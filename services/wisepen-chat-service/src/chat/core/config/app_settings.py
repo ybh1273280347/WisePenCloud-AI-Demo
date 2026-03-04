@@ -29,7 +29,7 @@ class AppSettings(BaseModel):
     MEMORY_LLM_MODEL: str = "gpt-4o"
     MEMORY_EMBEDDING_MODEL: str = "text-embedding-3-large"
     MEMORY_RERANKER_ZE_MODEL: str = "zerank-1"
-    ZERO_ENTROPY_API_KEY: str = "ze_ILqP5VmZusOOs88S"
+    ZERO_ENTROPY_API_KEY: str
 
     # 摘要压缩使用的轻量级模型（调用成本低、速度快）
     SUMMARY_MODEL: str = "openai/gemini-3-flash-preview"
