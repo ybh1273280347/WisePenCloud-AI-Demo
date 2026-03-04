@@ -1,0 +1,26 @@
+[project]
+name = "wisepen-chat-service"
+version = "0.1.0"
+description = "WisePen Chat Microservice: RAG & LLM Orchestration"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Jiazheng Sun", email = "jzsun24@m.fudan.edu.cn" }
+]
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "pydantic-settings",
+    "uvicorn[standard]",
+    "dependency_injector",
+    "litellm",
+    "mem0ai",
+    "openai",
+    "beanie",
+    "redis[asyncio]",
+    "nacos-sdk-python",
+    "pyyaml",
+    "jieba",
+    "zeroentropy",
+    "wisepen-common",
+]
