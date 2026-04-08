@@ -13,8 +13,7 @@ from chat.core.config.app_settings import settings
 
 class Mem0Adapter(MemoryProvider):
     def __init__(self):
-        # 让 Mem0 的 Embedding 模型也经由 LiteLLM 统一网关路由
-        config = {
+        self._config = {
             "embedder": {
                 "provider": "openai",
                 "config": {
@@ -39,18 +38,26 @@ class Mem0Adapter(MemoryProvider):
                     "top_k": 5
                 }
             },
-            # Mem0 默认使用内置向量存储（qdrant），可在此替换为外部实例
             "vector_store": {
                 "provider": "qdrant",
                 "config": {
                     "collection_name": "wisepen_memories",
-                    "host": settings.QDRANT_HOST,
-                    "port": settings.QDRANT_PORT,
-                    # 开启 BM25 关键词 + Dense 向量的混合检索，提升事实命中率
+                    "url": f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}",
+                    "api_key": settings.QDRANT_PASSWORD,
                 },
             },
         }
-        self.client = Memory.from_config(config)
+        self._client = None
+
+    def _get_client(self) -> Optional[Memory]:
+        if self._client is None:
+            log_debug("Lazy initializing Mem0 Client")
+            try:
+                self._client = Memory.from_config(self._config)
+            except Exception as e:
+                log_fail("初始化 Mem0 Client", e)
+                return None
+        return self._client
 
     async def search(
             self,
@@ -94,7 +101,10 @@ class Mem0Adapter(MemoryProvider):
         ]
 
         def _sync_add():
-            self.client.add(formatted_msgs, user_id=user_id)
+            try:
+                self.client.add(formatted_msgs, user_id=user_id)
+            except Exception as e:
+                log_fail("长期记忆写入异常", e, user=user_id)
 
         await asyncio.to_thread(_sync_add)
 

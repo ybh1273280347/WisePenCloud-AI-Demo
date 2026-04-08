@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from fastapi import BackgroundTasks
 from common.logger import log_error, log_ok
 
@@ -14,6 +14,24 @@ from chat.application.chat_post_processor import ChatPostProcessor
 from chat.application.tools.registry import ToolRegistry
 from common.kafka.producer import KafkaProducerClient
 
+
+SELECTED_TEXT_TEMPLATE = """You are an expert analytical assistant. The user has selected a specific snippet of text and asked a question about it.
+
+<selected_text>
+{perceived_text}
+</selected_text>
+
+<user_query>
+{user_query}
+</user_query>
+
+<system_constraints>
+1. GROUNDING: Your response MUST be primarily grounded in the `<selected_text>`.
+2. RELEVANCE CHECK: If the `<selected_text>` is completely irrelevant to the `<user_query>`, explicitly state this first before proceeding.
+3. SUPPLEMENTAL KNOWLEDGE: Use your internal knowledge ONLY if the `<selected_text>` lacks necessary context. If you do, explicitly label that part as [Supplemental Knowledge].
+4. EFFICIENCY: Do not repeat the user's query. Answer directly and concisely.
+5. CITATION: When directly referencing the text, attribute it as [Original].
+</system_constraints>"""
 
 class ChatOrchestrator:
     """
@@ -52,19 +70,20 @@ class ChatOrchestrator:
             user_query: str,
             background_tasks: BackgroundTasks,
             model_name: Optional[str] = None,
-            selected_text: Optional[str] = None,
+            states: Optional[List[Dict[str, Any]]] = None,
     ):
         resolved_model = model_name or settings.DEFAULT_MODEL
 
-        if selected_text is not None:
-            user_query = f"用户选中的内容:\n{selected_text}, 用户的问题:\n{user_query}"
+        selected_text = self._extract_selected_text(states)
+
+        full_query = SELECTED_TEXT_TEMPLATE.format(selected_text=selected_text, user_query=user_query) if selected_text else user_query
 
         # [Retrieval - 短期记忆] 从 Redis 读取最近对话, 如果 Redis 缓存失效（Cache Miss），会自动从 MongoDB 回填最近的 N 条历史 （可配置），确保对话连贯性。
         recent_messages = await self._ctx.get_or_repopulate_hot_context(session_id)
 
         # [Retrieval - 长期记忆] 从 Memory 按相似度阈值召回跨会话事实 (此处实现是Mem0)
         relevant_facts = await self._memory.search(
-            user_id=user_id, query=user_query, limit=10,
+            user_id=user_id, query=full_query, limit=10,
             score_threshold=0.6,  # 低质量召回直接丢弃，防止噪声污染上下文
         )
 
@@ -75,7 +94,7 @@ class ChatOrchestrator:
 
         # [Context Construction] 将系统提示词、Mem0 检索到的事实、会话的历史摘要以及窗口内的明细消息组装成 LLM 所需的格式
         messages_for_llm = self._ctx.assemble_prompt(
-            session_id, user_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary
+            session_id, full_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary
         )
 
         # 记录进入 Agent 循环前的列表长度
@@ -99,7 +118,7 @@ class ChatOrchestrator:
         #   - _post_processor.persist_all：将新消息写入 Redis 和 MongoDB；将新对话摄入 Memory 长期记忆
         #   - _post_processor.summarize_and_compress；调用轻量级模型生成并更新会话的全局摘要
         if background_tasks is not None:
-            user_msg = ChatMessage(session_id=session_id, role=Role.USER, content=user_query)
+            user_msg = ChatMessage(session_id=session_id, role=Role.USER, content=full_query)
             assistant_msg = ChatMessage(session_id=session_id, role=Role.ASSISTANT, content=full_response_content)
 
             messages_to_persist = [user_msg] + intermediate_messages + [assistant_msg]
@@ -117,3 +136,10 @@ class ChatOrchestrator:
                     messages_compress_candidates,
                     session_summary
                 )
+    def _extract_selected_text(self, states: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+        if states is None:
+            return None
+        for state in states:
+            if state.get('key') == 'selected_text' and not state.get('disabled', False):
+                return state.get('value')
+        return None
