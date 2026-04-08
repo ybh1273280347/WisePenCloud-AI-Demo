@@ -1,82 +1,18 @@
 from fastapi import APIRouter, Depends, Query
 from dependency_injector.wiring import inject, Provide
-from pydantic import BaseModel, Field
-from typing import List, Optional, Any, Dict
-from datetime import datetime
+
+from chat.api.schemas.session import SessionResponse, CreateSessionRequest, MessageResponse, RenameSessionRequest, \
+    PinSessionRequest
+from chat.domain.entities import ChatSession
+from chat.domain.repositories import SessionRepository, MessageRepository
+from chat.container import Container
 
 from common.security import require_login
 from common.core.domain import R, PageResult
-from chat.container import Container
-from chat.domain.entities import ChatSession, ChatMessage
-from chat.domain.repositories import SessionRepository, MessageRepository
 
 router = APIRouter()
 
-
-# ---------------------------------------------------------------------------
-# Request / Response 模型
-# ---------------------------------------------------------------------------
-
-class CreateSessionRequest(BaseModel):
-    title: Optional[str] = Field(default="New Chat", description="会话标题")
-
-class RenameSessionRequest(BaseModel):
-    new_title: Optional[str] = Field(default=None, description="新会话标题")
-
-class PinSessionRequest(BaseModel):
-    set_pin: bool = Field(default=False, description="是否置顶")
-
-
-class SessionResponse(BaseModel):
-    id: str
-    user_id: str
-    title: str
-    created_at: str
-    updated_at: str
-    is_pinned: bool = False
-    pinned_at: Optional[datetime] = None
-
-    @classmethod
-    def from_entity(cls, session: ChatSession) -> "SessionResponse":
-        return cls(
-            id=str(session.id) if session.id else "",
-            user_id=session.user_id,
-            title=session.title,
-            created_at=session.created_at.isoformat(),
-            updated_at=session.updated_at.isoformat(),
-            is_pinned=session.is_pinned,
-            pinned_at=session.pinned_at.isoformat() if session.pinned_at else None,
-        )
-
-
-class MessageResponse(BaseModel):
-    """
-    会话消息条目响应。
-    - user / assistant 消息：完整返回 content 和 tool_calls。
-    - TOOL role（工具调用结果）：在仓储层已过滤，不会出现在此处。
-    """
-    id: str
-    role: str
-    content: Optional[str]
-    tool_calls: Optional[List[Dict[str, Any]]]
-    created_at: str
-
-    @classmethod
-    def from_entity(cls, msg: ChatMessage) -> "MessageResponse":
-        return cls(
-            id=str(msg.id) if msg.id else "",
-            role=msg.role.value,
-            content=msg.content,
-            tool_calls=msg.tool_calls,
-            created_at=msg.created_at.isoformat(),
-        )
-
-
-# ---------------------------------------------------------------------------
-# 路由
-# ---------------------------------------------------------------------------
-
-@router.post("/create", response_model=R[SessionResponse], status_code=200)
+@router.post("/createSession", response_model=R[SessionResponse], status_code=200)
 @inject
 async def create_session(
         req: CreateSessionRequest,
@@ -88,7 +24,7 @@ async def create_session(
     return R.success(data=SessionResponse.from_entity(created))
 
 
-@router.get("/list", response_model=R[PageResult[SessionResponse]])
+@router.get("/listSessions", response_model=R[PageResult[SessionResponse]])
 @inject
 async def list_sessions(
         page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
@@ -103,7 +39,7 @@ async def list_sessions(
     ))
 
 
-@router.delete("/{session_id}", response_model=R, status_code=200)
+@router.post("/deleteSession", response_model=R, status_code=200)
 @inject
 async def delete_session(
         session_id: str,
@@ -114,7 +50,7 @@ async def delete_session(
     return R.success()
 
 
-@router.get("/{session_id}/messages", response_model=R[PageResult[MessageResponse]])
+@router.get("/listHistoryMessages", response_model=R[PageResult[MessageResponse]])
 @inject
 async def get_session_messages(
         session_id: str,

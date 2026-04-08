@@ -24,8 +24,6 @@ class AppSettings(BaseModel):
     LLM_BASE_URL: str
     LLM_API_KEY: str
 
-    MODEL_LIST: List[str]
-
     STANDARD_MODELS: List[str]
     ADVANCED_MODELS: List[str]
 

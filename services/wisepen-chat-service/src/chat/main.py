@@ -18,11 +18,9 @@ from common.web.exception_handlers import setup_global_exception_handlers
 
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
-from chat.api.v1.router import api_router
-from chat.api.v1.endpoints import chat as chat_endpoints
-from chat.api.v1.endpoints import session as session_endpoints
-from chat.api.v1.endpoints import memory as memory_endpoints
-from chat.api.v1.endpoints import model as model_endpoints
+from chat.api.router import api_router
+from chat.api.endpoints import chat as chat_endpoints, memory as memory_endpoints, session as session_endpoints, \
+    model as model_endpoints
 from chat.domain.entities import ChatSession, ChatMessage
 
 
@@ -89,7 +87,7 @@ app.add_middleware(SecurityHeaderMiddleware, from_source_secret=settings.FROM_SO
 setup_global_exception_handlers(app, is_dev=settings.DEV)
 
 # 挂载业务路由
-app.include_router(api_router, prefix="/v1")
+app.include_router(api_router, prefix="/chat")
 
 if __name__ == "__main__":
     uvicorn.run(

@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 
-from chat.api.schemas import ModelInfo, ModelsResponse
-from chat.domain.entities import ModelConfig, ModelType
+from chat.api.schemas.model import ModelInfo, ModelsResponse
 from chat.core.config.app_settings import settings
+from chat.domain.entities.model import ModelConfig
 from common.core.domain import R
 
 router = APIRouter()
@@ -25,6 +25,7 @@ async def get_models():
             ratio=config.ratio,
             is_default=(config.id == settings.DEFAULT_MODEL),
         )
+        from chat.domain.entities import ModelType
         if config.type == ModelType.STANDARD_MODEL:
             standard_models.append(model_info)
         elif config.type == ModelType.ADVANCED_MODEL:

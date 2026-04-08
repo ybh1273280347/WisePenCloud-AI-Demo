@@ -4,12 +4,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Any
 
-from chat.api.v1.vercel_formats import (
+from chat.api.vercel_formats import (
     step_start, step_finish, text_start, text_delta, text_end,
     tool_input_start, tool_input_delta, tool_input_available, tool_output_available,
 )
 
-from common.logger import log_fail, log_error, log_event
+from common.logger import log_fail
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces import LLMProvider

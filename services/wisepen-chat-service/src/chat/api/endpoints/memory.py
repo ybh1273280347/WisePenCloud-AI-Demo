@@ -1,26 +1,20 @@
 from typing import List, Any, Dict
 from fastapi import APIRouter, Depends
 from dependency_injector.wiring import inject, Provide
-from pydantic import BaseModel
+
+from chat.api.schemas.memory import MemoryItemResponse
+from chat.domain.error_codes import ChatErrorCode
+from chat.domain.interfaces import MemoryProvider
+from chat.container import Container
 
 from common.security import require_login
 from common.core.exceptions import ServiceException
 from common.core.domain import R
-from chat.container import Container
-from chat.domain.interfaces.memory import MemoryProvider
-from chat.domain.error_codes import ChatErrorCode
 
 router = APIRouter()
 
 
-class MemoryItemResponse(BaseModel):
-    """单条记忆条目的 API 响应结构"""
-    id: str
-    memory: str
-    metadata: Dict[str, Any] = {}
-
-
-@router.get("/list", response_model=R[List[MemoryItemResponse]])
+@router.get("/listMemories", response_model=R[List[MemoryItemResponse]])
 @inject
 async def list_memories(
     user_id: str = Depends(require_login),
@@ -41,7 +35,7 @@ async def list_memories(
     ])
 
 
-@router.delete("/{memory_id}", response_model=R, status_code=200)
+@router.post("/deleteMemory", response_model=R, status_code=200)
 @inject
 async def delete_memory(
     memory_id: str,
@@ -58,7 +52,7 @@ async def delete_memory(
     return R.success()
 
 
-@router.delete("", response_model=R, status_code=200)
+@router.delete("/deleteAllMemories", response_model=R, status_code=200)
 @inject
 async def delete_all_memories(
     user_id: str = Depends(require_login),
