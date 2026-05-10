@@ -1,0 +1,18 @@
+[project]
+name = "wisepen-server-py"
+version = "0.1.0"
+description = "WisePen Python Microservices Monorepo"
+requires-python = ">=3.9"
+dependencies = [
+    "wisepen-chat-service",
+    "wisepen-common",
+]
+
+[tool.uv.workspace]
+members = [
+    "services/*",   # 扫描 services 下的所有子文件夹
+]
+
+[tool.uv.sources]
+wisepen-chat-service = { workspace = true }
+wisepen-common = { workspace = true }

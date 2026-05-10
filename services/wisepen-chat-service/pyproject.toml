@@ -1,0 +1,57 @@
+[project]
+name = "wisepen-chat-service"
+version = "0.1.0"
+description = "WisePen Chat Microservice: RAG & LLM Orchestration"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Jiazheng Sun", email = "jzsun24@m.fudan.edu.cn" }
+]
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "pydantic-settings",
+    "uvicorn[standard]",
+    "dependency_injector",
+    "litellm",
+    "mem0ai[nlp]",
+    "openai",
+    "beanie",
+    "redis",
+    "nacos-sdk-python",
+    "pyyaml",
+    "jieba",
+    "zeroentropy",
+    "wisepen-common",
+    "tavily-python",
+    "httpx",
+    "steel-sdk",
+    "trafilatura",
+    "playwright",
+    "pdfplumber",
+    "pymupdf",
+    "camelot-py",
+    "markitdown",
+    "pandas",
+    "beautifulsoup4",
+    "python-docx",
+    "openpyxl",
+    "python-pptx",
+    "cachetools",
+    "langchain-text-splitters",
+    "ddgs",
+    "fastembed",
+    "dnspython",
+]
+
+[dependency-groups]
+doc = [
+    "docling",
+]
+ocr = [
+    "paddleocr",
+    "paddlepaddle==3.1.1",
+]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
