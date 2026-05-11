@@ -1,12 +1,22 @@
 from pathlib import Path
-from typing import Any, List
+from typing import List
 
-from chat.application.document_parse import DocumentParseResult, ParsedPage, ParsedTable
+from chat.application.document_parse.models import DocumentParseResult, ParsedPage, ParsedTable
 from chat.application.document_parse.text_utils import normalize_text
+from common.logger import log_event, log_ok
 
 
 class OfficeNativeParser:
+    def __init__(self):
+        log_ok("OfficeNativeParser init", handler_class=type(self).__name__)
+
     def parse(self, path: Path, *, file_type: str) -> DocumentParseResult:
+        log_event(
+            "OfficeNativeParser route",
+            path=str(path),
+            file_type=file_type,
+            handler_class=type(self).__name__,
+        )
         if file_type == "docx":
             return self._parse_docx(path)
 
@@ -61,7 +71,7 @@ class OfficeNativeParser:
             metadata={"parser": "python_docx"},
         )
 
-        return DocumentParseResult(
+        result = DocumentParseResult(
             text=text,
             source=str(path),
             file_type="docx",
@@ -70,8 +80,19 @@ class OfficeNativeParser:
             metadata={"parser": "python_docx"},
             warnings=[],
         )
+        log_ok(
+            "OfficeNativeParser parse",
+            path=str(path),
+            file_type="docx",
+            handler_class=type(self).__name__,
+            backend_class=Document.__name__,
+            page_count=1,
+            table_count=len(tables),
+            length=len(text),
+        )
+        return result
 
-    def _rows_from_docx_table(self, table: Any) -> List[List[str]]:
+    def _rows_from_docx_table(self, table) -> List[List[str]]:
         rows: List[List[str]] = []
         for row in table.rows:
             cells = [cell.text.strip() for cell in row.cells]
@@ -132,7 +153,7 @@ class OfficeNativeParser:
 
         text = normalize_text("\n\n".join(text_parts))
 
-        return DocumentParseResult(
+        result = DocumentParseResult(
             text=text,
             source=str(path),
             file_type="pptx",
@@ -141,3 +162,14 @@ class OfficeNativeParser:
             metadata={"parser": "python_pptx"},
             warnings=[],
         )
+        log_ok(
+            "OfficeNativeParser parse",
+            path=str(path),
+            file_type="pptx",
+            handler_class=type(self).__name__,
+            backend_class=Presentation.__name__,
+            page_count=len(pages),
+            table_count=len(all_tables),
+            length=len(text),
+        )
+        return result

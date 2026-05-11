@@ -69,7 +69,7 @@ class LiteLLMAdapter(LLMProvider):
             tools: Optional[List[Dict[str, Any]]] = None,
             api_base: Optional[str] = None,
             api_key: Optional[str] = None,
-    ) -> Any:
+    ):
         formatted_msgs = self._convert_messages(messages)
         litellm_model = self._format_model_for_litellm(model_name)
 

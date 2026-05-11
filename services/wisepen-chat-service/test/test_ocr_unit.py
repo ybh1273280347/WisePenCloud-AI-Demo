@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from chat.application.document_parse.ocr.processor import OcrProcessor
+from chat.application.document_parse.ocr.worker import _collect_legacy_ocr_texts
 
 
 def assert_true(condition: bool, message: str) -> None:
@@ -89,18 +90,48 @@ async def test_missing_image_fails_without_worker() -> None:
     await processor.close()
 
 
+def test_legacy_ocr_nested_result() -> None:
+    raw_result = [
+        [
+            [[[0, 0], [1, 0], [1, 1], [0, 1]], ("Hello", 0.99)],
+            [[[0, 2], [1, 2], [1, 3], [0, 3]], ("World", 0.98)],
+        ]
+    ]
+    texts = _collect_legacy_ocr_texts(raw_result)
+    assert_true(texts == ["Hello", "World"], f"expected ['Hello', 'World'], got {texts}")
+
+
+def test_legacy_ocr_flat_result() -> None:
+    raw_result = [
+        [[[0, 0], [1, 0], [1, 1], [0, 1]], ("Text", 0.9)]
+    ]
+    texts = _collect_legacy_ocr_texts(raw_result)
+    assert_true(texts == ["Text"], f"expected ['Text'], got {texts}")
+
+
+def test_legacy_ocr_empty_result() -> None:
+    assert_true(_collect_legacy_ocr_texts(None) == [], "None should yield []")
+    assert_true(_collect_legacy_ocr_texts([]) == [], "empty list should yield []")
+    assert_true(_collect_legacy_ocr_texts([[]]) == [], "nested empty list should yield []")
+
+
 async def main() -> int:
     tests = [
         test_disabled_ocr,
         test_worker_protocol_shutdown,
         test_missing_image_fails_without_worker,
+        test_legacy_ocr_nested_result,
+        test_legacy_ocr_flat_result,
+        test_legacy_ocr_empty_result,
     ]
 
     passed = 0
     failed = 0
     for test in tests:
         try:
-            await test()
+            result = test()
+            if asyncio.iscoroutine(result):
+                await result
             print(f"  PASS  {test.__name__}")
             passed += 1
         except Exception as e:

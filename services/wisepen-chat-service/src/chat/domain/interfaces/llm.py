@@ -14,7 +14,7 @@ class LLMProvider(ABC):
             tools: Optional[List[Dict[str, Any]]] = None,
             api_base: Optional[str] = None,
             api_key: Optional[str] = None,
-    ) -> Any:
+    ):
         pass
 
     @abstractmethod

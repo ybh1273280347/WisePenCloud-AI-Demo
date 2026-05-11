@@ -1,197 +1,100 @@
 import asyncio
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from chat.application.tool_content_store import (
+    cache_and_format,
     cache_and_window,
     format_windowed_content,
 )
 from chat.application.web_fetch import FetchCoordinator
 from chat.application.web_search import (
-    MAX_BROAD_SEARCH_QUERIES,
     ImageResult,
     SearchCoordinator,
     SearchResponse,
-    has_response_content,
+    SearchResult,
 )
-from chat.application.web_search.search_coordinator import _normalize_queries
 from chat.application.web_search.utils import (
     add_note,
     count_unique_domains,
     extract_domain,
     has_site_operator,
-    normalize_bool,
-    normalize_int,
+    normalize_queries,
 )
+from chat.application.web_search.utils.urls import normalize_url_for_dedup
 from chat.core.config.app_settings import settings
 from chat.domain.interfaces.tool import BaseTool
-from common.logger import log_fail
+from common.logger import log_fail, log_event
 
 
-_TRUNCATION_MARKER = "\n\n...(Search result truncated due to length)"
+_SEARCH_QUERY_LIMIT = 4
+
+_RESULTS_PER_QUERY = 8
+_FINAL_RESULT_LIMIT = 20
+
+_DEDUPE_DOMAINS = True
+_MAX_PER_DOMAIN = 2
+
+_PAGE_CONTENT_LIMIT = 8
+_PAGE_CONTENT_CONCURRENCY = 5
+_PAGE_CONTENT_TIMEOUT_SECONDS = 15.0
+_PAGE_CONTENT_WINDOW_CHARS = 3000
 
 _TOOL_DESCRIPTION = (
-    "Searches the web using a staged fallback chain: "
-    "fresh cache, SearXNG, DuckDuckGo buffer, stale cache, then Tavily as paid fallback.\n\n"
-    "Use query for a focused precise search. Use queries for 2-4 focused searches when broad "
-    "coverage is needed. Use fetch_top_pages=true when snippets are insufficient and the caller "
-    "needs page content from the top merged results.\n\n"
-    "Use freshness_required=true for time-sensitive information such as latest news, current "
-    "facts, recent releases, prices, weather, scores, schedules, or current office holders.\n\n"
-    "Use with_images=true for pictures, photos, visual references, locations, people, animals, "
-    "products, UI screenshots, or other visual information."
-)
-_TOOL_DESCRIPTION += (
-    "\n\nQuery generation guidance:\n"
-    "- For simple lookup, use query.\n"
-    "- For complex questions, comparisons, debugging, or research tasks, use queries.\n"
-    "- Generate 2-4 concise focused search-engine-style queries.\n"
-    "- Keep each query short. Do not pass long natural-language paragraphs.\n\n"
-    "Recommended query patterns for technical questions:\n"
-    "1) original focused query\n"
-    "2) official documentation query, often with site:docs...\n"
-    "3) exact error message keywords\n"
-    "4) GitHub issue or StackOverflow style query when debugging\n\n"
-    "Recommended query patterns for comparison or selection:\n"
-    "1) A vs B focused comparison\n"
-    "2) A official documentation\n"
-    "3) B official documentation\n"
-    "4) real-world usage A OR B with current year if freshness matters\n"
+    "Searches the web with concurrent multi-query search. "
+    "The tool always accepts queries as a list. Use one query for simple lookup and "
+    "2-4 focused queries for complex research, comparisons, debugging, or source-backed answers.\n\n"
+    "For one research task, prefer one web_search call with 2-4 queries instead of "
+    "multiple web_search calls.\n\n"
+    "Modes:\n"
+    "1) normal: concurrent web search, returning titles, URLs, snippets, and optional images.\n"
+    "2) deep: concurrent web search plus page content snippets from top-ranked result URLs.\n\n"
+    "Use normal mode when search result snippets are enough. "
+    "Use deep mode when the answer needs stronger evidence from page content.\n\n"
+    "Query generation guidance:\n"
+    "- Keep each query short and search-engine-style.\n"
+    "- For technical questions, include one official-documentation query when possible, such as site:docs.python.org.\n"
+    "- For debugging, include exact error keywords and library/framework names.\n"
+    "- For comparisons, use focused A vs B queries plus official documentation queries.\n\n"
+    "Cost policy: Tavily paid fallback is disabled for this tool."
+    " Long evidence packs are returned as ToolContent windows; when truncated=true, "
+    "continue reading with tool_content_read using next_offset."
 )
 
 _TOOL_SCHEMA = {
     "type": "object",
     "properties": {
-        "query": {
-            "type": "string",
-            "description": "Single web search query.",
-        },
         "queries": {
             "type": "array",
             "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": 4,
             "description": (
-                "Multiple focused search queries for broad or complex research. "
-                "Prefer 2-4 concise queries. If provided, this takes precedence over query."
+                "One to four focused search-engine-style queries. "
+                "Use one query for simple lookup. Use 2-4 queries for complex questions, "
+                "technical research, comparisons, debugging, or source-backed answers."
             ),
         },
-        "max_results": {
-            "type": "integer",
-            "description": "Maximum results per query. Default 5. Maximum 10.",
-            "default": 5,
-            "minimum": 1,
-            "maximum": 10,
-        },
-        "final_max_results": {
-            "type": "integer",
+        "mode": {
+            "type": "string",
+            "enum": ["normal", "deep"],
             "description": (
-                "Maximum merged results returned after multi-query search. "
-                "Default 12. Maximum 20."
+                "Search mode. normal returns search result titles, URLs, snippets, "
+                "and optional images. deep also reads page content snippets from up to "
+                "8 top-ranked result URLs."
             ),
-            "default": 12,
-            "minimum": 1,
-            "maximum": 20,
+            "default": "normal",
         },
         "with_images": {
             "type": "boolean",
             "description": (
-                "Whether to include relevant image results. Use when the user asks for "
-                "pictures, photos, visual references, locations, people, animals, products, "
-                "UI screenshots, or other visual information."
+                "Whether to include relevant image results. "
+                "Use for pictures, photos, locations, people, animals, products, "
+                "UI screenshots, or visual references."
             ),
             "default": False,
-        },
-        "freshness_required": {
-            "type": "boolean",
-            "description": (
-                "Whether the search must avoid stale cached results. Set to true for "
-                "time-sensitive queries such as latest news, current facts, prices, weather, "
-                "scores, schedules, recent releases, or current office holders."
-            ),
-            "default": False,
-        },
-        "fetch_top_pages": {
-            "type": "boolean",
-            "description": (
-                "Whether to fetch and extract content from the top 1-3 merged result pages "
-                "after search. Use when snippets are insufficient and the user needs a "
-                "detailed source-backed answer."
-            ),
-            "default": False,
-        },
-        "fetch_top_pages_limit": {
-            "type": "integer",
-            "description": "Number of top merged result pages to fetch. Default 2. Maximum 3.",
-            "default": 2,
-            "minimum": 1,
-            "maximum": 3,
-        },
-        "fetched_page_max_chars": {
-            "type": "integer",
-            "description": (
-                "Maximum characters returned from each fetched page. "
-                "Default 3000. Maximum 6000."
-            ),
-            "default": 3000,
-            "minimum": 500,
-            "maximum": 6000,
-        },
-        "fetch_page_timeout_seconds": {
-            "type": "number",
-            "description": "Timeout for each fetched top page. Default 15 seconds. Maximum 30 seconds.",
-            "default": 15.0,
-            "minimum": 3.0,
-            "maximum": 30.0,
-        },
-        "allow_paid_fallback": {
-            "type": "boolean",
-            "description": (
-                "Whether multi-query search may use Tavily paid fallback when merged results "
-                "are sparse. Default false to control cost. Single-query search keeps its "
-                "standard fallback behavior."
-            ),
-            "default": False,
-        },
-        "dedupe_domains": {
-            "type": "boolean",
-            "description": (
-                "Whether to limit repeated results from the same domain. Default true for "
-                "broader coverage. Set false for site-specific searches such as "
-                "site:docs.python.org."
-            ),
-            "default": True,
-        },
-        "max_per_domain": {
-            "type": "integer",
-            "description": (
-                "Maximum results kept per domain when dedupe_domains is true. "
-                "Default 2. Maximum 5."
-            ),
-            "default": 2,
-            "minimum": 1,
-            "maximum": 5,
-        },
-        "include_domains": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": (
-                "Only keep results from these domains after search. "
-                "Use for official-site or site-specific research."
-            ),
-        },
-        "exclude_domains": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Exclude results from these domains after search.",
-        },
-        "time_range": {
-            "type": "string",
-            "enum": ["day", "week", "month", "year"],
-            "description": (
-                "Optional freshness window. Best-effort parameter. When month/year is used, "
-                "queries without time words may get the current year appended."
-            ),
         },
     },
-    "required": [],
+    "required": ["queries"],
 }
 
 
@@ -212,226 +115,204 @@ class WebSearchTool(BaseTool):
     def parameters_schema(self) -> Dict[str, Any]:
         return _TOOL_SCHEMA
 
-    async def execute(self, context: Dict[str, Any], **kwargs: Any) -> str:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> str:
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
 
         notes: List[str] = []
-        queries = _normalize_queries(
-            _get_queries(kwargs),
-            limit=MAX_BROAD_SEARCH_QUERIES,
+
+        queries = normalize_queries(
+            kwargs.get("queries", []),
+            limit=_SEARCH_QUERY_LIMIT,
             notes=notes,
-            time_range=kwargs.get("time_range"),
         )
         if not queries:
-            return "[Tool Error] Missing required query or queries parameter."
+            return "[Tool Error] Missing required queries parameter."
 
-        max_results = normalize_int(
-            kwargs.get("max_results", 5),
-            default=5,
-            minimum=1,
-            maximum=10,
-        )
-        final_max_results = normalize_int(
-            kwargs.get("final_max_results", 12),
-            default=12,
-            minimum=1,
-            maximum=20,
-        )
-        fetch_top_pages_limit = normalize_int(
-            kwargs.get("fetch_top_pages_limit", 2),
-            default=2,
-            minimum=1,
-            maximum=3,
-        )
-        fetched_page_max_chars = normalize_int(
-            kwargs.get("fetched_page_max_chars", 3000),
-            default=3000,
-            minimum=500,
-            maximum=6000,
-        )
-        fetch_page_timeout_seconds = _normalize_float(
-            kwargs.get("fetch_page_timeout_seconds", 15.0),
-            default=15.0,
-            minimum=3.0,
-            maximum=30.0,
-        )
-        max_per_domain = normalize_int(
-            kwargs.get("max_per_domain", 2),
-            default=2,
-            minimum=1,
-            maximum=5,
-        )
+        mode = kwargs.get("mode", "normal")
+        with_images = kwargs.get("with_images", False)
 
-        with_images = normalize_bool(kwargs.get("with_images", False))
-        freshness_required = normalize_bool(kwargs.get("freshness_required", False))
-        fetch_top_pages = normalize_bool(kwargs.get("fetch_top_pages", False))
-        allow_paid_fallback = normalize_bool(kwargs.get("allow_paid_fallback", False))
-        dedupe_domains = (
-            normalize_bool(kwargs.get("dedupe_domains"))
-            if "dedupe_domains" in kwargs
-            else None
-        )
-        if len(queries) > 1 and dedupe_domains is None and has_site_operator(queries):
+        search_override: Optional[Dict[str, Any]] = context.get("search_override")
+        if search_override:
+            # 会话级搜索覆盖：只提升搜索力度，不降级 AI 自主判断的结果
+            # force_deep_search=True 时强制 deep；False/None 时不降级
+            # force_image_search=True 时强制启用图片搜索；False/None 时不关闭
+            if search_override.get("force_deep_search") is True:
+                mode = "deep"
+                add_note(notes, "Deep search forced by session override.")
+            if search_override.get("force_image_search") is True:
+                with_images = True
+                add_note(notes, "Image search forced by session override.")
+
+        dedupe_domains = _DEDUPE_DOMAINS
+        if has_site_operator(queries):
             dedupe_domains = False
             add_note(notes, "Domain dedupe disabled because a site: operator was detected.")
-        include_domains = _get_domain_list(kwargs.get("include_domains"))
-        exclude_domains = _get_domain_list(kwargs.get("exclude_domains"))
-
-        mode = "deep" if fetch_top_pages else "broad" if len(queries) > 1 else "precise"
 
         try:
-            if len(queries) == 1:
-                response = await self._coordinator.search(
-                    query=queries[0],
-                    max_results=max_results,
-                    with_images=with_images,
-                    freshness_required=freshness_required,
-                    allow_paid_fallback=True,
-                )
-            else:
-                response = await self._coordinator.search_many(
-                    queries=queries,
-                    max_results_per_query=max_results,
-                    final_max_results=final_max_results,
-                    with_images=with_images,
-                    freshness_required=freshness_required,
-                    allow_paid_fallback=allow_paid_fallback,
-                    dedupe_domains=dedupe_domains,
-                    max_per_domain=max_per_domain,
-                    notes=notes,
-                    include_domains=include_domains,
-                    exclude_domains=exclude_domains,
-                    time_range=kwargs.get("time_range"),
-                )
-        except Exception as e:
-            log_fail(
-                "联网搜索工具",
-                e,
-                session_id=session_id,
+            response = await self._coordinator.search_many(
                 queries=queries,
-                mode=mode,
-                max_results=max_results,
+                max_results_per_query=_RESULTS_PER_QUERY,
+                final_max_results=_FINAL_RESULT_LIMIT,
                 with_images=with_images,
-                freshness_required=freshness_required,
+                dedupe_domains=dedupe_domains,
+                max_per_domain=_MAX_PER_DOMAIN,
+                notes=notes,
             )
+        except Exception as e:
+            log_fail("网页搜索工具执行失败", e, session_id=session_id, queries=queries, mode=mode, with_images=with_images)
             return "[Tool Error] Unexpected error while searching the web."
 
         if response is None:
-            return "[Tool Result] Failed to search the web (all search methods exhausted)."
+            return "[Tool Result] Failed to search the web."
 
-        if not has_response_content(response):
-            return _format_response(response, mode=mode, queries=queries, notes=notes)
+        page_contents: List[str] = []
 
-        extra_contents: List[str] = []
-
-        if fetch_top_pages:
-            extra_contents = await self._fetch_top_pages(
+        if mode == "deep":
+            page_contents = await self._read_page_contents(
                 response,
                 session_id=session_id,
-                limit=fetch_top_pages_limit,
-                max_chars_per_page=fetched_page_max_chars,
-                timeout_seconds=fetch_page_timeout_seconds,
+                limit=_PAGE_CONTENT_LIMIT,
                 notes=notes,
             )
 
-        return _format_response(
+            if not page_contents:
+                add_note(notes, "Deep search was requested but no page content was read.")
+
+        formatted = _format_response(
             response,
             mode=mode,
             queries=queries,
             notes=notes,
-            extra_contents=extra_contents,
+            page_contents=page_contents,
+        )
+        return _window_long_response(
+            session_id=session_id,
+            mode=mode,
+            queries=queries,
+            text=formatted,
         )
 
-    async def _fetch_top_pages(
+    async def _read_page_contents(
         self,
         response: SearchResponse,
         *,
         session_id: str,
-        limit: int = 2,
-        max_chars_per_page: int = 3000,
-        timeout_seconds: float = 15.0,
+        limit: int,
         notes: Optional[List[str]] = None,
     ) -> List[str]:
-        limit = normalize_int(limit, default=2, minimum=1, maximum=3)
-        max_chars_per_page = normalize_int(
-            max_chars_per_page,
-            default=3000,
-            minimum=500,
-            maximum=6000,
-        )
-        timeout_seconds = _normalize_timeout(
-            timeout_seconds,
-            default=15.0,
-            maximum=30.0,
-        )
-
-        contents: List[str] = []
+        candidates: List[Tuple[int, SearchResult]] = []
         seen: Set[str] = set()
 
         for result_index, result in enumerate(response.results, 1):
             url = result.url.strip()
-            if not url or url in seen:
+            if not url:
                 continue
-            seen.add(url)
 
-            if len(contents) >= limit:
+            normalized_url = normalize_url_for_dedup(url)
+            if not normalized_url or normalized_url in seen:
+                continue
+
+            seen.add(normalized_url)
+            candidates.append((result_index, result))
+
+            if len(candidates) >= limit:
                 break
 
-            try:
-                content = await asyncio.wait_for(
-                    self._fetcher.fetch(url),
-                    timeout=timeout_seconds,
+        if not candidates:
+            add_note(notes, "No readable result URLs were available for page content reading.")
+            return []
+
+        semaphore = asyncio.Semaphore(_PAGE_CONTENT_CONCURRENCY)
+
+        async def read_one(
+            result_index: int,
+            result: SearchResult,
+        ) -> Optional[Tuple[int, str]]:
+            async with semaphore:
+                return await self._read_one_page_content(
+                    result_index=result_index,
+                    result=result,
+                    response=response,
+                    session_id=session_id,
+                    notes=notes,
                 )
-            except asyncio.TimeoutError as e:
-                log_fail(
-                    "搜索结果页面抓取超时",
-                    e,
-                    url=url,
-                    timeout=timeout_seconds,
-                )
-                add_note(
-                    notes,
-                    f"Fetched page for result #{result_index} was skipped because it timed out.",
-                )
-                continue
-            except Exception as e:
-                log_fail("搜索结果页面抓取失败", e, url=url)
-                add_note(
-                    notes,
-                    f"Fetched page for result #{result_index} failed and was skipped.",
-                )
+
+        tasks = [read_one(result_index, result) for result_index, result in candidates]
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        contents: List[Tuple[int, str]] = []
+
+        for item in raw_results:
+            if isinstance(item, Exception):
+                log_fail("页面内容读取任务失败", item)
                 continue
 
-            if content is None:
-                add_note(
-                    notes,
-                    f"Fetched page for result #{result_index} returned no content and was skipped.",
-                )
+            if item is None:
                 continue
 
-            if not isinstance(content, str):
-                log_fail(
-                    "搜索结果页面抓取跳过",
-                    "Fetched content is not text Markdown, skip page body",
-                    url=url,
-                    content_type=type(content).__name__,
-                )
-                add_note(
-                    notes,
-                    f"Fetched page for result #{result_index} was skipped because it returned non-text content.",
-                )
-                continue
+            contents.append(item)
 
-            content = content.strip()
-            if not content:
-                add_note(
-                    notes,
-                    f"Fetched page for result #{result_index} was empty and skipped.",
-                )
-                continue
+        contents.sort(key=lambda item: item[0])
 
+        return [content for _, content in contents]
+
+    async def _read_one_page_content(
+        self,
+        *,
+        result_index: int,
+        result: SearchResult,
+        response: SearchResponse,
+        session_id: str,
+        notes: Optional[List[str]],
+    ) -> Optional[Tuple[int, str]]:
+        url = result.url.strip()
+
+        try:
+            content = await asyncio.wait_for(
+                self._fetcher.fetch(url),
+                timeout=_PAGE_CONTENT_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as e:
+            log_fail("页面内容读取超时", e, url=url, timeout=_PAGE_CONTENT_TIMEOUT_SECONDS)
+            add_note(
+                notes,
+                f"Page content for result #{result_index} was skipped because it timed out.",
+            )
+            return None
+        except Exception as e:
+            log_fail("页面内容读取失败", e, url=url)
+            add_note(
+                notes,
+                f"Page content for result #{result_index} failed and was skipped.",
+            )
+            return None
+
+        if content is None:
+            add_note(
+                notes,
+                f"Page content for result #{result_index} returned no content and was skipped.",
+            )
+            return None
+
+        if not isinstance(content, str):
+            log_event("页面内容读取跳过：返回内容非 Markdown 文本", url=url, content_type=type(content).__name__)
+            add_note(
+                notes,
+                f"Page content for result #{result_index} was skipped because it returned non-text content.",
+            )
+            return None
+
+        content = content.strip()
+        if not content:
+            add_note(
+                notes,
+                f"Page content for result #{result_index} was empty and skipped.",
+            )
+            return None
+
+        try:
             window = cache_and_window(
                 session_id=session_id,
                 tool_name=self.name,
@@ -440,51 +321,31 @@ class WebSearchTool(BaseTool):
                 content_type="text/markdown",
                 metadata={
                     "query": response.query,
-                    "fetched_from": "web_search.fetch_top_pages",
+                    "fetched_from": "web_search.deep",
                 },
                 offset=0,
-                limit=max_chars_per_page,
+                limit=_PAGE_CONTENT_WINDOW_CHARS,
             )
 
-            contents.append(
-                f"--- Fetched page for result #{result_index} ---\n"
-                f"Title: {result.title.strip() or '(no title)'}\n"
-                f"URL: {url}\n"
-                "Content:\n"
-                f"{format_windowed_content(window)}"
+            formatted_content = format_windowed_content(window)
+
+        except Exception as e:
+            log_fail("页面内容窗口化处理失败", e, url=url, session_id=session_id)
+            add_note(
+                notes,
+                f"Page content for result #{result_index} failed during content processing and was skipped.",
             )
+            return None
 
-        return contents
+        text = (
+            f"--- Page content for result #{result_index} ---\n"
+            f"Title: {result.title.strip() or '(no title)'}\n"
+            f"URL: {url}\n"
+            "Content:\n"
+            f"{formatted_content}"
+        )
 
-
-def _get_queries(kwargs: Dict[str, Any]) -> List[str]:
-    raw_queries = kwargs.get("queries")
-    if isinstance(raw_queries, list):
-        queries = [
-            item
-            for item in raw_queries
-            if isinstance(item, str) and item.strip()
-        ]
-        if queries:
-            return queries
-
-    query = kwargs.get("query")
-    if isinstance(query, str) and query.strip():
-        return [query]
-
-    return []
-
-
-def _get_domain_list(value: Any) -> Optional[List[str]]:
-    if not isinstance(value, list):
-        return None
-
-    domains = [
-        item.strip()
-        for item in value
-        if isinstance(item, str) and item.strip()
-    ]
-    return domains or None
+        return result_index, text
 
 
 def _format_response(
@@ -493,7 +354,7 @@ def _format_response(
     mode: str,
     queries: List[str],
     notes: Optional[List[str]] = None,
-    extra_contents: Optional[List[str]] = None,
+    page_contents: Optional[List[str]] = None,
 ) -> str:
     unique_domains = count_unique_domains(tuple(response.results))
     output_notes = list(notes or [])
@@ -529,6 +390,12 @@ def _format_response(
     if response.answer:
         lines.append(f"\nAnswer:\n{response.answer}")
 
+    if page_contents:
+        lines.append("\nPage contents:")
+        for content in page_contents:
+            lines.append("")
+            lines.append(content)
+
     if response.results:
         lines.append("\nResults:")
 
@@ -539,9 +406,12 @@ def _format_response(
         domain = extract_domain(url)
 
         lines.append(f"\n{index}. Title: {title}")
-        lines.append(f"   Domain: {domain}")
-        lines.append(f"   URL: {url}")
-        lines.append(f"   Snippet: {snippet}")
+        if domain:
+            lines.append(f"   Domain: {domain}")
+        if url:
+            lines.append(f"   URL: {url}")
+        if snippet:
+            lines.append(f"   Snippet: {snippet}")
         if result.images:
             lines.append("   Images:")
             for image in result.images[:2]:
@@ -552,13 +422,7 @@ def _format_response(
         for image in response.images[:5]:
             lines.append(_format_image_line(image, indent="   "))
 
-    if extra_contents:
-        lines.append("\nFetched top pages:")
-        for content in extra_contents:
-            lines.append("")
-            lines.append(content)
-
-    return _normalize_tool_result("\n".join(lines))
+    return "\n".join(lines).strip()
 
 
 def _format_image_line(image: ImageResult, *, indent: str) -> str:
@@ -594,44 +458,34 @@ def _deduplicate_notes(notes: List[str]) -> List[str]:
     return deduped
 
 
-def _normalize_timeout(
-    value: Any,
+def _window_long_response(
     *,
-    default: float,
-    maximum: float,
-) -> float:
-    try:
-        timeout = float(value)
-    except (TypeError, ValueError):
-        timeout = default
+    session_id: str,
+    mode: str,
+    queries: List[str],
+    text: str,
+) -> str:
+    result = text.strip()
 
-    if timeout <= 0:
-        timeout = default
+    if len(result) <= settings.TOOL_RESULT_MAX_CHARS:
+        return result
 
-    return min(timeout, maximum)
-
-
-def _normalize_float(
-    value: Any,
-    *,
-    default: float,
-    minimum: float,
-    maximum: float,
-) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        number = default
-
-    return max(minimum, min(number, maximum))
+    return cache_and_format(
+        session_id=session_id,
+        tool_name="web_search",
+        source="; ".join(queries),
+        text=result,
+        content_type="text/plain",
+        metadata={
+            "content_kind": "web_search_evidence_pack",
+            "mode": mode,
+            "queries": queries,
+        },
+        limit=settings.TOOL_RESULT_MAX_CHARS,
+    )
 
 
 def _normalize_tool_result(result: str) -> str:
+    """向后兼容的别名：长响应应由 execute() 进行窗口化处理。"""
     result = result.strip()
-
-    if len(result) > settings.TOOL_RESULT_MAX_CHARS:
-        limit = settings.TOOL_RESULT_MAX_CHARS
-        keep_len = max(0, limit - len(_TRUNCATION_MARKER))
-        result = result[:keep_len].rstrip() + _TRUNCATION_MARKER
-
     return result

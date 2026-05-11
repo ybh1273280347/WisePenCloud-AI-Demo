@@ -2,8 +2,9 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from chat.application.document_parse import DocumentParseResult, ParsedPage, ParsedTable
+from chat.application.document_parse.models import DocumentParseResult, ParsedPage, ParsedTable
 from chat.application.document_parse.text_utils import normalize_text
+from common.logger import log_event, log_ok
 
 
 _FILE_TYPE_SPREADSHEET = "spreadsheet"
@@ -27,9 +28,22 @@ def _format_cell(value: object) -> str:
 class SpreadsheetParser:
     """电子表格文档解析器。"""
 
+    def __init__(self):
+        log_ok(
+            "SpreadsheetParser init",
+            handler_class=type(self).__name__,
+            backend=_BACKEND_PANDAS,
+        )
+
     def parse(self, path: Path) -> DocumentParseResult:
         import pandas as pd
 
+        log_event(
+            "SpreadsheetParser parse start",
+            path=str(path),
+            handler_class=type(self).__name__,
+            backend=_BACKEND_PANDAS,
+        )
         sheets = pd.read_excel(path, sheet_name=None, dtype=object, keep_default_na=False)
 
         text_parts: List[str] = []
@@ -79,7 +93,7 @@ class SpreadsheetParser:
             metadata={"parser": _BACKEND_PANDAS},
         )
 
-        return DocumentParseResult(
+        result = DocumentParseResult(
             text=text,
             source=str(path),
             file_type=_FILE_TYPE_SPREADSHEET,
@@ -87,6 +101,7 @@ class SpreadsheetParser:
             tables=tables,
             metadata={
                 "parser": _PARSER_NAME,
+                "selected_parser": _BACKEND_PANDAS,
                 "spreadsheet_backend": _BACKEND_PANDAS,
                 "sheet_count": len(sheets),
                 "sheets": sheets_info,
@@ -95,8 +110,18 @@ class SpreadsheetParser:
             },
             warnings=[],
         )
+        log_ok(
+            "SpreadsheetParser parse",
+            path=str(path),
+            handler_class=type(self).__name__,
+            backend=_BACKEND_PANDAS,
+            sheet_count=len(sheets),
+            table_count=len(tables),
+            length=len(text),
+        )
+        return result
 
-    def _rows_from_dataframe(self, df: Any) -> List[List[str]]:
+    def _rows_from_dataframe(self, df) -> List[List[str]]:
         filled = df.fillna("")
         rows: List[List[str]] = [[_format_cell(col) for col in filled.columns.tolist()]]
         rows.extend([[_format_cell(value) for value in row] for row in filled.values.tolist()])

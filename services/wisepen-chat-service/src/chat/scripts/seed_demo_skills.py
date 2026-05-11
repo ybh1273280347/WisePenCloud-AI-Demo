@@ -153,7 +153,7 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
             updated_at=now,
         )
         await doc.insert()
-        log_event("seed_demo_skills: insert", skill_id=skill_id, version=version, assets=len(assets_manifest))
+        log_event("seed_demo_skills：插入", skill_id=skill_id, version=version, assets=len(assets_manifest))
     else:
         existing.display_name = display_name
         existing.description = description
@@ -165,7 +165,7 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
         existing.enabled = enabled
         existing.updated_at = now
         await existing.save()
-        log_event("seed_demo_skills: update", skill_id=skill_id, version=version, assets=len(assets_manifest))
+        log_event("seed_demo_skills：更新", skill_id=skill_id, version=version, assets=len(assets_manifest))
 
 
 async def _main() -> None:

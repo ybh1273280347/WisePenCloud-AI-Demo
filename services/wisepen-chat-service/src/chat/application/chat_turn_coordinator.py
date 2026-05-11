@@ -71,6 +71,7 @@ class ChatTurnCoordinator:
             background_tasks: BackgroundTasks,
             model_id: Optional[int] = None,
             states: Optional[List[Dict[str, Any]]] = None,
+            search_override: Optional[Dict[str, Any]] = None,
     ):
         model_id = model_id or settings.DEFAULT_MODEL_ID
 
@@ -94,6 +95,7 @@ class ChatTurnCoordinator:
         tool_context: Dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
+            "search_override": search_override,
         } 
 
         # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills

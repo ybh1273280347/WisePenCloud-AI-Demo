@@ -3,6 +3,8 @@ from ipaddress import ip_address, ip_network
 from typing import List
 from urllib.parse import urlparse
 
+from common.logger import log_fail
+
 import dns.message
 import dns.query
 import dns.rdatatype
@@ -179,6 +181,7 @@ def _resolve_with_doh_server(hostname: str, doh_url: str) -> List[str]:
         try:
             ips.extend(_query_doh_record(hostname, doh_url, record_type))
         except Exception:
+            log_fail("DoH 查询失败", hostname=hostname, doh_url=doh_url, record_type=record_type)
             continue
 
     return sorted(set(ips))

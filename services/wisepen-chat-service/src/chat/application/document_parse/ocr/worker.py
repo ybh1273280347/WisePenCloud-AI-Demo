@@ -3,11 +3,13 @@ import contextlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List, Tuple
+
+import torch
 
 
 _PROTOCOL_STDOUT = sys.stdout
-_ENGINES: Dict[Tuple[str, bool, bool, bool], Any] = {}
+_ENGINES: Dict[Tuple[str, bool, bool, bool], object] = {}
 
 
 @contextlib.contextmanager
@@ -31,7 +33,7 @@ def _get_engine(
     use_doc_orientation_classify: bool,
     use_doc_unwarping: bool,
     use_textline_orientation: bool,
-) -> Any:
+):
     key = (
         language,
         use_doc_orientation_classify,
@@ -53,9 +55,8 @@ def _get_engine(
 
     kwargs = {
         "lang": language,
-        "use_doc_orientation_classify": use_doc_orientation_classify,
-        "use_doc_unwarping": use_doc_unwarping,
-        "use_textline_orientation": use_textline_orientation,
+        "use_angle_cls": False,
+        "show_log": False,
     }
 
     with _redirect_stdout_to_stderr():
@@ -65,84 +66,35 @@ def _get_engine(
     return engine
 
 
-def _extend_strings(parts: List[str], values: Iterable[Any]) -> None:
-    for value in values:
-        if isinstance(value, str):
-            text = value.strip()
-            if text:
-                parts.append(text)
+def _collect_legacy_ocr_texts(raw_result) -> List[str]:
+    texts: List[str] = []
 
+    def visit(value) -> None:
+        if value is None:
+            return
 
-def _collect_texts(value: Any, parts: List[str], *, depth: int = 0) -> None:
-    if depth > 8 or value is None:
-        return
-
-    if isinstance(value, str):
-        text = value.strip()
-        if text:
-            parts.append(text)
-        return
-
-    if isinstance(value, dict):
-        preferred_keys = ("rec_texts", "text", "transcription", "texts")
-        handled_keys = set()
-
-        for key in preferred_keys:
-            if key in value:
-                handled_keys.add(key)
-                nested = value[key]
-                if isinstance(nested, list):
-                    _extend_strings(parts, nested)
-                else:
-                    _collect_texts(nested, parts, depth=depth + 1)
-
-        for key, nested in value.items():
-            if key not in handled_keys:
-                _collect_texts(nested, parts, depth=depth + 1)
-        return
-
-    if isinstance(value, (list, tuple)):
-        if len(value) >= 2:
-            second = value[1]
-            if isinstance(second, str):
-                text = second.strip()
+        if isinstance(value, tuple) and value:
+            first = value[0]
+            if isinstance(first, str):
+                text = first.strip()
                 if text:
-                    parts.append(text)
-            elif isinstance(second, (list, tuple)) and second and isinstance(second[0], str):
-                text = second[0].strip()
-                if text:
-                    parts.append(text)
+                    texts.append(text)
+                return
 
-        for item in value:
-            _collect_texts(item, parts, depth=depth + 1)
-        return
+        if isinstance(value, list):
+            if len(value) >= 2 and isinstance(value[1], tuple):
+                text_value = value[1][0] if len(value[1]) >= 1 else None
+                if isinstance(text_value, str):
+                    text = text_value.strip()
+                    if text:
+                        texts.append(text)
+                    return
 
-    for attr in ("rec_texts", "text", "texts", "data"):
-        if hasattr(value, attr):
-            try:
-                _collect_texts(getattr(value, attr), parts, depth=depth + 1)
-            except Exception:
-                pass
+            for item in value:
+                visit(item)
 
-    if hasattr(value, "json"):
-        try:
-            _collect_texts(value.json(), parts, depth=depth + 1)
-        except Exception:
-            pass
-
-
-def _normalize_lines(parts: List[str]) -> List[str]:
-    lines: List[str] = []
-    seen = set()
-
-    for part in parts:
-        text = str(part).strip()
-        if not text or text in seen:
-            continue
-        lines.append(text)
-        seen.add(text)
-
-    return lines
+    visit(raw_result)
+    return texts
 
 
 def _recognize_image(
@@ -161,11 +113,9 @@ def _recognize_image(
     )
 
     with _redirect_stdout_to_stderr():
-        raw_result = engine.predict(input=str(input_path))
+        raw_result = engine.ocr(str(input_path), cls=False)
 
-    parts: List[str] = []
-    _collect_texts(raw_result, parts)
-    lines = _normalize_lines(parts)
+    lines = _collect_legacy_ocr_texts(raw_result)
     text = "\n".join(lines).strip()
 
     if not text:

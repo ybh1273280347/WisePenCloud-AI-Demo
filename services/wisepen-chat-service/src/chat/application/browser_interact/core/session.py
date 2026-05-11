@@ -63,21 +63,21 @@ class BrowserSessionManager:
             try:
                 await self._page.close()
             except Exception:
-                pass
+                log_fail("关闭 page 失败，可能存在资源泄漏")
             self._page = None
 
         if self._context is not None:
             try:
                 await self._context.close()
             except Exception:
-                pass
+                log_fail("关闭 browser context 失败，可能存在资源泄漏")
             self._context = None
 
         if self._playwright is not None:
             try:
                 await self._playwright.stop()
             except Exception:
-                pass
+                log_fail("停止 Playwright 失败，可能存在资源泄漏")
             self._playwright = None
 
         self._session_id = None
@@ -86,8 +86,6 @@ class BrowserSessionManager:
         self,
         browser_session_id: Optional[str],
     ) -> Optional[ToolErrorCode]:
-        browser_session_id = browser_session_id or None
-
         if browser_session_id is None:
             return ToolErrorCode.SESSION_REQUIRED
 

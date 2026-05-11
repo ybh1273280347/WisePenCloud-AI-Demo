@@ -95,13 +95,13 @@ class FetchCoordinator:
                 result = content.strip()
                 if len(result) < min_length:
                     failure_reasons.append(f"{fetcher_name}: 内容过短({len(result)}字符，阈值{min_length})")
-                    log_fail("网页抓取", "内容过短，触发降级", url=url, fetcher=fetcher_name)
+                    log_event("网页抓取：内容过短，触发降级", url=url, fetcher=fetcher_name)
                     continue
             else:
                 result = self._processor.process(content)
                 if result is None:
                     failure_reasons.append(f"{fetcher_name}: 内容处理失败")
-                    log_fail("网页抓取", "内容处理失败，触发降级", url=url, fetcher=fetcher_name)
+                    log_event("网页抓取：内容处理失败，触发降级", url=url, fetcher=fetcher_name)
                     continue
 
             log_ok("网页抓取", url=url, fetcher=fetcher_name, length=len(result))

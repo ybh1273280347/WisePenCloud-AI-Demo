@@ -57,6 +57,7 @@ def _extract_with_trafilatura(html: str) -> Optional[str]:
             favor_recall=True,
         )
     except Exception:
+        log_fail("trafilatura 提取失败")
         return None
 
 
@@ -64,6 +65,7 @@ def _extract_with_baseline(html: str) -> Optional[str]:
     try:
         _, text, _ = trafilatura.baseline(html)
     except Exception:
+        log_fail("trafilatura baseline 提取失败")
         return None
 
     return text or None
@@ -73,6 +75,7 @@ def _extract_with_html2txt(html: str) -> Optional[str]:
     try:
         text = trafilatura.html2txt(html)
     except Exception:
+        log_fail("trafilatura html2txt 提取失败")
         return None
 
     return text or None
@@ -145,9 +148,10 @@ class ContentProcessor:
             return None
 
         if len(result) < self._min_content_length:
-            log_fail(
-                "HTML 清洗",
-                f"清洗后文本过短({len(result)}字符)，阈值{self._min_content_length}，触发降级",
+            log_event(
+                "HTML 清洗：清洗后文本过短，触发降级",
+                length=len(result),
+                threshold=self._min_content_length,
             )
             return None
 
@@ -158,9 +162,10 @@ class ContentProcessor:
         normalized = normalize_text(text)
 
         if len(normalized) < self._min_content_length:
-            log_fail(
-                "纯文本检测",
-                f"文本过短({len(normalized)}字符)，阈值{self._min_content_length}，触发降级",
+            log_event(
+                "纯文本检测：文本过短，触发降级",
+                length=len(normalized),
+                threshold=self._min_content_length,
             )
             return None
 

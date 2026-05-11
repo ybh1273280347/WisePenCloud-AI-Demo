@@ -15,9 +15,11 @@ _HANDOFF_DIR = Path(".wisepen-web-fetch-documents")
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 
 _TOOL_DESCRIPTION = (
-    "Fetches a web URL and extracts readable Markdown from HTML pages. "
-    "For direct file links, this tool only performs binary/file handoff; "
-    "document content parsing belongs to document_parse."
+    "Parses a local or cached binary document file referenced by file_ref into Markdown text and structured tables. "
+    "Use this after web_fetch returns a file_ref for a direct document file link. "
+    "Supports PDF, DOCX, PPTX, EPUB, XLSX, XLS, and ODS. "
+    "Does not fetch URLs. "
+    "Does not handle HTML, TXT, MD, CSV, JSON, XML, images, audio, or video."
 )
 
 _TOOL_SCHEMA = {
@@ -51,14 +53,12 @@ class WebFetchTool(BaseTool):
     def parameters_schema(self) -> Dict[str, Any]:
         return _TOOL_SCHEMA
 
-    async def execute(self, context: Dict[str, Any], **kwargs: Any) -> str:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> str:
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
 
         url: str = kwargs["url"]
-
-        log_ok("网页抓取参数", url=url, session_id=session_id)
 
         try:
             fetched = await self._fetcher.fetch(url)
@@ -107,7 +107,7 @@ class WebFetchTool(BaseTool):
                 f"filename: {document.filename}",
                 f"content_type: {document.media_type}",
                 f"size_bytes: {len(document.content)}",
-                "next_step: Use document_parse with this file_ref to parse the document.",
+                "next_step: Call document_parse with this file_ref to read the document content.",
             ]
         )
 

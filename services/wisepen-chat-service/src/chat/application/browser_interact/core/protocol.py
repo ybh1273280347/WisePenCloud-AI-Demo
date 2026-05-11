@@ -3,6 +3,8 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional
 
+from common.logger import log_fail
+
 from playwright.async_api import Page
 
 @dataclass(frozen=True, slots=True)
@@ -573,6 +575,7 @@ async def get_page_state(page: Optional[Page]) -> Optional[PageState]:
         )
 
     except Exception:
+        log_fail("获取页面状态失败")
         return PageState(
             url=getattr(page, "url", ""),
             title="",

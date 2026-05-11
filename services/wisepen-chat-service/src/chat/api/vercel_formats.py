@@ -6,7 +6,7 @@ import json
 from typing import Dict
 
 
-def _sse(payload: dict | str) -> str:
+def _sse(payload: Dict | str) -> str:
     """将 payload 编码为 SSE data 行"""
     data = json.dumps(payload, ensure_ascii=False) if isinstance(payload, dict) else payload
     return f"data: {data}\n\n"

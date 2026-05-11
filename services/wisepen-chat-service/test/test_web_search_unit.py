@@ -9,22 +9,25 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from chat.application.web_search.cache import SearchCache, make_search_cache_key
+from chat.application.web_search.cache import SearchCache
 from chat.application.web_search.models import ImageResult, SearchResponse, SearchResult
 from chat.application.web_search.models.helpers import has_response_content
 from chat.application.web_search.search_coordinator import (
     DEFAULT_FINAL_RESULTS,
     DEFAULT_MAX_PER_DOMAIN,
-    PAID_FALLBACK_LIMIT,
     SearchCoordinator,
-    _merge_many_search_responses,
-    _normalize_queries,
-    _normalize_url_for_dedup,
+    merge_many_search_responses,
 )
-from chat.application.web_search.utils import add_note, extract_domain, has_site_operator, normalize_bool, normalize_int
-from chat.application.web_search.utils.domains import _filter_results_by_domains
+from chat.application.web_search.utils import (
+    add_note,
+    deduplicate_images,
+    extract_domain,
+    has_site_operator,
+    normalize_queries,
+    normalize_url_for_dedup,
+)
 from chat.core.config.app_settings import settings
 
 
@@ -104,7 +107,7 @@ class CountingSearcher:
 
         results = tuple(
             make_result(query, index, domain=self.domain)
-            for index in range(min(self.result_count, max_results))
+            for index in range(1, min(self.result_count, max_results) + 1)
         )
         images: Tuple[ImageResult, ...] = ()
         if self.images or with_images:
@@ -114,6 +117,48 @@ class CountingSearcher:
             )
 
         return SearchResponse(query=query, results=results, images=images)
+
+
+class FakeFetcher:
+    def __init__(
+        self,
+        content: Union[object, Callable[[str], object]],
+        *,
+        delay: float = 0,
+    ) -> None:
+        self.content = content
+        self.delay = delay
+        self.calls: List[str] = []
+        self.active = 0
+        self.max_active = 0
+
+    async def fetch(self, url: str) -> object:
+        self.calls.append(url)
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            if callable(self.content):
+                return self.content(url)
+            return self.content
+        finally:
+            self.active -= 1
+
+
+class RecordingCoordinator:
+    def __init__(self, response: SearchResponse) -> None:
+        self.response = response
+        self.search_many_calls: List[Tuple[List[str], Dict[str, Any]]] = []
+        self.search_calls: List[Tuple[str, Dict[str, Any]]] = []
+
+    async def search_many(self, queries: List[str], **kwargs: Any) -> SearchResponse:
+        self.search_many_calls.append((queries, kwargs))
+        return self.response
+
+    async def search(self, query: str, **kwargs: Any) -> SearchResponse:
+        self.search_calls.append((query, kwargs))
+        raise AssertionError("WebSearchTool should always call search_many")
 
 
 def make_coordinator(
@@ -133,246 +178,63 @@ def make_coordinator(
     )
 
 
-def test_normalize_params() -> None:
-    assert_true(normalize_int("bad", default=5, minimum=1, maximum=10) == 5, "invalid int should use default")
-    assert_true(normalize_int(0, default=5, minimum=1, maximum=10) == 1, "int should clamp minimum")
-    assert_true(normalize_int(99, default=5, minimum=1, maximum=10) == 10, "int should clamp maximum")
-    assert_true(normalize_int(7, default=5, minimum=1, maximum=10) == 7, "valid int should pass through")
-    assert_true(normalize_int(None, default=5, minimum=1, maximum=10) == 5, "None should use default")
-
-    for value in ("true", "1", "yes", "y", "True", "YES", True):
-        assert_true(normalize_bool(value) is True, f"{value!r} should be true")
-
-    for value in ("false", "0", "no", "n", "False", "NO", "maybe", "", False):
-        assert_true(normalize_bool(value) is False, f"{value!r} should be false")
-
-
 def test_normalize_queries() -> None:
-    assert_true(_normalize_queries(["", "   ", "Python"], limit=4) == ["Python"], "empty queries should be removed")
+    assert_true(normalize_queries(["", "   ", "Python"], limit=4) == ["Python"], "empty queries should be removed")
     assert_true(
-        _normalize_queries(["Python asyncio", "python   asyncio", "PYTHON ASYNCIO"], limit=4)
+        normalize_queries(["Python asyncio", "python   asyncio", "PYTHON ASYNCIO"], limit=4)
         == ["Python asyncio"],
         "queries should dedupe case-insensitively after whitespace normalization",
     )
     assert_true(
-        _normalize_queries(["q1", "q2", "q3", "q4", "q5"], limit=4) == ["q1", "q2", "q3", "q4"],
+        normalize_queries(["q1", "q2", "q3", "q4", "q5"], limit=4) == ["q1", "q2", "q3", "q4"],
         "queries should be limited",
     )
     assert_true(
-        _normalize_queries(["  Python    asyncio   "], limit=4) == ["Python asyncio"],
+        normalize_queries(["  Python    asyncio   "], limit=4) == ["Python asyncio"],
         "query whitespace should collapse",
     )
-    assert_true(_normalize_queries(["", "   "], limit=4) == [], "all invalid queries should return empty list")
 
 
-def test_normalize_url_preserves_path_case() -> None:
-    normalized = _normalize_url_for_dedup("HTTPS://WWW.Example.com/Some/Path/")
-    assert_true(
-        normalized == "https://example.com/Some/Path",
-        f"path case should be preserved, got {normalized}",
-    )
-
-
-def test_normalize_url_removes_tracking_params() -> None:
-    normalized = _normalize_url_for_dedup(
-        "https://example.com/path?utm_source=x&fbclid=1&a=keep&utm_content=y"
-    )
-    assert_true(
-        normalized == "https://example.com/path?a=keep",
-        f"tracking params should be removed, got {normalized}",
-    )
-
-
-def test_normalize_url_sorts_remaining_query_params() -> None:
-    normalized = _normalize_url_for_dedup("https://example.com/path?b=2&a=1&blank=")
-    assert_true(
-        normalized == "https://example.com/path?a=1&b=2&blank=",
-        f"remaining query params should be sorted, got {normalized}",
-    )
-
-
-def test_normalize_url_removes_default_port() -> None:
-    assert_true(
-        _normalize_url_for_dedup("http://www.example.com:80/Path")
-        == "http://example.com/Path",
-        "http default port should be removed",
-    )
-    assert_true(
-        _normalize_url_for_dedup("https://www.example.com:443/Path")
-        == "https://example.com/Path",
-        "https default port should be removed",
-    )
-
-
-def test_normalize_url_keeps_non_default_port() -> None:
-    normalized = _normalize_url_for_dedup("https://www.example.com:8443/Path")
-    assert_true(
-        normalized == "https://example.com:8443/Path",
-        f"non-default port should be kept, got {normalized}",
-    )
-
-
-def test_normalize_queries_removes_empty_values() -> None:
-    assert_true(
-        _normalize_queries(["", "   ", "Python"], limit=4) == ["Python"],
-        "empty values should be removed",
-    )
-
-
-def test_normalize_queries_deduplicates_case_insensitively() -> None:
-    assert_true(
-        _normalize_queries(["Python asyncio", "python   asyncio"], limit=4)
-        == ["Python asyncio"],
-        "queries should deduplicate case-insensitively",
-    )
-
-
-def test_normalize_queries_limits_count() -> None:
+def test_normalize_queries_notes() -> None:
     notes: List[str] = []
-    normalized = _normalize_queries(["q1", "q2", "q3", "q4", "q5"], limit=4, notes=notes)
-    assert_true(normalized == ["q1", "q2", "q3", "q4"], "queries should be limited")
-    assert_true("Search queries were limited to 4 focused queries." in notes, "limit should add a note")
-
-
-def test_normalize_queries_notes_duplicate_queries() -> None:
-    notes: List[str] = []
-    normalized = _normalize_queries(
-        ["Python asyncio", "python   asyncio", "PYTHON ASYNCIO"],
+    long_query = ("alpha " * 100).strip()
+    normalized = normalize_queries(
+        [long_query, "Python asyncio", "python   asyncio", "q3", "q4", "q5"],
         limit=4,
         notes=notes,
     )
 
-    assert_true(normalized == ["Python asyncio"], "duplicate queries should be removed")
-    assert_true(
-        "2 duplicate search queries were removed." in notes,
-        "duplicate queries should add a note",
-    )
-
-
-def test_normalize_queries_collapses_whitespace() -> None:
-    assert_true(
-        _normalize_queries(["  Python    asyncio   "], limit=4) == ["Python asyncio"],
-        "query whitespace should collapse",
-    )
-
-
-def test_truncate_query_adds_note() -> None:
-    notes: List[str] = []
-    long_query = ("alpha " * 100).strip()
-    normalized = _normalize_queries([long_query], limit=4, notes=notes)
-
     assert_true(len(normalized[0]) <= 400, "long query should be truncated")
+    assert_true("Query truncated to 400 characters." in notes, "truncation should add note")
+    assert_true("1 duplicate search queries were removed." in notes, "duplicate should add note")
+    assert_true("Search queries were limited to 4 focused queries." in notes, "limit should add note")
+
+
+def test_normalize_url_for_dedup() -> None:
     assert_true(
-        "Query truncated to 400 characters." in notes,
-        "query truncation should add a concise note",
+        normalize_url_for_dedup("HTTPS://WWW.Example.com/Some/Path/") == "https://example.com/Some/Path",
+        "path case should be preserved and www/default slash normalized",
     )
-    assert_true(long_query not in " ".join(notes), "notes should not contain the full original query")
-
-
-def test_time_range_year_appends_current_year() -> None:
     assert_true(
-        _normalize_queries(
-            ["openai model release"],
-            limit=4,
-            time_range="year",
-            current_year=2026,
-        )
-        == ["openai model release 2026"],
-        "year time_range should append current year when no time clue exists",
+        normalize_url_for_dedup("https://example.com/path?utm_source=x&fbclid=1&a=keep")
+        == "https://example.com/path?a=keep",
+        "tracking params should be removed",
     )
-
-
-def test_time_range_day_does_not_append_year() -> None:
     assert_true(
-        _normalize_queries(
-            ["openai model release"],
-            limit=4,
-            time_range="day",
-            current_year=2026,
-        )
-        == ["openai model release"],
-        "day time_range should not append current year",
+        normalize_url_for_dedup("https://www.example.com:8443/Path") == "https://example.com:8443/Path",
+        "non-default port should be kept",
     )
 
 
-def test_query_with_existing_year_does_not_append_year() -> None:
-    assert_true(
-        _normalize_queries(
-            ["openai model release 2025"],
-            limit=4,
-            time_range="year",
-            current_year=2026,
-        )
-        == ["openai model release 2025"],
-        "query with existing year should not append another year",
-    )
-
-
-def test_query_with_yesterday_does_not_append_year() -> None:
-    assert_true(
-        _normalize_queries(
-            ["openai release yesterday"],
-            limit=4,
-            time_range="month",
-            current_year=2026,
-        )
-        == ["openai release yesterday"],
-        "query with yesterday should not append current year",
-    )
-
-
-async def test_single_query_search_returns_results() -> None:
-    coordinator = make_coordinator()
-    response = await coordinator.search("Python asyncio gather", max_results=5)
-    assert_true(response is not None, "single query should return a response")
-    assert_true(len(response.results) > 0, "single query should return results")
-    assert_true(response.source == "searxng", f"expected searxng source, got {response.source}")
-
-
-async def test_search_many_returns_merged_results() -> None:
-    coordinator = make_coordinator(searxng=CountingSearcher(result_count=3, domain="docs.example"))
-    response = await coordinator.search_many(
-        queries=[
-            "Python asyncio gather vs wait",
-            "site:docs.python.org asyncio",
-            "asyncio return_when FIRST_COMPLETED",
-        ],
-        max_results_per_query=5,
-        final_max_results=DEFAULT_FINAL_RESULTS,
-    )
-
-    assert_true(response.source is not None and response.source.startswith("multi"), "source should be multi")
-    assert_true(0 < len(response.results) <= DEFAULT_FINAL_RESULTS, "merged result count should respect final limit")
-
-
-async def test_one_query_failure_does_not_break_others() -> None:
-    class PartlyFailingCoordinator(SearchCoordinator):
-        async def search(self, query: str, **kwargs: Any) -> SearchResponse:  # type: ignore[override]
-            if "fail" in query:
-                raise RuntimeError("forced gather failure")
-            return SearchResponse(
-                query=query,
-                results=(make_result(query, 1, domain="parallel.example"),),
-                source="fake",
-            )
-
-    coordinator = PartlyFailingCoordinator(
-        cache=SearchCache(fresh_ttl=60, stale_ttl=3600, maxsize=64),
-        searxng_searcher=CountingSearcher(),
-        duckduckgo_searcher=CountingSearcher(),
-        tavily_searcher=CountingSearcher(),
-    )
-
-    response = await coordinator.search_many(
-        queries=["succeed one", "fail this", "succeed two"],
-        allow_paid_fallback=False,
-    )
-
-    assert_true(len(response.results) == 2, "failed query should not block successful query results")
+def test_has_site_operator() -> None:
+    assert_true(has_site_operator(["site:docs.python.org asyncio"]) is True, "site: should match")
+    assert_true(has_site_operator(["website:docs.python.org"]) is False, "website: should not match site:")
+    assert_true(has_site_operator(["offsite:docs.python.org"]) is False, "offsite: should not match site:")
+    assert_true(has_site_operator(["awesome site: great"]) is True, "standalone site: should match")
 
 
 def test_merge_deduplicates_urls_domains_and_images() -> None:
-    response = _merge_many_search_responses(
+    response = merge_many_search_responses(
         query="merged",
         responses=[
             SearchResponse(
@@ -416,22 +278,16 @@ def test_merge_deduplicates_urls_domains_and_images() -> None:
 
 def test_merge_reports_deduplication_notes() -> None:
     notes: List[str] = []
-    response = _merge_many_search_responses(
+    response = merge_many_search_responses(
         query="dedupe",
         responses=[
             SearchResponse(
                 query="q1",
                 results=(
-                    SearchResult(
-                        title="A",
-                        url="https://www.example.com/Path?utm_source=x&a=1",
-                        snippet="one",
-                    ),
-                    SearchResult(
-                        title="B",
-                        url="https://example.com/Path?a=1",
-                        snippet="two",
-                    ),
+                    SearchResult(title="A", url="https://www.example.com/Path?utm_source=x&a=1", snippet="one"),
+                    SearchResult(title="B", url="https://example.com/Path?a=1", snippet="two"),
+                    SearchResult(title="C", url="https://example.com/Other", snippet="three"),
+                    SearchResult(title="D", url="https://example.com/Third", snippet="four"),
                 ),
                 images=(
                     ImageResult(url="https://www.img.example.com/p.png?utm_source=x"),
@@ -440,19 +296,20 @@ def test_merge_reports_deduplication_notes() -> None:
             )
         ],
         final_max_results=10,
-        dedupe_domains=False,
+        dedupe_domains=True,
         max_per_domain=2,
         notes=notes,
     )
 
-    assert_true(len(response.results) == 1, "normalized duplicate URLs should be merged")
+    assert_true(len(response.results) == 2, "URL and domain dedupe should both apply")
     assert_true(len(response.images) == 1, "normalized duplicate image URLs should be merged")
     assert_true("1 duplicate URLs were removed." in notes, "URL dedupe should report count")
     assert_true("1 duplicate image URLs were removed." in notes, "image dedupe should report count")
+    assert_true("1 same-domain results were removed by domain dedupe." in notes, "domain dedupe should report count")
 
 
 def test_merge_can_disable_domain_deduplication() -> None:
-    response = _merge_many_search_responses(
+    response = merge_many_search_responses(
         query="site specific",
         responses=[
             SearchResponse(
@@ -472,432 +329,358 @@ def test_merge_can_disable_domain_deduplication() -> None:
     assert_true(len(response.results) == 3, "dedupe_domains=False should allow more same-domain results")
 
 
-async def test_site_operator_disables_domain_dedupe_when_not_explicit() -> None:
-    coordinator = make_coordinator(searxng=CountingSearcher(result_count=3, domain="docs.python.org"))
+async def test_search_many_returns_merged_results() -> None:
+    coordinator = make_coordinator(searxng=CountingSearcher(result_count=3, domain="docs.example"))
     response = await coordinator.search_many(
-        queries=["site:docs.python.org asyncio"],
-        dedupe_domains=False,
-        final_max_results=10,
-    )
-
-    assert_true(len(response.results) == 3, "site: with dedupe_domains=False should keep all results")
-
-
-async def test_site_operator_does_not_match_website_or_offsite() -> None:
-    coordinator = make_coordinator(searxng=CountingSearcher(result_count=3, domain="docs.python.org"))
-    website_response = await coordinator.search_many(
-        queries=["website:docs.python.org asyncio"],
-        final_max_results=10,
-    )
-    offsite_response = await coordinator.search_many(
-        queries=["offsite:docs.python.org asyncio"],
-        final_max_results=10,
-    )
-
-    assert_true(has_site_operator(["website:docs.python.org"]) is False, "website: should not match site:")
-    assert_true(has_site_operator(["offsite:docs.python.org"]) is False, "offsite: should not match site:")
-    assert_true(len(website_response.results) == 2, "website: should keep default domain dedupe")
-    assert_true(len(offsite_response.results) == 2, "offsite: should keep default domain dedupe")
-
-
-async def test_explicit_dedupe_domains_true_is_respected() -> None:
-    coordinator = make_coordinator(searxng=CountingSearcher(result_count=3, domain="docs.python.org"))
-    response = await coordinator.search_many(
-        queries=["site:docs.python.org asyncio"],
-        dedupe_domains=True,
-        final_max_results=10,
-    )
-
-    assert_true(len(response.results) == 2, "explicit dedupe_domains=True should be respected")
-
-
-def test_include_domains_filters_by_hostname() -> None:
-    results = (
-        make_result("q", 1, domain="example.com"),
-        make_result("q", 2, domain="docs.example.com"),
-        make_result("q", 3, domain="notexample.com"),
-    )
-
-    filtered = _filter_results_by_domains(
-        results,
-        include_domains=["example.com"],
-    )
-
-    urls = [result.url for result in filtered]
-    assert_true("https://example.com/q/1" in urls, "include should keep exact hostname")
-    assert_true("https://docs.example.com/q/2" in urls, "include should keep subdomain")
-    assert_true("https://notexample.com/q/3" not in urls, "include should not use string contains")
-
-
-def test_exclude_domains_filters_by_hostname() -> None:
-    results = (
-        make_result("q", 1, domain="example.com"),
-        make_result("q", 2, domain="docs.example.com"),
-        make_result("q", 3, domain="notexample.com"),
-    )
-
-    filtered = _filter_results_by_domains(
-        results,
-        exclude_domains=["example.com"],
-    )
-
-    urls = [result.url for result in filtered]
-    assert_true("https://example.com/q/1" not in urls, "exclude should remove exact hostname")
-    assert_true("https://docs.example.com/q/2" not in urls, "exclude should remove subdomain")
-    assert_true("https://notexample.com/q/3" in urls, "exclude should not use string contains")
-
-
-def test_merge_include_domains_adds_note() -> None:
-    notes: List[str] = []
-    _merge_many_search_responses(
-        query="include",
-        responses=[
-            SearchResponse(
-                query="q",
-                results=(
-                    make_result("q", 1, domain="example.com"),
-                    make_result("q", 2, domain="docs.example.com"),
-                    make_result("q", 3, domain="notexample.com"),
-                ),
-            )
+        queries=[
+            "Python asyncio gather vs wait",
+            "site:docs.python.org asyncio",
+            "asyncio return_when FIRST_COMPLETED",
         ],
-        final_max_results=10,
-        dedupe_domains=False,
-        max_per_domain=2,
-        notes=notes,
-        include_domains=["example.com"],
+        max_results_per_query=8,
+        final_max_results=DEFAULT_FINAL_RESULTS,
     )
 
-    assert_true(
-        "include_domains filter reduced results from 3 to 2." in notes,
-        "include_domains filtering should add a count note",
-    )
+    assert_true(response.source is not None and response.source.startswith("multi"), "source should be multi")
+    assert_true(0 < len(response.results) <= DEFAULT_FINAL_RESULTS, "merged result count should respect final limit")
 
 
-def test_merge_exclude_domains_adds_note() -> None:
-    notes: List[str] = []
-    _merge_many_search_responses(
-        query="exclude",
-        responses=[
-            SearchResponse(
-                query="q",
-                results=(
-                    make_result("q", 1, domain="example.com"),
-                    make_result("q", 2, domain="docs.example.com"),
-                    make_result("q", 3, domain="notexample.com"),
-                ),
+async def test_one_query_failure_does_not_break_others() -> None:
+    class PartlyFailingCoordinator(SearchCoordinator):
+        async def search(self, query: str, **kwargs: Any) -> SearchResponse:  # type: ignore[override]
+            if "fail" in query:
+                raise RuntimeError("forced gather failure")
+            return SearchResponse(
+                query=query,
+                results=(make_result(query, 1, domain="parallel.example"),),
+                source="fake",
             )
-        ],
-        final_max_results=10,
-        dedupe_domains=False,
-        max_per_domain=2,
-        notes=notes,
-        exclude_domains=["example.com"],
+
+    coordinator = PartlyFailingCoordinator(
+        cache=SearchCache(fresh_ttl=60, stale_ttl=3600, maxsize=64),
+        searxng_searcher=CountingSearcher(),
+        duckduckgo_searcher=CountingSearcher(),
+        tavily_searcher=CountingSearcher(),
     )
 
-    assert_true(
-        "exclude_domains filter removed 2 results." in notes,
-        "exclude_domains filtering should add a count note",
-    )
+    response = await coordinator.search_many(queries=["succeed one", "fail this", "succeed two"])
+
+    assert_true(len(response.results) == 2, "failed query should not block successful query results")
 
 
-async def test_search_many_does_not_call_tavily_by_default() -> None:
-    tavily = CountingSearcher(domain="tavily.example")
-    coordinator = make_coordinator(
-        searxng=CountingSearcher(empty=True),
-        duckduckgo=CountingSearcher(empty=True),
-        tavily=tavily,
-    )
+async def test_search_many_with_images() -> None:
+    coordinator = make_coordinator(searxng=CountingSearcher(result_count=1, images=True))
+    response = await coordinator.search_many(queries=["image query"], with_images=True)
 
-    response = await coordinator.search_many(
-        queries=["query one", "query two"],
-        allow_paid_fallback=False,
-    )
-
-    assert_true(len(tavily.calls) == 0, "multi-query search should not call Tavily by default")
-    assert_true(len(response.results) == 0, "empty free results should return an empty merged response")
+    assert_true(len(response.images) == 1, "query-level duplicate images should be deduplicated")
 
 
-async def test_search_many_calls_tavily_at_most_once_when_allowed() -> None:
-    tavily = CountingSearcher(result_count=2, domain="tavily.example")
-    coordinator = make_coordinator(
-        searxng=CountingSearcher(empty=True),
-        duckduckgo=CountingSearcher(empty=True),
-        tavily=tavily,
-    )
-
-    notes: List[str] = []
-    response = await coordinator.search_many(
-        queries=["query one", "query two"],
-        allow_paid_fallback=True,
-        notes=notes,
-    )
-
-    assert_true(len(tavily.calls) <= PAID_FALLBACK_LIMIT, "paid fallback should be capped at one call")
-    assert_true(response.source == "multi:tavily", f"unexpected source {response.source}")
-    assert_true("Tavily paid fallback was used once." in notes, "paid fallback should add a note")
-
-
-async def test_empty_tavily_paid_fallback_does_not_add_note() -> None:
-    tavily = CountingSearcher(empty=True, domain="tavily.example")
-    coordinator = make_coordinator(
-        searxng=CountingSearcher(empty=True),
-        duckduckgo=CountingSearcher(empty=True),
-        tavily=tavily,
-    )
-    notes: List[str] = []
-
-    response = await coordinator.search_many(
-        queries=["query one", "query two"],
-        allow_paid_fallback=True,
-        notes=notes,
-    )
-
-    assert_true(len(tavily.calls) <= PAID_FALLBACK_LIMIT, "paid fallback should still be capped")
-    assert_true(len(response.results) == 0, "empty paid fallback should not add results")
-    assert_true(
-        "Tavily paid fallback was used once." not in notes,
-        "empty paid fallback should not add a model-facing note",
-    )
-
-
-async def test_tavily_paid_fallback_does_not_pollute_query_cache() -> None:
-    cache = SearchCache(fresh_ttl=60, stale_ttl=3600, maxsize=64)
+async def test_search_many_never_calls_tavily() -> None:
+    searxng = CountingSearcher(empty=True)
+    duckduckgo = CountingSearcher(empty=True)
     tavily = CountingSearcher(result_count=1, domain="tavily.example")
-    coordinator = make_coordinator(
-        cache=cache,
-        searxng=CountingSearcher(empty=True),
-        duckduckgo=CountingSearcher(empty=True),
-        tavily=tavily,
+    coordinator = make_coordinator(searxng=searxng, duckduckgo=duckduckgo, tavily=tavily)
+
+    response = await coordinator.search_many(queries=["needs fallback"])
+
+    assert_true(len(tavily.calls) == 0, "search_many should not call Tavily")
+    assert_true(len(response.results) == 0, "empty free-search results should stay empty")
+
+
+async def test_search_many_passes_allow_paid_fallback_false() -> None:
+    class RecordingSearchCoordinator(SearchCoordinator):
+        def __init__(self) -> None:
+            super().__init__(
+                cache=SearchCache(fresh_ttl=60, stale_ttl=3600, maxsize=64),
+                searxng_searcher=CountingSearcher(),
+                duckduckgo_searcher=CountingSearcher(),
+                tavily_searcher=CountingSearcher(),
+            )
+            self.search_kwargs: List[Dict[str, Any]] = []
+
+        async def search(self, query: str, **kwargs: Any) -> SearchResponse:  # type: ignore[override]
+            self.search_kwargs.append(kwargs)
+            return SearchResponse(query=query, results=(make_result(query, 1),), source="fake")
+
+    coordinator = RecordingSearchCoordinator()
+    await coordinator.search_many(queries=["one", "two"])
+
+    assert_true(
+        all(kwargs.get("allow_paid_fallback") is False for kwargs in coordinator.search_kwargs),
+        "search_many should force allow_paid_fallback=False on each search call",
     )
 
-    await coordinator.search_many(
-        queries=["unique query for cache test", "another query"],
-        allow_paid_fallback=True,
+
+async def test_tool_normal_mode_uses_search_many_for_one_query() -> None:
+    coordinator = RecordingCoordinator(
+        SearchResponse(query="one", results=(make_result("one", 1, domain="normal.example"),), source="multi:searxng")
+    )
+    fetcher = FakeFetcher("# Page\n\nbody")
+    tool = WebSearchTool(coordinator=coordinator, fetcher=fetcher)  # type: ignore[arg-type]
+
+    result = await tool.execute({"session_id": "normal-one"}, queries=["one"], mode="normal", with_images=True)
+
+    assert_true("Mode: normal" in result, "normal mode should be formatted")
+    assert_true(len(coordinator.search_many_calls) == 1, "tool should use search_many even for one query")
+    assert_true(len(coordinator.search_calls) == 0, "tool should not use single-query search")
+    queries, kwargs = coordinator.search_many_calls[0]
+    assert_true(queries == ["one"], "tool should pass normalized queries")
+    assert_true(kwargs["max_results_per_query"] == 8, "tool should use fixed per-query result count")
+    assert_true(kwargs["final_max_results"] == 20, "tool should use fixed final result count")
+    assert_true(kwargs["with_images"] is True, "with_images should be forwarded")
+    assert_true("allow_paid_fallback" not in kwargs, "tool should not pass allow_paid_fallback to search_many")
+    assert_true(fetcher.calls == [], "normal mode should not fetch page contents")
+
+
+async def test_tool_requires_queries() -> None:
+    tool = WebSearchTool(
+        coordinator=RecordingCoordinator(SearchResponse(query="")),
+        fetcher=FakeFetcher("# Page"),
+    )  # type: ignore[arg-type]
+
+    result = await tool.execute({"session_id": "missing"}, query="old single query")
+
+    assert_true(result == "[Tool Error] Missing required queries parameter.", "old query parameter should not be accepted")
+
+
+async def test_tool_site_operator_disables_domain_dedupe() -> None:
+    coordinator = RecordingCoordinator(SearchResponse(query="site", results=(make_result("site", 1),), source="multi:searxng"))
+    tool = WebSearchTool(coordinator=coordinator, fetcher=FakeFetcher("# Page"))  # type: ignore[arg-type]
+
+    result = await tool.execute({"session_id": "site"}, queries=["site:docs.python.org asyncio"])
+
+    kwargs = coordinator.search_many_calls[0][1]
+    assert_true(kwargs["dedupe_domains"] is False, "site: should disable domain dedupe")
+    assert_true(
+        "Domain dedupe disabled because a site: operator was detected." in result,
+        "site: should add note",
     )
 
-    key = make_search_cache_key(
-        query="unique query for cache test",
-        max_results=5,
-        with_images=False,
-    )
-    cached = await cache.get_fresh(key)
-    assert_true(cached is None, "paid fallback result should not be written to the ordinary query cache")
 
+async def test_tool_website_and_offsite_do_not_disable_domain_dedupe() -> None:
+    coordinator = RecordingCoordinator(SearchResponse(query="site", results=(make_result("site", 1),), source="multi:searxng"))
+    tool = WebSearchTool(coordinator=coordinator, fetcher=FakeFetcher("# Page"))  # type: ignore[arg-type]
 
-async def test_freshness_required_skips_stale_cache() -> None:
-    cache = SearchCache(fresh_ttl=0.01, stale_ttl=60, maxsize=64)
-    key = make_search_cache_key(
-        query="latest query one",
-        max_results=5,
-        with_images=False,
-    )
-    await cache.set(
-        key,
-        SearchResponse(
-            query="latest query one",
-            results=(make_result("latest query one", 1, domain="stale.example"),),
-            source="searxng",
-        ),
-    )
-    await asyncio.sleep(0.02)
+    await tool.execute({"session_id": "website"}, queries=["website:docs.python.org asyncio"])
+    await tool.execute({"session_id": "offsite"}, queries=["offsite:docs.python.org asyncio"])
 
-    coordinator = make_coordinator(
-        cache=cache,
-        searxng=CountingSearcher(empty=True),
-        duckduckgo=CountingSearcher(empty=True),
-        tavily=CountingSearcher(empty=True),
-    )
-    response = await coordinator.search_many(
-        queries=["latest query one"],
-        freshness_required=True,
-        allow_paid_fallback=False,
+    assert_true(
+        all(call[1]["dedupe_domains"] is True for call in coordinator.search_many_calls),
+        "website:/offsite: should keep default domain dedupe",
     )
 
-    assert_true("stale_cache" not in (response.source or ""), "freshness_required should not return stale_cache source")
-    assert_true(len(response.results) == 0, "stale result should be skipped when freshness is required")
 
-
-async def test_all_queries_fail_returns_empty_response() -> None:
-    coordinator = make_coordinator(
-        searxng=CountingSearcher(raise_queries={"fail one", "fail two"}),
-        duckduckgo=CountingSearcher(raise_queries={"fail one", "fail two"}),
-        tavily=CountingSearcher(raise_queries={"fail one", "fail two"}),
-    )
-
-    response = await coordinator.search_many(
-        queries=["fail one", "fail two"],
-        allow_paid_fallback=False,
-    )
-
-    assert_true(response.source == "multi", f"all-fail response should keep source=multi, got {response.source}")
-    assert_true(len(response.results) == 0, "all failed queries should return empty results")
-
-
-class FakeFetcher:
-    def __init__(self, value: Any) -> None:
-        self.value = value
-        self.calls: List[str] = []
-
-    async def fetch(self, url: str) -> Any:
-        self.calls.append(url)
-        return self.value(url) if callable(self.value) else self.value
-
-
-async def test_fetch_top_pages_respects_limit() -> None:
-    fetcher = FakeFetcher(lambda url: f"# Page\n\n{url}\n" + ("x" * 1000))
-    tool = WebSearchTool(coordinator=object(), fetcher=fetcher)  # type: ignore[arg-type]
+async def test_deep_mode_reads_top_eight_unique_pages() -> None:
     response = SearchResponse(
-        query="fetch",
+        query="deep",
+        results=tuple(make_result("deep", index, domain="pages.example") for index in range(1, 13)),
+        source="multi:searxng",
+    )
+    coordinator = RecordingCoordinator(response)
+    fetcher = FakeFetcher(lambda url: f"# Page\n\n{url}")
+    tool = WebSearchTool(coordinator=coordinator, fetcher=fetcher)  # type: ignore[arg-type]
+
+    result = await tool.execute({"session_id": "deep"}, queries=["deep query"], mode="deep")
+
+    assert_true(len(fetcher.calls) == 8, "deep mode should read at most eight unique result URLs")
+    assert_true("Mode: deep" in result, "deep mode should be formatted")
+    assert_true("Page contents:" in result, "deep mode should include page contents")
+    assert_true("--- Page content for result #9 ---" not in result, "ninth result should not be read")
+
+
+async def test_deep_mode_output_shows_internal_page_fetch() -> None:
+    response = SearchResponse(
+        query="deep",
         results=(
-            make_result("fetch", 1, domain="pages.example"),
-            make_result("fetch", 2, domain="pages.example"),
-            make_result("fetch", 3, domain="pages.example"),
+            SearchResult(
+                title="Python docs",
+                url="https://docs.python.org/3/library/asyncio-task.html",
+                snippet="asyncio tasks",
+            ),
         ),
+        source="multi:searxng",
+    )
+    coordinator = RecordingCoordinator(response)
+    fetcher = FakeFetcher("# asyncio TaskGroup\n\nTaskGroup runs related tasks.")
+    tool = WebSearchTool(coordinator=coordinator, fetcher=fetcher)  # type: ignore[arg-type]
+
+    result = await tool.execute({"session_id": "deep-fetch-signal"}, queries=["asyncio TaskGroup"], mode="deep")
+
+    assert_true(
+        fetcher.calls == ["https://docs.python.org/3/library/asyncio-task.html"],
+        "deep mode should call the injected web fetch coordinator for page extraction",
+    )
+    assert_true("Page contents:" in result, "deep output should expose that page contents were read")
+    assert_true("--- Page content for result #1 ---" in result, "deep output should include fetched page block")
+    assert_true("tool_name: web_search" in result, "page content should be windowed under web_search")
+    assert_true(
+        "Deep search was requested but no page content was read." not in result,
+        "successful page fetch should not include no-content note",
     )
 
-    contents = await tool._fetch_top_pages(
-        response,
-        session_id="session-fetch-limit",
-        limit=2,
-        max_chars_per_page=500,
-    )
 
-    assert_true(len(fetcher.calls) == 2, "fetch_top_pages should only fetch the requested top pages")
-    assert_true(len(contents) == 2, "fetch_top_pages should return two fetched page bodies")
-
-
-async def test_fetch_top_pages_binds_result_index() -> None:
+async def test_read_page_contents_deduplicates_normalized_urls() -> None:
     fetcher = FakeFetcher(lambda url: f"# Page\n\n{url}")
     tool = WebSearchTool(coordinator=object(), fetcher=fetcher)  # type: ignore[arg-type]
     response = SearchResponse(
         query="fetch",
         results=(
-            make_result("fetch", 1, domain="pages.example"),
-            make_result("fetch", 2, domain="pages.example"),
+            SearchResult(title="Page one", url="https://www.example.com/Page/?utm_source=x#section", snippet="one"),
+            SearchResult(title="Page two", url="https://example.com/Page", snippet="two"),
+            SearchResult(title="Page three", url="https://example.com/Other", snippet="three"),
         ),
     )
 
-    contents = await tool._fetch_top_pages(
-        response,
-        session_id="session-result-index",
-        limit=2,
-        max_chars_per_page=500,
+    contents = await tool._read_page_contents(response, session_id="session-url-dedupe", limit=8)
+
+    assert_true(len(fetcher.calls) == 2, "normalized duplicate URLs should only be fetched once")
+    assert_true(len(contents) == 2, "normalized duplicate URLs should only produce one page content block")
+
+
+async def test_read_page_contents_concurrency_limit() -> None:
+    fetcher = FakeFetcher(lambda url: f"# Page\n\n{url}", delay=0.02)
+    tool = WebSearchTool(coordinator=object(), fetcher=fetcher)  # type: ignore[arg-type]
+    response = SearchResponse(
+        query="concurrency",
+        results=tuple(make_result("concurrency", index, domain="pages.example") for index in range(1, 9)),
     )
 
-    assert_true("--- Fetched page for result #1 ---" in contents[0], "first page should bind result index")
-    assert_true("--- Fetched page for result #2 ---" in contents[1], "second page should bind result index")
-    assert_true("Title:" in contents[0] and "URL:" in contents[0] and "Content:" in contents[0], "page output should include metadata")
+    contents = await tool._read_page_contents(response, session_id="session-concurrency", limit=8)
+
+    assert_true(len(contents) == 8, "all pages should be read")
+    assert_true(fetcher.max_active <= 5, "page content concurrency should not exceed five")
 
 
-async def test_fetch_top_pages_skips_non_text_result() -> None:
-    fetcher = FakeFetcher(object())
+async def test_read_page_contents_failure_does_not_block_others() -> None:
+    def content_for_url(url: str) -> str:
+        if url.endswith("/fail"):
+            raise RuntimeError("forced fetch failure")
+        return f"# Page\n\n{url}"
+
+    fetcher = FakeFetcher(content_for_url)
     tool = WebSearchTool(coordinator=object(), fetcher=fetcher)  # type: ignore[arg-type]
     response = SearchResponse(
         query="fetch",
-        results=(make_result("fetch", 1, domain="pages.example"),),
+        results=(
+            make_result("fetch", 1, domain="pages.example", path="/fail"),
+            make_result("fetch", 2, domain="pages.example", path="/ok"),
+        ),
     )
     notes: List[str] = []
 
-    contents = await tool._fetch_top_pages(
-        response,
-        session_id="session-non-str",
-        limit=1,
-        max_chars_per_page=500,
-        notes=notes,
-    )
+    contents = await tool._read_page_contents(response, session_id="session-failure", limit=8, notes=notes)
 
-    assert_true(contents == [], "non-string fetched content should be skipped")
-    assert_true(len(fetcher.calls) == 1, "fetcher should still have been called once")
+    assert_true(len(fetcher.calls) == 2, "one fetch failure should not stop later fetches")
+    assert_true(len(contents) == 1, "only successful page content should be returned")
+    assert_true("--- Page content for result #2 ---" in contents[0], "successful page should keep original result index")
     assert_true(
-        "Fetched page for result #1 was skipped because it returned non-text content." in notes,
-        "non-text fetch should add a concise note",
+        "Page content for result #1 failed and was skipped." in notes,
+        "fetch failure should add note",
     )
 
 
-async def test_fetch_top_pages_timeout_adds_note() -> None:
-    class SlowFetcher:
-        async def fetch(self, url: str) -> str:
-            await asyncio.sleep(0.05)
-            return "too late"
+async def test_read_page_contents_skips_none_and_non_text() -> None:
+    for content, expected_note in (
+        (None, "Page content for result #1 returned no content and was skipped."),
+        (object(), "Page content for result #1 was skipped because it returned non-text content."),
+    ):
+        fetcher = FakeFetcher(content)
+        tool = WebSearchTool(coordinator=object(), fetcher=fetcher)  # type: ignore[arg-type]
+        response = SearchResponse(query="fetch", results=(make_result("fetch", 1, domain="pages.example"),))
+        notes: List[str] = []
 
-    tool = WebSearchTool(coordinator=object(), fetcher=SlowFetcher())  # type: ignore[arg-type]
-    response = SearchResponse(
-        query="fetch",
-        results=(make_result("fetch", 1, domain="pages.example"),),
-    )
-    notes: List[str] = []
+        contents = await tool._read_page_contents(response, session_id="session-skip", limit=8, notes=notes)
 
-    contents = await tool._fetch_top_pages(
-        response,
-        session_id="session-timeout",
-        limit=1,
-        max_chars_per_page=500,
-        timeout_seconds=0.01,
-        notes=notes,
-    )
+        assert_true(contents == [], "invalid page content should be skipped")
+        assert_true(expected_note in notes, "invalid page content should add note")
+
+
+async def test_read_page_contents_timeout_adds_note() -> None:
+    original_timeout = WEB_SEARCH_TOOL_MODULE.PAGE_CONTENT_TIMEOUT_SECONDS
+    WEB_SEARCH_TOOL_MODULE.PAGE_CONTENT_TIMEOUT_SECONDS = 0.01
+
+    try:
+        fetcher = FakeFetcher("too late", delay=0.05)
+        tool = WebSearchTool(coordinator=object(), fetcher=fetcher)  # type: ignore[arg-type]
+        response = SearchResponse(query="fetch", results=(make_result("fetch", 1, domain="pages.example"),))
+        notes: List[str] = []
+
+        contents = await tool._read_page_contents(response, session_id="session-timeout", limit=8, notes=notes)
+    finally:
+        WEB_SEARCH_TOOL_MODULE.PAGE_CONTENT_TIMEOUT_SECONDS = original_timeout
 
     assert_true(contents == [], "timed out page should be skipped")
     assert_true(
-        "Fetched page for result #1 was skipped because it timed out." in notes,
-        "timeout should add a concise note",
+        "Page content for result #1 was skipped because it timed out." in notes,
+        "timeout should add note",
     )
 
 
-async def test_fetch_top_pages_respects_max_chars() -> None:
-    fetcher = FakeFetcher("x" * 1000 + "TAIL")
+async def test_read_page_contents_cache_window_failure_skips_only_current_page() -> None:
+    fetcher = FakeFetcher(lambda url: f"# Page\n\n{url}")
     tool = WebSearchTool(coordinator=object(), fetcher=fetcher)  # type: ignore[arg-type]
     response = SearchResponse(
         query="fetch",
-        results=(make_result("fetch", 1, domain="pages.example"),),
+        results=(
+            make_result("fetch", 1, domain="pages.example", path="/fail"),
+            make_result("fetch", 2, domain="pages.example", path="/ok"),
+        ),
+    )
+    notes: List[str] = []
+
+    original_cache_and_window = WEB_SEARCH_TOOL_MODULE.cache_and_window
+
+    def failing_once_cache_and_window(**kwargs: Any) -> Any:
+        if kwargs["source"].endswith("/fail"):
+            raise RuntimeError("forced cache failure")
+        return original_cache_and_window(**kwargs)
+
+    WEB_SEARCH_TOOL_MODULE.cache_and_window = failing_once_cache_and_window
+    try:
+        contents = await tool._read_page_contents(response, session_id="session-cache-failure", limit=8, notes=notes)
+    finally:
+        WEB_SEARCH_TOOL_MODULE.cache_and_window = original_cache_and_window
+
+    assert_true(len(fetcher.calls) == 2, "cache failure on one page should not stop later fetches")
+    assert_true(len(contents) == 1, "only the successful page should be returned")
+    assert_true("--- Page content for result #2 ---" in contents[0], "successful page should keep original result index")
+    assert_true(
+        "Page content for result #1 failed during content processing and was skipped." in notes,
+        "cache/window failure should add note",
     )
 
-    contents = await tool._fetch_top_pages(
-        response,
-        session_id="session-max-chars",
-        limit=1,
-        max_chars_per_page=500,
+
+async def test_read_page_contents_output_binds_result_index() -> None:
+    fetcher = FakeFetcher(lambda url: f"# Page\n\n{url}")
+    tool = WebSearchTool(coordinator=object(), fetcher=fetcher)  # type: ignore[arg-type]
+    response = SearchResponse(
+        query="fetch",
+        results=(
+            SearchResult(title="Empty URL", url="", snippet="skip"),
+            make_result("fetch", 2, domain="pages.example", path="/second"),
+        ),
     )
 
-    assert_true(len(contents) == 1, "one page should be fetched")
-    assert_true("TAIL" not in contents[0], "fetched page content should respect max_chars_per_page")
+    contents = await tool._read_page_contents(response, session_id="session-result-index", limit=8)
+
+    assert_true(len(contents) == 1, "one valid page should be returned")
+    assert_true("--- Page content for result #2 ---" in contents[0], "page output should bind original result index")
+    assert_true("Title:" in contents[0] and "URL:" in contents[0] and "Content:" in contents[0], "page output should include metadata")
 
 
-async def test_tool_execute_modes() -> None:
-    class FakeCoordinator:
-        async def search(self, query: str, **kwargs: Any) -> SearchResponse:
-            return SearchResponse(
-                query=query,
-                results=(make_result(query, 1, domain="precise.example"),),
-                source="searxng",
-            )
-
-        async def search_many(self, queries: List[str], **kwargs: Any) -> SearchResponse:
-            return SearchResponse(
-                query=" | ".join(queries),
-                results=tuple(make_result(query, 1, domain="broad.example") for query in queries),
-                source="multi:searxng",
-            )
-
-    tool = WebSearchTool(
-        coordinator=FakeCoordinator(),  # type: ignore[arg-type]
-        fetcher=FakeFetcher(lambda url: "# fetched\n\nbody"),
+async def test_tool_deep_without_content_adds_note() -> None:
+    coordinator = RecordingCoordinator(
+        SearchResponse(query="deep", results=(make_result("deep", 1, domain="empty-fetch.example"),), source="multi:searxng")
     )
+    tool = WebSearchTool(coordinator=coordinator, fetcher=FakeFetcher(None))  # type: ignore[arg-type]
 
-    precise = await tool.execute({"session_id": "mode-precise"}, query="one")
-    broad = await tool.execute({"session_id": "mode-broad"}, queries=["one", "two"])
-    deep = await tool.execute(
-        {"session_id": "mode-deep"},
-        queries=["one", "two"],
-        fetch_top_pages=True,
-        fetch_top_pages_limit=1,
-        fetched_page_max_chars=500,
+    result = await tool.execute({"session_id": "fetch-empty-note"}, queries=["needs fetch"], mode="deep")
+
+    assert_true(
+        "Deep search was requested but no page content was read." in result,
+        "empty deep page content should add note",
     )
-
-    assert_true("Mode: precise" in precise, "single query should format as precise mode")
-    assert_true("Mode: broad" in broad, "multi-query should format as broad mode")
-    assert_true("Mode: deep" in deep, "fetch_top_pages should format as deep mode")
-    assert_true("Fetched top pages:" in deep, "deep mode should include fetched top pages")
+    assert_true("Page contents:" not in result, "empty deep page content should not add section")
 
 
 def test_format_response_contains_evidence_pack_sections() -> None:
@@ -927,8 +710,8 @@ def test_format_response_contains_evidence_pack_sections() -> None:
         mode="deep",
         queries=["evidence"],
         notes=["A concise note."],
-        extra_contents=[
-            "--- Fetched page for result #1 ---\nTitle: Evidence title\nURL: https://example.com/evidence\nContent:\nbody"
+        page_contents=[
+            "--- Page content for result #1 ---\nTitle: Evidence title\nURL: https://example.com/evidence\nContent:\nbody"
         ],
     )
 
@@ -944,7 +727,8 @@ def test_format_response_contains_evidence_pack_sections() -> None:
     assert_true("URL: https://example.com/evidence" in formatted, "result URL should be included")
     assert_true("Snippet: Evidence snippet" in formatted, "result snippet should be included")
     assert_true("Query-level images:" in formatted, "query-level images should be included")
-    assert_true("Fetched top pages:" in formatted, "fetched pages section should be included")
+    assert_true("Page contents:" in formatted, "page contents section should be included")
+    assert_true("Fetched top pages:" not in formatted, "old fetched-page section name should be removed")
 
 
 def test_format_response_deduplicates_notes() -> None:
@@ -956,7 +740,7 @@ def test_format_response_deduplicates_notes() -> None:
 
     formatted = WEB_SEARCH_TOOL_MODULE._format_response(
         response,
-        mode="precise",
+        mode="normal",
         queries=["notes"],
         notes=[
             "Some results came from stale cache and may be outdated.",
@@ -970,34 +754,35 @@ def test_format_response_deduplicates_notes() -> None:
     )
 
 
-def test_tool_schema_includes_optimization_params() -> None:
+def test_tool_schema_only_exposes_final_params() -> None:
     schema = WEB_SEARCH_TOOL_MODULE._TOOL_SCHEMA
     properties = schema["properties"]
 
-    for name in (
-        "include_domains",
-        "exclude_domains",
-        "time_range",
-        "fetched_page_max_chars",
-        "fetch_page_timeout_seconds",
-    ):
-        assert_true(name in properties, f"{name} should be exposed in tool schema")
-
-    assert_true(
-        properties["time_range"]["enum"] == ["day", "week", "month", "year"],
-        "time_range should expose the supported freshness windows",
-    )
+    assert_true(set(properties) == {"queries", "mode", "with_images"}, "schema should only expose final params")
+    assert_true(schema["required"] == ["queries"], "queries should be required")
+    assert_true(properties["queries"]["minItems"] == 1, "queries minItems should be one")
+    assert_true(properties["queries"]["maxItems"] == 4, "queries maxItems should be four")
+    assert_true(properties["mode"]["enum"] == ["normal", "deep"], "mode should only support normal/deep")
 
 
-def test_tool_description_contains_query_generation_guidance() -> None:
+def test_tool_description_contains_new_guidance() -> None:
     description = WEB_SEARCH_TOOL_MODULE._TOOL_DESCRIPTION
 
-    assert_true("Query generation guidance:" in description, "description should guide query generation")
-    assert_true("Generate 2-4 concise focused search-engine-style queries." in description, "description should cap query count")
-    assert_true("exact error message keywords" in description, "description should include debugging query pattern")
+    assert_true("concurrent multi-query search" in description, "description should describe concurrent multi-query search")
+    assert_true("normal" in description and "deep" in description, "description should describe both modes")
+    assert_true(
+        "prefer one web_search call with 2-4 queries" in description,
+        "description should discourage multiple web_search calls for one research task",
+    )
+    assert_true("Tavily paid fallback is disabled" in description, "description should state cost policy")
+    assert_true("query" not in WEB_SEARCH_TOOL_MODULE._TOOL_SCHEMA["properties"], "old query param should be removed")
 
 
-def test_format_response_truncates_long_output() -> None:
+def test_removed_old_page_reader_name() -> None:
+    assert_true(not hasattr(WebSearchTool, "_fetch_top_pages"), "old _fetch_top_pages name should be removed")
+
+
+def test_format_response_does_not_truncate_long_output() -> None:
     response = SearchResponse(
         query="long",
         results=(
@@ -1012,137 +797,171 @@ def test_format_response_truncates_long_output() -> None:
 
     formatted = WEB_SEARCH_TOOL_MODULE._format_response(
         response,
-        mode="precise",
+        mode="normal",
         queries=["long"],
     )
 
     assert_true(
-        len(formatted) <= settings.TOOL_RESULT_MAX_CHARS,
-        "formatted output should be capped by TOOL_RESULT_MAX_CHARS",
+        len(formatted) > settings.TOOL_RESULT_MAX_CHARS,
+        "raw formatted output should remain complete before tool-content windowing",
     )
-    assert_true("...(Search result truncated due to length)" in formatted, "truncation marker should be included")
+    assert_true("...(Search result truncated due to length)" not in formatted, "raw formatting should not use bare truncation")
 
 
-def test_add_note_strips_whitespace() -> None:
+async def test_tool_long_output_uses_tool_content_window() -> None:
+    response = SearchResponse(
+        query="long",
+        results=tuple(
+            SearchResult(
+                title=f"Long result {index}",
+                url=f"https://long.example/{index}",
+                snippet="x" * 800,
+            )
+            for index in range(1, 9)
+        ),
+        source="multi:searxng",
+    )
+    coordinator = RecordingCoordinator(response)
+    tool = WebSearchTool(coordinator=coordinator, fetcher=FakeFetcher("PAGE_BODY_SENTINEL " + ("body " * 900)))  # type: ignore[arg-type]
+
+    result = await tool.execute({"session_id": "long-window"}, queries=["long"], mode="deep")
+
+    assert_true("[ToolContent Metadata]" in result, "long web_search output should return ToolContent Metadata")
+    assert_true("tool_name: web_search" in result, "windowed output should be readable through tool_content_read")
+    assert_true("content_cached: true" in result, "long web_search output should be cached")
+    assert_true("truncated: true" in result, "long web_search output should expose continuation state")
+    assert_true("next_offset:" in result, "long web_search output should expose next_offset")
+    assert_true("...(Search result truncated due to length)" not in result, "tool output should not use bare truncation")
+    assert_true("Page contents:" in result, "deep page contents should appear in the first returned window")
+    assert_true("PAGE_BODY_SENTINEL" in result, "deep fetched page content should be visible to the model")
+    assert_true(
+        "content_id: web_search:" in result,
+        "first window should include a content_id for continuing the full deep search result",
+    )
+    assert_true(
+        result.count("content_id: web_search:") >= 2,
+        "first window should also include the fetched page content_id for tool_content_read",
+    )
+    assert_true(
+        "Results:" not in result or result.index("Page contents:") < result.index("Results:"),
+        "deep page contents should be prioritized before search result listings when both are in the first window",
+    )
+
+
+def test_add_note() -> None:
     notes: List[str] = []
     add_note(notes, "  hello  ")
-    assert_true(notes == ["hello"], f"add_note should strip whitespace, got {notes}")
-
-
-def test_add_note_skips_empty() -> None:
-    notes: List[str] = []
+    add_note(notes, "hello")
+    add_note(notes, "hello   world")
+    add_note(notes, "hello world")
     add_note(notes, "")
-    add_note(notes, "   ")
-    assert_true(notes == [], "add_note should skip empty notes")
+    add_note(None, "ignored")
+
+    assert_true(notes == ["hello", "hello world"], f"add_note should normalize, dedupe, and skip empty notes, got {notes}")
 
 
-def test_add_note_skips_none_list() -> None:
-    add_note(None, "test")
-    assert_true(True, "add_note should not raise when notes is None")
-
-
-def test_has_response_content_with_answer() -> None:
-    response = SearchResponse(query="q", answer="yes")
-    assert_true(has_response_content(response) is True, "answer should count as content")
-
-
-def test_has_response_content_with_results() -> None:
-    response = SearchResponse(
-        query="q",
-        results=(SearchResult(title="t", url="https://example.com", snippet="s"),),
-    )
-    assert_true(has_response_content(response) is True, "results should count as content")
-
-
-def test_has_response_content_with_images() -> None:
-    response = SearchResponse(query="q", images=(ImageResult(url="https://img.example.com/a.png"),))
-    assert_true(has_response_content(response) is True, "images should count as content")
-
-
-def test_has_response_content_empty() -> None:
-    response = SearchResponse(query="q")
-    assert_true(has_response_content(response) is False, "empty response should have no content")
-
-
-def test_has_site_operator_matches_site() -> None:
-    assert_true(has_site_operator(["site:docs.python.org asyncio"]) is True, "site: should match")
-
-
-def test_has_site_operator_no_false_positive() -> None:
-    assert_true(has_site_operator(["website:docs.python.org"]) is False, "website: should not match site:")
-    assert_true(has_site_operator(["offsite:docs.python.org"]) is False, "offsite: should not match site:")
-    assert_true(has_site_operator(["awesome site: great"]) is True, "site: as standalone word should match")
-    assert_true(has_site_operator(["no operator here"]) is False, "no site: operator should not match")
-
-
-def test_normalize_url_preserves_path_case_extended() -> None:
+def test_add_note_dedupes_pre_existing_unnormalized() -> None:
+    notes: List[str] = ["Query   truncated to 400 characters."]
+    add_note(notes, "Query truncated to 400 characters.")
     assert_true(
-        _normalize_url_for_dedup("https://example.com/API/v2/Users") == "https://example.com/API/v2/Users",
-        "path case should be preserved exactly",
+        len(notes) == 1,
+        f"add_note should dedupe against pre-existing unnormalized note, got {notes}",
     )
+
+
+def test_deduplicate_images_removes_tracking_params() -> None:
+    images = (
+        ImageResult(url="https://img.example.com/photo.jpg"),
+        ImageResult(url="https://img.example.com/photo.jpg?utm_source=x&fbclid=1"),
+        ImageResult(url="https://img.example.com/photo.jpg#fragment"),
+        ImageResult(url="https://img.example.com/other.png"),
+    )
+    result = deduplicate_images(images)
+    assert_true(
+        len(result) == 2,
+        f"deduplicate_images should remove tracking-param and fragment duplicates, got {len(result)}",
+    )
+    assert_true(
+        result[0].url == "https://img.example.com/photo.jpg",
+        f"first image should be the base url, got {result[0].url}",
+    )
+    assert_true(
+        result[1].url == "https://img.example.com/other.png",
+        f"second image should be the distinct url, got {result[1].url}",
+    )
+
+
+def test_normalize_url_preserves_path_case_and_nondefault_port() -> None:
+    assert_true(
+        normalize_url_for_dedup("https://example.com/API/Endpoint") == "https://example.com/API/Endpoint",
+        "path case should be preserved",
+    )
+    assert_true(
+        normalize_url_for_dedup("https://example.com:8443/Path") == "https://example.com:8443/Path",
+        "non-default port should be kept",
+    )
+    assert_true(
+        normalize_url_for_dedup("https://example.com:443/Path") == "https://example.com/Path",
+        "default port should be removed",
+    )
+
+
+def test_has_response_content() -> None:
+    assert_true(has_response_content(SearchResponse(query="q", answer="yes")) is True, "answer should count")
+    assert_true(
+        has_response_content(SearchResponse(query="q", results=(make_result("q", 1),))) is True,
+        "results should count",
+    )
+    assert_true(
+        has_response_content(SearchResponse(query="q", images=(ImageResult(url="https://img.example.com/a.png"),))) is True,
+        "images should count",
+    )
+    assert_true(has_response_content(SearchResponse(query="q")) is False, "empty response should not count")
 
 
 async def main() -> int:
     sync_tests = [
-        test_normalize_params,
         test_normalize_queries,
-        test_normalize_url_preserves_path_case,
-        test_normalize_url_removes_tracking_params,
-        test_normalize_url_sorts_remaining_query_params,
-        test_normalize_url_removes_default_port,
-        test_normalize_url_keeps_non_default_port,
-        test_normalize_queries_removes_empty_values,
-        test_normalize_queries_deduplicates_case_insensitively,
-        test_normalize_queries_limits_count,
-        test_normalize_queries_collapses_whitespace,
-        test_truncate_query_adds_note,
-        test_time_range_year_appends_current_year,
-        test_time_range_day_does_not_append_year,
-        test_query_with_existing_year_does_not_append_year,
-        test_query_with_yesterday_does_not_append_year,
+        test_normalize_queries_notes,
+        test_normalize_url_for_dedup,
+        test_has_site_operator,
         test_merge_deduplicates_urls_domains_and_images,
         test_merge_reports_deduplication_notes,
         test_merge_can_disable_domain_deduplication,
-        test_include_domains_filters_by_hostname,
-        test_exclude_domains_filters_by_hostname,
-        test_merge_include_domains_adds_note,
-        test_merge_exclude_domains_adds_note,
         test_format_response_contains_evidence_pack_sections,
         test_format_response_deduplicates_notes,
-        test_tool_schema_includes_optimization_params,
-        test_tool_description_contains_query_generation_guidance,
-        test_format_response_truncates_long_output,
-        test_add_note_strips_whitespace,
-        test_add_note_skips_empty,
-        test_add_note_skips_none_list,
-        test_has_response_content_with_answer,
-        test_has_response_content_with_results,
-        test_has_response_content_with_images,
-        test_has_response_content_empty,
-        test_has_site_operator_matches_site,
-        test_has_site_operator_no_false_positive,
-        test_normalize_url_preserves_path_case_extended,
+        test_tool_schema_only_exposes_final_params,
+        test_tool_description_contains_new_guidance,
+        test_removed_old_page_reader_name,
+        test_format_response_does_not_truncate_long_output,
+        test_add_note,
+        test_add_note_dedupes_pre_existing_unnormalized,
+        test_deduplicate_images_removes_tracking_params,
+        test_normalize_url_preserves_path_case_and_nondefault_port,
+        test_has_response_content,
     ]
 
     async_tests = [
-        test_single_query_search_returns_results,
         test_search_many_returns_merged_results,
         test_one_query_failure_does_not_break_others,
-        test_site_operator_disables_domain_dedupe_when_not_explicit,
-        test_site_operator_does_not_match_website_or_offsite,
-        test_explicit_dedupe_domains_true_is_respected,
-        test_search_many_does_not_call_tavily_by_default,
-        test_search_many_calls_tavily_at_most_once_when_allowed,
-        test_empty_tavily_paid_fallback_does_not_add_note,
-        test_tavily_paid_fallback_does_not_pollute_query_cache,
-        test_freshness_required_skips_stale_cache,
-        test_all_queries_fail_returns_empty_response,
-        test_fetch_top_pages_respects_limit,
-        test_fetch_top_pages_binds_result_index,
-        test_fetch_top_pages_skips_non_text_result,
-        test_fetch_top_pages_timeout_adds_note,
-        test_fetch_top_pages_respects_max_chars,
-        test_tool_execute_modes,
+        test_search_many_with_images,
+        test_search_many_never_calls_tavily,
+        test_search_many_passes_allow_paid_fallback_false,
+        test_tool_normal_mode_uses_search_many_for_one_query,
+        test_tool_requires_queries,
+        test_tool_site_operator_disables_domain_dedupe,
+        test_tool_website_and_offsite_do_not_disable_domain_dedupe,
+        test_deep_mode_reads_top_eight_unique_pages,
+        test_deep_mode_output_shows_internal_page_fetch,
+        test_read_page_contents_deduplicates_normalized_urls,
+        test_read_page_contents_concurrency_limit,
+        test_read_page_contents_failure_does_not_block_others,
+        test_read_page_contents_skips_none_and_non_text,
+        test_read_page_contents_timeout_adds_note,
+        test_read_page_contents_cache_window_failure_skips_only_current_page,
+        test_read_page_contents_output_binds_result_index,
+        test_tool_deep_without_content_adds_note,
+        test_tool_long_output_uses_tool_content_window,
     ]
 
     passed = 0

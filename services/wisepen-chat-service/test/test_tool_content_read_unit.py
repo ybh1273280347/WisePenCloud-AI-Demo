@@ -67,7 +67,7 @@ async def test_missing_session_id(tool: ToolContentReadTool) -> None:
         "[Tool Error] Missing session_id" in result,
         "缺失 session_id 时应返回 Tool Error",
     )
-    print("✓ missing session_id")
+    print("[OK] missing session_id")
 
 
 async def test_missing_content_id(tool: ToolContentReadTool) -> None:
@@ -76,7 +76,7 @@ async def test_missing_content_id(tool: ToolContentReadTool) -> None:
         "[Tool Error] Missing required content_id parameter" in result,
         "缺失 content_id 时应返回 Tool Error",
     )
-    print("✓ missing content_id")
+    print("[OK] missing content_id")
 
 
 async def test_read_cached_content(tool: ToolContentReadTool) -> None:
@@ -133,9 +133,9 @@ async def test_read_cached_content(tool: ToolContentReadTool) -> None:
         "不同 session_id 不应能读取缓存内容",
     )
 
-    print("✓ read cached content")
-    print("✓ read next window")
-    print("✓ session isolation")
+    print("[OK] read cached content")
+    print("[OK] read next window")
+    print("[OK] session isolation")
 
 
 async def test_read_tool_content_window_default_limit() -> None:
@@ -160,7 +160,7 @@ async def test_read_tool_content_window_default_limit() -> None:
     assert_true("[ToolContent Metadata]" in result, "缺省 limit 返回应包含 ToolContent Metadata")
     assert_true("content_cached: true" in result, "缺省 limit 仍应来自缓存")
 
-    print("✓ read_tool_content_window default limit")
+    print("[OK] read_tool_content_window default limit")
 
 
 async def test_read_tool_content_window_empty_content_id() -> None:
@@ -184,7 +184,7 @@ async def test_read_tool_content_window_empty_content_id() -> None:
         "空白 content_id 应返回 Tool Error",
     )
 
-    print("✓ read_tool_content_window empty content_id")
+    print("[OK] read_tool_content_window empty content_id")
 
 
 async def test_read_tool_content_window_session_isolation() -> None:
@@ -209,7 +209,47 @@ async def test_read_tool_content_window_session_isolation() -> None:
         "不同 session_id 通过 read_tool_content_window 不应能读取缓存内容",
     )
 
-    print("✓ read_tool_content_window session isolation")
+    print("[OK] read_tool_content_window session isolation")
+
+
+async def test_legacy_object_api() -> None:
+    content_id = tool_content_store.put(
+        session_id=SESSION_ID,
+        tool_name="legacy_test",
+        source="memory://legacy-api",
+        text="hello legacy world",
+    )
+    assert_true(content_id is not None, "旧 put API 应正常工作")
+
+    item = tool_content_store.get(content_id=content_id, session_id=SESSION_ID)
+    assert_true(item is not None, "旧 get API 应正常工作")
+    assert_true(item.session_id == SESSION_ID, "兼容 property session_id 应正常")
+    assert_true(item.tool_name == "legacy_test", "兼容 property tool_name 应正常")
+
+    window = tool_content_store.read_window(
+        content_id=content_id,
+        session_id=SESSION_ID,
+        offset=0,
+        limit=100,
+    )
+    assert_true(window is not None, "旧 read_window API 应正常工作")
+    assert_true(window.tool_name == "legacy_test", "兼容 property tool_name 应正常")
+    assert_true(window.content_cached is True, "兼容 property content_cached 应正常")
+
+    print("[OK] legacy object API (put/get/read_window)")
+    print("[OK] legacy properties (session_id, tool_name, content_cached)")
+
+
+async def test_read_tool_content_window_non_string_input() -> None:
+    result = read_tool_content_window(
+        session_id=SESSION_ID,
+        content_id=None,  # type: ignore
+    )
+    assert_true(
+        "[Tool Error] Missing required content_id parameter" in result,
+        "非字符串 content_id 应返回 Tool Error",
+    )
+    print("[OK] read_tool_content_window non-string input")
 
 
 async def main() -> int:
@@ -224,14 +264,16 @@ async def main() -> int:
         await test_read_tool_content_window_default_limit()
         await test_read_tool_content_window_empty_content_id()
         await test_read_tool_content_window_session_isolation()
+        await test_legacy_object_api()
+        await test_read_tool_content_window_non_string_input()
     except AssertionError as e:
-        print(f"\n✗ FAIL: {e}")
+        print(f"\nFAIL: {e}")
         return 1
     except Exception as e:
-        print(f"\n✗ ERROR: {e}")
+        print(f"\nERROR: {e}")
         return 1
 
-    print("\n✓ PASS all unit tests")
+    print("\n[OK] PASS all unit tests")
     return 0
 
 

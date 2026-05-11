@@ -1,11 +1,12 @@
 from pathlib import Path
-from typing import Any
+
+from chat.application.document_parse.ocr.processor import OcrProcessor
 
 
 class OcrImageAdapter:
     """本地图片 OCR 适配器。"""
 
-    def __init__(self, *, local_ocr_processor: Any):
+    def __init__(self, *, local_ocr_processor: OcrProcessor):
         self.local_ocr_processor = local_ocr_processor
 
     async def extract_text(self, image_path: Path) -> str:
