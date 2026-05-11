@@ -1,9 +1,11 @@
 from typing import Any, Dict, Optional
 
+from chat.application.document_parse import DocumentParseService
+from chat.application.document_parse.file_resolver import LocalDocumentFileResolver
 from chat.application.tool_content_store import cache_and_format
 from chat.core.config.app_settings import settings
 from chat.domain.interfaces.tool import BaseTool
-from common.logger import log_fail
+from common.logger import log_fail, log_ok
 
 
 _TOOL_DESCRIPTION = (
@@ -27,7 +29,7 @@ _TOOL_SCHEMA = {
 
 
 class DocumentParseTool(BaseTool):
-    def __init__(self, *, parse_service: Any, file_resolver: Any):
+    def __init__(self, *, parse_service: DocumentParseService, file_resolver: LocalDocumentFileResolver):
         self.parse_service = parse_service
         self.file_resolver = file_resolver
 
@@ -43,7 +45,7 @@ class DocumentParseTool(BaseTool):
     def parameters_schema(self) -> Dict[str, Any]:
         return _TOOL_SCHEMA
 
-    async def execute(self, context: Dict[str, Any], **kwargs: Any) -> str:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> str:
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
@@ -60,7 +62,7 @@ class DocumentParseTool(BaseTool):
         except RuntimeError as e:
             return f"[Tool Error] {e}"
         except Exception as e:
-            log_fail("文档解析工具", e, session_id=session_id, file_ref=file_ref)
+            log_fail("文档解析", e, session_id=session_id, file_ref=file_ref)
             return "[Tool Error] Unexpected error while parsing document content."
 
         metadata: Dict[str, Any] = {
@@ -72,6 +74,19 @@ class DocumentParseTool(BaseTool):
             "table_count": len(result.tables),
             "warnings": result.warnings,
         }
+
+        log_ok(
+            "文档解析",
+            session_id=session_id,
+            file_ref=file_ref,
+            resolved_path=str(resolved.local_path),
+            parser=metadata.get("parser"),
+            selected_parser=metadata.get("selected_parser"),
+            file_type=result.file_type,
+            page_count=len(result.pages),
+            table_count=len(result.tables),
+            length=len(result.text),
+        )
 
         return cache_and_format(
             session_id=session_id,

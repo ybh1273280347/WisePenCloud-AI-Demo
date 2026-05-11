@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Any
 
 
 _PAGE_TYPE_TEXT = "text"
@@ -42,7 +41,7 @@ class PageClassifier:
 
         return _PAGE_TYPE_EMPTY
 
-    def _has_large_image_area(self, page: Any) -> bool:
+    def _has_large_image_area(self, page) -> bool:
         page_area = float(page.rect.width * page.rect.height)
         if page_area <= 0:
             return False

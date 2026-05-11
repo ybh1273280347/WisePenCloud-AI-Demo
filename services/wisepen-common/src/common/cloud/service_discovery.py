@@ -40,7 +40,7 @@ class ServiceDiscovery:
     ) -> None:
         # 懒加载 Nacos 客户端
         self._naming_provider = naming_client_provider
-        self._naming: NacosNamingService | None = None
+        self._naming: Optional[NacosNamingService] = None
         self._naming_lock = asyncio.Lock()
 
         # 服务组名
@@ -153,9 +153,9 @@ class ServiceDiscovery:
                         )
                     )
                     self._subscribed.add(service_name)
-                    log_event("Nacos subscribe", service=service_name, group=self._group)
+                    log_event("Nacos 订阅注册", service=service_name, group=self._group)
                 except Exception as e:
-                    log_fail("Nacos subscribe", e, service=service_name, group=self._group)
+                    log_fail("Nacos 订阅", e, service=service_name, group=self._group)
 
     async def _refresh(self, service_name: str) -> None:
         naming = await self._get_naming()

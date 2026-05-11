@@ -60,13 +60,9 @@ class ToolContentReadTool(BaseTool):
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
 
-        content_id = kwargs.get("content_id", "")
-        if not content_id:
-            return "[Tool Error] Missing required content_id parameter"
-
         return read_tool_content_window(
             session_id=session_id,
-            content_id=content_id,
+            content_id=kwargs["content_id"],
             offset=kwargs.get("offset", 0),
             limit=kwargs.get("limit"),
         )

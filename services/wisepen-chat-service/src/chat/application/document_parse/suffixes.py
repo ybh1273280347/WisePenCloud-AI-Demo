@@ -45,19 +45,6 @@ _UNSUPPORTED_GUIDANCE = {
     ".mov": ".mov video should be handled by the multimodal model, not document_parse.",
 }
 
-__all__ = [
-    "DOCUMENT_TYPE_PDF",
-    "DOCUMENT_TYPE_DOCX",
-    "DOCUMENT_TYPE_PPTX",
-    "DOCUMENT_TYPE_EPUB",
-    "DOCUMENT_TYPE_SPREADSHEET",
-    "PDF_SUFFIXES",
-    "OFFICE_SUFFIXES",
-    "EPUB_SUFFIXES",
-    "SPREADSHEET_SUFFIXES",
-    "detect_document_type_by_suffix",
-]
-
 
 def detect_document_type_by_suffix(path: Path) -> str:
     suffix = path.suffix.lower()

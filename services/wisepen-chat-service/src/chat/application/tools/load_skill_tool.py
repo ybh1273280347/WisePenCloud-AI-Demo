@@ -52,9 +52,7 @@ class LoadSkillTool(BaseTool):
         return True
 
     async def execute(self, context: Dict[str, Any], **kwargs) -> str:
-        skill_id = (kwargs.get("skill_id") or "").strip()
-        if not skill_id:
-            return "[Tool Error] Missing required argument: skill_id."
+        skill_id = kwargs["skill_id"]
 
         allowed = set(context.get("allowed_skill_ids") or [])
         if skill_id not in allowed:

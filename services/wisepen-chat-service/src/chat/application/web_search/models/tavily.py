@@ -21,7 +21,7 @@ def _map_tavily_result(item: Mapping[str, Any]) -> SearchResult:
     )
 
 
-def _map_images(items: Any) -> Tuple[ImageResult, ...]:
+def _map_images(items) -> Tuple[ImageResult, ...]:
     if not isinstance(items, Sequence) or isinstance(items, str):
         return ()
 
@@ -35,7 +35,7 @@ def _map_images(items: Any) -> Tuple[ImageResult, ...]:
     return deduplicate_images(images)
 
 
-def _map_image(item: Any) -> Optional[ImageResult]:
+def _map_image(item) -> Optional[ImageResult]:
     if isinstance(item, str):
         return ImageResult(url=item)
 

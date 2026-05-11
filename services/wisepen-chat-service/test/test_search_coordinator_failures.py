@@ -93,14 +93,14 @@ async def test_searxng_exception_then_duckduckgo_success() -> bool:
     response = await coordinator.search("Python asyncio gather", max_results=5)
 
     if response is None:
-        print("  ✗ FAIL: 返回 None")
+        print("  FAIL: 返回 None")
         return False
 
     if response.source != "duckduckgo":
-        print(f"  ✗ FAIL: source={response.source}，期望 duckduckgo")
+        print(f"  FAIL: source={response.source}，期望 duckduckgo")
         return False
 
-    print(f"  ✓ PASS: source={response.source}, results={len(response.results)}")
+    print(f"  PASS: source={response.source}, results={len(response.results)}")
     return True
 
 
@@ -116,14 +116,14 @@ async def test_searxng_duckduckgo_exception_then_tavily_success() -> bool:
     response = await coordinator.search("unique-test-query-error-001", max_results=5)
 
     if response is None:
-        print("  ✗ FAIL: 返回 None")
+        print("  FAIL: 返回 None")
         return False
 
     if response.source != "tavily":
-        print(f"  ✗ FAIL: source={response.source}，期望 tavily")
+        print(f"  FAIL: source={response.source}，期望 tavily")
         return False
 
-    print(f"  ✓ PASS: source={response.source}, results={len(response.results)}")
+    print(f"  PASS: source={response.source}, results={len(response.results)}")
     return True
 
 
@@ -139,14 +139,14 @@ async def test_empty_result_then_fallback_success() -> bool:
     response = await coordinator.search("empty result fallback test", max_results=5)
 
     if response is None:
-        print("  ✗ FAIL: 返回 None")
+        print("  FAIL: 返回 None")
         return False
 
     if response.source != "duckduckgo":
-        print(f"  ✗ FAIL: source={response.source}，期望 duckduckgo")
+        print(f"  FAIL: source={response.source}，期望 duckduckgo")
         return False
 
-    print(f"  ✓ PASS: source={response.source}, results={len(response.results)}")
+    print(f"  PASS: source={response.source}, results={len(response.results)}")
     return True
 
 
@@ -162,10 +162,10 @@ async def test_all_searchers_raise_returns_none() -> bool:
     response = await coordinator.search("all engines fail test", max_results=5)
 
     if response is not None:
-        print(f"  ✗ FAIL: 返回了结果 source={response.source}，期望 None")
+        print(f"  FAIL: 返回了结果 source={response.source}，期望 None")
         return False
 
-    print("  ✓ PASS: 全部失败时返回 None")
+    print("  PASS: 全部失败时返回 None")
     return True
 
 
@@ -185,7 +185,7 @@ async def test_errors_then_stale_cache_hit() -> bool:
 
     first = await seed_coordinator.search(query, max_results=5)
     if first is None or first.source != "searxng":
-        print(f"  ✗ FAIL: 种子查询失败 source={first.source if first else None}")
+        print(f"  FAIL: 种子查询失败 source={first.source if first else None}")
         return False
 
     await asyncio.sleep(1.1)
@@ -201,14 +201,14 @@ async def test_errors_then_stale_cache_hit() -> bool:
     response = await coordinator.search(query, max_results=5)
 
     if response is None:
-        print("  ✗ FAIL: 返回 None，期望 stale_cache")
+        print("  FAIL: 返回 None，期望 stale_cache")
         return False
 
     if response.source != "stale_cache":
-        print(f"  ✗ FAIL: source={response.source}，期望 stale_cache")
+        print(f"  FAIL: source={response.source}，期望 stale_cache")
         return False
 
-    print(f"  ✓ PASS: source=stale_cache, results={len(response.results)}")
+    print(f"  PASS: source=stale_cache, results={len(response.results)}")
     return True
 
 
@@ -229,7 +229,7 @@ async def main() -> int:
             passed = await test()
             results.append((test.__name__, passed))
         except Exception as e:
-            print(f"  ✗ EXCEPTION: {e}")
+            print(f"  EXCEPTION: {e}")
             results.append((test.__name__, False))
 
     print("\n" + "=" * 60)
@@ -240,7 +240,7 @@ async def main() -> int:
     total = len(results)
 
     for name, ok in results:
-        print(f"  {'✓' if ok else '✗'} {name}")
+        print(f"  {'PASS' if ok else 'FAIL'} {name}")
 
     print(f"\n通过: {passed}/{total}")
     return 0 if passed == total else 1

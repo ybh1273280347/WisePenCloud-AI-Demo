@@ -87,7 +87,7 @@ TEST_WEBSITES = [
     # ─────────────────────────────────────────────────────────────
     # 静态 HTML：测试 StaticFetcher + readability/markdownify
     # ─────────────────────────────────────────────────────────────
-    ("HTML-Example.com", "https://example.com/", True),
+    ("HTML-Python.org", "https://www.python.org/", True),
     ("HTML-Python 文档首页", "https://docs.python.org/3/", True),
     ("HTML-HTTPX 文档", "https://www.python-httpx.org/", True),
     ("HTML-MDN Web Docs", "https://developer.mozilla.org/en-US/", True),

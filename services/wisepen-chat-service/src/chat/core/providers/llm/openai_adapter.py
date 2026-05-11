@@ -41,7 +41,7 @@ class OpenAIAdapter(LLMProvider):
             model_name: str,
             temperature: float = 0.7,
             tools: Optional[List[Dict[str, Any]]] = None
-    ) -> Any:
+    ):
         formatted_msgs = self._convert_messages(messages)
 
         # 组装请求参数，忽略 None 值的 tools

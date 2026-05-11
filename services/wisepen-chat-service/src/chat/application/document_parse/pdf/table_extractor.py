@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any, List, Dict
 
-from chat.application.document_parse import ParsedTable
+from chat.application.document_parse.models import ParsedTable
 from common.logger import log_fail
 
 
@@ -30,7 +30,7 @@ class TableExtractor:
 
     def _extract_tables_with_flavor(
         self,
-        camelot: Any,
+        camelot,
         path: Path,
         *,
         page_index: int,
@@ -39,7 +39,7 @@ class TableExtractor:
         try:
             tables = camelot.read_pdf(str(path), pages=str(page_index + 1), flavor=flavor)
         except Exception as e:
-            log_fail("Camelot table extraction", e, page=page_index + 1, path=str(path), flavor=flavor)
+            log_fail("Camelot 表格提取", e, page=page_index + 1, path=str(path), flavor=flavor)
             return []
 
         parsed_tables: List[ParsedTable] = []
@@ -60,7 +60,7 @@ class TableExtractor:
 
         return parsed_tables
 
-    def _rows_from_table(self, table: Any) -> List[List[str]]:
+    def _rows_from_table(self, table) -> List[List[str]]:
         df = getattr(table, "df", None)
         if df is None:
             return []
@@ -73,7 +73,7 @@ class TableExtractor:
 
         return rows
 
-    def _metadata_from_table(self, table: Any, *, flavor: str) -> Dict[str, Any]:
+    def _metadata_from_table(self, table, *, flavor: str) -> Dict[str, Any]:
         metadata: Dict[str, Any] = {"flavor": flavor}
         for attr in ("accuracy", "whitespace", "order", "page"):
             if hasattr(table, attr):

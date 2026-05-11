@@ -5,8 +5,12 @@ def add_note(notes: Optional[List[str]], note: str) -> None:
     if notes is None:
         return
 
-    note = note.strip()
-    if not note:
+    normalized = " ".join(note.strip().split())
+    if not normalized:
         return
 
-    notes.append(note)
+    existing = {" ".join(item.strip().split()) for item in notes}
+    if normalized in existing:
+        return
+
+    notes.append(normalized)

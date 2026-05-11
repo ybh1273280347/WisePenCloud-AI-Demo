@@ -6432,6 +6432,7 @@ dependencies = [
     { name = "ddgs" },
     { name = "dependency-injector" },
     { name = "dnspython" },
+    { name = "docling" },
     { name = "fastapi" },
     { name = "fastembed" },
     { name = "httpx" },
@@ -6443,6 +6444,8 @@ dependencies = [
     { name = "nacos-sdk-python" },
     { name = "openai" },
     { name = "openpyxl" },
+    { name = "paddleocr" },
+    { name = "paddlepaddle" },
     { name = "pandas" },
     { name = "pdfplumber" },
     { name = "playwright" },
@@ -6461,15 +6464,6 @@ dependencies = [
     { name = "zeroentropy" },
 ]
 
-[package.dev-dependencies]
-doc = [
-    { name = "docling" },
-]
-ocr = [
-    { name = "paddleocr" },
-    { name = "paddlepaddle" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "beanie" },
@@ -6479,6 +6473,7 @@ requires-dist = [
     { name = "ddgs" },
     { name = "dependency-injector" },
     { name = "dnspython" },
+    { name = "docling" },
     { name = "fastapi" },
     { name = "fastembed" },
     { name = "httpx" },
@@ -6490,6 +6485,8 @@ requires-dist = [
     { name = "nacos-sdk-python" },
     { name = "openai" },
     { name = "openpyxl" },
+    { name = "paddleocr" },
+    { name = "paddlepaddle", specifier = "==3.1.1" },
     { name = "pandas" },
     { name = "pdfplumber" },
     { name = "playwright" },
@@ -6506,13 +6503,6 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
     { name = "zeroentropy" },
-]
-
-[package.metadata.requires-dev]
-doc = [{ name = "docling" }]
-ocr = [
-    { name = "paddleocr" },
-    { name = "paddlepaddle", specifier = "==3.1.1" },
 ]
 
 [[package]]

@@ -4,23 +4,26 @@ import unittest
 import sys
 import types
 from types import SimpleNamespace
+from typing import List
 
 settings_module = types.ModuleType("chat.core.config.app_settings")
 settings_module.settings = SimpleNamespace(
     TOOL_CONTENT_STORE_TTL_SECONDS=60,
     TOOL_CONTENT_STORE_MAX_TOTAL_CHARS=10_000,
+    TOOL_CONTENT_STORE_MAX_ITEM_CHARS=10_000,
     TOOL_RESULT_MAX_CHARS=24,
 )
 sys.modules["chat.core.config.app_settings"] = settings_module
 
-from chat.application.tool_content_store import ToolContentStore, _create_content_chunks
+from chat.application.tool_content_store import ToolContentStore
+from chat.core.content_store.chunking import create_content_chunks
 
 
 class ToolContentStoreOffsetTest(unittest.TestCase):
     def test_chunks_use_stable_contiguous_offsets_for_repeated_text(self) -> None:
         text = "\n\n".join(["repeat paragraph line"] * 6)
 
-        chunks = _create_content_chunks(text, chunk_size=24)
+        chunks = create_content_chunks(text, chunk_size=24)
 
         self.assertGreater(len(chunks), 1)
         self.assertEqual(chunks[0].start_offset, 0)
@@ -86,7 +89,7 @@ class ToolContentStoreOffsetTest(unittest.TestCase):
         )
         self.assertIsNotNone(content_id)
 
-        seen_offsets: list[int] = []
+        seen_offsets: List[int] = []
         offset = 0
         for _ in range(20):
             window = store.read_window(
@@ -108,7 +111,7 @@ class ToolContentStoreOffsetTest(unittest.TestCase):
 
     def test_chunk_offsets_monotonic_with_duplicate_short_sentences(self) -> None:
         text = "xy\n\nxy\n\nxy\n\nxy"
-        chunks = _create_content_chunks(text, chunk_size=4)
+        chunks = create_content_chunks(text, chunk_size=4)
 
         offsets = [c.start_offset for c in chunks]
         for i in range(1, len(offsets)):

@@ -31,7 +31,7 @@ def normalize_optional_str(value: Optional[str]) -> Optional[str]:
     return value or None
 
 
-def to_optional_str(value: Any) -> Optional[str]:
+def to_optional_str(value) -> Optional[str]:
     if value is None:
         return None
 

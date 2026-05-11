@@ -13,8 +13,8 @@ from v2.nacos import (
 
 from chat.core.config.bootstrap_settings import bootstrap_settings
 
-_config_client: NacosConfigService | None = None
-_naming_client: NacosNamingService | None = None
+_config_client: Optional[NacosConfigService] = None
+_naming_client: Optional[NacosNamingService] = None
 
 
 class NacosClientManager:

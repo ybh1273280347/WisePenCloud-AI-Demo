@@ -82,7 +82,8 @@ async def chat_completions(
         user_query=req.query,
         background_tasks=background_tasks,
         model_id=resolved_model_id,
-        states=req.states
+        states=req.states,
+        search_override=req.search_override,
     )
 
     return StreamingResponse(

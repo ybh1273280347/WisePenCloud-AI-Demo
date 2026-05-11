@@ -63,10 +63,8 @@ class LoadSkillAssetTool(BaseTool):
         return True
 
     async def execute(self, context: Dict[str, Any], **kwargs) -> str:
-        skill_id = (kwargs.get("skill_id") or "").strip()
-        path = (kwargs.get("path") or "").strip()
-        if not skill_id or not path:
-            return "[Tool Error] Missing required arguments: skill_id, path."
+        skill_id = kwargs["skill_id"]
+        path = kwargs["path"]
 
         allowed = set(context.get("allowed_skill_ids") or [])
         if skill_id not in allowed:

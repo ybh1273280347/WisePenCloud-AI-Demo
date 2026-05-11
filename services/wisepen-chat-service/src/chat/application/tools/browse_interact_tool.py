@@ -194,7 +194,7 @@ class BrowseInteractTool(BaseTool):
     def parameters_schema(self) -> Dict[str, Any]:
         return deepcopy(TOOL_SCHEMA)
 
-    async def execute(self, context: Dict[str, Any], **kwargs: Any) -> str:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> str:
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."

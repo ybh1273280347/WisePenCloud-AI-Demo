@@ -2,9 +2,15 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from chat.application.document_parse import DocumentParseResult, ParsedPage, ParsedTable
+from chat.application.document_parse.models import DocumentParseResult, ParsedPage, ParsedTable
+from chat.application.document_parse.pdf.page_classifier import PageClassifier
+from chat.application.document_parse.pdf.text_extractor import TextExtractor
+from chat.application.document_parse.pdf.page_renderer import PageRenderer
+from chat.application.document_parse.pdf.table_extractor import TableExtractor
+from chat.application.document_parse.pdf.scanned_table_extractor import ScannedTableExtractor
+from chat.application.document_parse.ocr.image_adapter import OcrImageAdapter
 from chat.application.document_parse.text_utils import normalize_text
-from common.logger import log_fail, log_ok
+from common.logger import log_event, log_fail, log_ok
 
 
 _PARSER_NAME = "PdfParser"
@@ -36,12 +42,12 @@ class PdfParser:
     def __init__(
         self,
         *,
-        classifier: Any,
-        text_extractor: Any,
-        page_renderer: Any,
-        table_extractor: Any,
-        ocr_adapter: Any,
-        scanned_table_extractor: Any,
+        classifier: PageClassifier,
+        text_extractor: TextExtractor,
+        page_renderer: PageRenderer,
+        table_extractor: TableExtractor,
+        ocr_adapter: OcrImageAdapter,
+        scanned_table_extractor: ScannedTableExtractor,
     ):
         self.classifier = classifier
         self.text_extractor = text_extractor
@@ -49,8 +55,19 @@ class PdfParser:
         self.table_extractor = table_extractor
         self.ocr_adapter = ocr_adapter
         self.scanned_table_extractor = scanned_table_extractor
+        log_ok(
+            "PdfParser init",
+            handler_class=type(self).__name__,
+            classifier_class=type(classifier).__name__,
+            text_extractor_class=type(text_extractor).__name__,
+            page_renderer_class=type(page_renderer).__name__,
+            table_extractor_class=type(table_extractor).__name__,
+            ocr_adapter_class=type(ocr_adapter).__name__,
+            scanned_table_extractor_class=type(scanned_table_extractor).__name__,
+        )
 
     async def parse(self, path: Path) -> DocumentParseResult:
+        log_event("PdfParser selected", path=str(path), handler_class=type(self).__name__)
         return await self._parse(path)
 
     def _page_count(self, path: Path) -> int:
@@ -114,7 +131,7 @@ class PdfParser:
                 except Exception as e:
                     warning = f"page_parse_failed: page={page_index + 1}: {type(e).__name__}: {e}"
                     warnings.append(warning)
-                    log_fail("PDF page parse", e, page=page_index + 1, path=str(path))
+                    log_fail("PDF 页面解析", e, page=page_index + 1, path=str(path))
 
         text = normalize_text("\n\n".join(page.text for page in pages if page.text.strip()))
         log_ok("PDF parse", path=str(path), pages=len(pages), tables=len(tables), length=len(text))
@@ -127,6 +144,7 @@ class PdfParser:
             tables=tables,
             metadata={
                 "parser": _PARSER_NAME,
+                "selected_parser": _PARSER_NAME,
                 "pdf_backend": _TEXT_BACKEND_PYMUPDF,
                 "ocr_backend": _TEXT_BACKEND_PADDLEOCR,
                 "table_backends": [_TABLE_BACKEND_CAMELOT, _TABLE_BACKEND_PP_STRUCTURE],
@@ -151,7 +169,7 @@ class PdfParser:
             tables = self.table_extractor.extract_tables(path, page_index=page_index)
         except Exception as e:
             warnings.append(f"table_parse_failed: page={page_index + 1}: {type(e).__name__}: {e}")
-            log_fail("PDF table extraction", e, page=page_index + 1, path=str(path))
+            log_fail("PDF 表格提取", e, page=page_index + 1, path=str(path))
 
         return text, tables
 
@@ -171,7 +189,7 @@ class PdfParser:
             tables = self.scanned_table_extractor.extract_tables(image_path, page_index=page_index)
         except Exception as e:
             warnings.append(f"table_parse_failed: page={page_index + 1}: {type(e).__name__}: {e}")
-            log_fail("PP-Structure table extraction", e, page=page_index + 1, path=str(path))
+            log_fail("PP-Structure 表格提取", e, page=page_index + 1, path=str(path))
 
         return ocr_text, tables
 

@@ -83,7 +83,7 @@ def _register_persistence_providers(container_cls) -> None:
 
 
 def _register_rpc_providers(container_cls) -> None:
-    # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
+    # 内部 RPC：Nacos 服务发现、通用 httpx 客户端、文件存储类型外观
     container_cls.service_discovery = providers.Singleton(
         ServiceDiscovery,
         naming_client_provider=providers.Object(_provide_nacos_naming),
@@ -138,7 +138,7 @@ def _register_skill_providers(container_cls) -> None:
 
 
 def _register_document_parse_providers(container_cls) -> None:
-    # ── Document Parse OCR ──
+    # ── 文档解析 OCR ──
     container_cls.document_parse_ocr_processor = providers.Singleton(
         OcrProcessor,
         timeout=settings.OCR_TIMEOUT_SECONDS,
@@ -162,18 +162,18 @@ def _register_document_parse_providers(container_cls) -> None:
 
 
 def _register_web_providers(container_cls) -> None:
-    # ── Search ──
+    # ── 搜索 ──
     container_cls.web_search_coordinator = providers.Singleton(
         create_search_coordinator,
     )
 
-    # ── Content processing ──
+    # ── 内容处理 ──
     container_cls.content_processor = providers.Singleton(
         ContentProcessor,
         min_content_length=settings.WEB_FETCH_MIN_CONTENT_LENGTH,
     )
 
-    # ── Fetchers ──
+    # ── 抓取器 ──
     container_cls.static_fetcher = providers.Singleton(
         StaticFetcher,
         timeout=settings.WEB_FETCH_STATIC_TIMEOUT,
@@ -259,7 +259,7 @@ def _register_tool_providers(container_cls) -> None:
 
 
 def _register_application_providers(container_cls) -> None:
-    # Application 层组件
+    # 应用层组件
     container_cls.chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
         llm=container_cls.llm_provider,

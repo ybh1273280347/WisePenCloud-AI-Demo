@@ -57,24 +57,24 @@ class SearchHistoricalMessagesTool(BaseTool):
         }
 
     async def execute(self, context: Dict[str, Any], **kwargs) -> str:
-        # session_id 从系统注入的 context 读取
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
 
-        keyword: str = kwargs.get("keyword", "").strip()
-        if not keyword:
-            return "[Tool Error] Missing required argument: keyword."
+        keyword: str = kwargs["keyword"]
 
         start_time: Optional[datetime] = None
         end_time: Optional[datetime] = None
-        try:
-            if kwargs.get("start_time"):
+        if kwargs.get("start_time"):
+            try:
                 start_time = datetime.fromisoformat(kwargs["start_time"])
-            if kwargs.get("end_time"):
+            except ValueError:
+                return "[Tool Error] Invalid start_time format. Expected ISO 8601 datetime string."
+        if kwargs.get("end_time"):
+            try:
                 end_time = datetime.fromisoformat(kwargs["end_time"])
-        except ValueError:
-            pass  # 非法时间格式，静默忽略，不中断检索
+            except ValueError:
+                return "[Tool Error] Invalid end_time format. Expected ISO 8601 datetime string."
 
         limit = kwargs.get("limit", 10)
 

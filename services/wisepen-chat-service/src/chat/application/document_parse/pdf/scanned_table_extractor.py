@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import Any, List
+from typing import List
 
-from chat.application.document_parse import ParsedTable
+from chat.application.document_parse.models import ParsedTable
 
 
 _TABLE_SOURCE = "pp_structure"
@@ -41,7 +41,7 @@ class ScannedTableExtractor:
 
         return tables
 
-    def _get_engine(self) -> Any:
+    def _get_engine(self):
         if self._engine is not None:
             return self._engine
 
@@ -54,7 +54,7 @@ class ScannedTableExtractor:
 
         return self._engine
 
-    def _read_image(self, image_path: Path) -> Any:
+    def _read_image(self, image_path: Path):
         import cv2
 
         image = cv2.imread(str(image_path))
@@ -63,7 +63,7 @@ class ScannedTableExtractor:
 
         return image
 
-    def _rows_from_item(self, item: Any) -> List[List[str]]:
+    def _rows_from_item(self, item) -> List[List[str]]:
         if not isinstance(item, dict):
             return []
 

@@ -145,6 +145,7 @@ class ToolContentStoreSettings(BaseModel):
     # ToolContentStore 缓存配置
     TOOL_CONTENT_STORE_TTL_SECONDS: int = 30 * 60
     TOOL_CONTENT_STORE_MAX_TOTAL_CHARS: int = 20_000_000
+    TOOL_CONTENT_STORE_MAX_ITEM_CHARS: int = 20_000_000
 
 
 class SkillSettings(BaseModel):
