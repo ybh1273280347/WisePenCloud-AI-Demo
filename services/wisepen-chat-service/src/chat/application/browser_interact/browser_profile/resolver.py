@@ -10,7 +10,6 @@ from .checker import (
     ensure_directory,
 )
 from .config import AutomationProfileConfig
-from .presenter import summarize_check
 from .models import (
     ResolveFailure,
     ResolveFailureReason,
@@ -26,6 +25,10 @@ from .paths import (
     resolve_env,
     resolve_home,
 )
+from .presenter import summarize_check
+
+SUPPORTED_PLATFORMS: Tuple[str, ...] = ("win32", "darwin", "linux")
+
 
 class BrowserAutomationProfileResolver:
     def __init__(

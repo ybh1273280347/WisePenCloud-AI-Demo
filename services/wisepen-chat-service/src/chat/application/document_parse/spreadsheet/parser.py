@@ -2,10 +2,14 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from chat.application.document_parse.models import DocumentParseResult, ParsedPage, ParsedTable
+from chat.application.document_parse.base import BaseDocumentParser
+from chat.application.document_parse.models import (
+    DocumentParseResult,
+    ParsedPage,
+    ParsedTable,
+)
 from chat.application.document_parse.text_utils import normalize_text
-from common.logger import log_event, log_ok
-
+from common.logger import log_event
 
 _FILE_TYPE_SPREADSHEET = "spreadsheet"
 _PAGE_TYPE_SPREADSHEET = "spreadsheet"
@@ -25,26 +29,30 @@ def _format_cell(value: object) -> str:
     return text.strip()
 
 
-class SpreadsheetParser:
+class SpreadsheetParser(BaseDocumentParser):
     """电子表格文档解析器。"""
 
+    supported_extensions = (".xlsx", ".xls", ".xlsm", ".ods")
+
     def __init__(self):
-        log_ok(
-            "SpreadsheetParser init",
+        log_event(
+            "SpreadsheetParser 初始化",
             handler_class=type(self).__name__,
             backend=_BACKEND_PANDAS,
         )
 
-    def parse(self, path: Path) -> DocumentParseResult:
+    async def parse(self, path: Path) -> DocumentParseResult:
         import pandas as pd
 
         log_event(
-            "SpreadsheetParser parse start",
+            "SpreadsheetParser parse 开始",
             path=str(path),
             handler_class=type(self).__name__,
             backend=_BACKEND_PANDAS,
         )
-        sheets = pd.read_excel(path, sheet_name=None, dtype=object, keep_default_na=False)
+        sheets = pd.read_excel(
+            path, sheet_name=None, dtype=object, keep_default_na=False
+        )
 
         text_parts: List[str] = []
         tables: List[ParsedTable] = []
@@ -110,8 +118,8 @@ class SpreadsheetParser:
             },
             warnings=[],
         )
-        log_ok(
-            "SpreadsheetParser parse",
+        log_event(
+            "SpreadsheetParser parse 完成",
             path=str(path),
             handler_class=type(self).__name__,
             backend=_BACKEND_PANDAS,
@@ -124,5 +132,7 @@ class SpreadsheetParser:
     def _rows_from_dataframe(self, df) -> List[List[str]]:
         filled = df.fillna("")
         rows: List[List[str]] = [[_format_cell(col) for col in filled.columns.tolist()]]
-        rows.extend([[_format_cell(value) for value in row] for row in filled.values.tolist()])
+        rows.extend(
+            [[_format_cell(value) for value in row] for row in filled.values.tolist()]
+        )
         return rows

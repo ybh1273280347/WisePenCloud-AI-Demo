@@ -1,9 +1,9 @@
-from .parser import PdfParser
 from .page_classifier import PageClassifier
-from .text_extractor import TextExtractor
 from .page_renderer import PageRenderer
-from .table_extractor import TableExtractor
+from .parser import PdfParser
 from .scanned_table_extractor import ScannedTableExtractor
+from .table_extractor import TableExtractor
+from .text_extractor import TextExtractor
 
 __all__ = [
     "PdfParser",

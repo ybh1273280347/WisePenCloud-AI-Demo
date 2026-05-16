@@ -1,27 +1,41 @@
-from typing import Optional, List, Dict, Any
-from fastapi import BackgroundTasks
-from common.logger import log_error, log_ok
+from typing import Any, Dict, List, Optional
 
+from chat.api.vercel_sse_mapper import to_vercel_sse
+from chat.application.chat_context_assembler import ChatContextAssembler
+from chat.application.chat_turn_finalizer import ChatTurnFinalizer
+from chat.application.model_resolver import ModelResolver
+from chat.application.query_loop_runtime import (
+    QueryLoopRuntime,
+    ReasoningDeltaEvent,
+    StepStartEvent,
+    TextDeltaEvent,
+)
+from chat.application.skill_matcher import SkillMatcher
+from chat.application.tools.runtime.tool_registry import ToolRegistry
+from chat.application.web_search.search_provider_config.constants import (
+    ERROR_NOT_CONFIGURED,
+    MODE_CUSTOM,
+    MODE_DEFAULT,
+    PUBLIC_ERROR_NOT_CONFIGURED,
+    STATUS_PROVIDER_ERROR,
+)
+from chat.application.web_search.search_provider_config.service import (
+    RuntimeSearchProviderContext,
+    SearchProviderConfigService,
+)
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
-from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository
-from common.core.exceptions import ServiceException
-from chat.application.chat_context_assembler import ChatContextAssembler
-from chat.application.query_loop_runtime import (
-    QueryLoopRuntime,
-    StepStartEvent,
-    TextDeltaEvent,
-    ReasoningDeltaEvent,
+from chat.domain.repositories import (
+    HotContextRepository,
+    MessageRepository,
+    SessionRepository,
 )
-from chat.api.vercel_sse_mapper import to_vercel_sse
-from chat.application.chat_turn_finalizer import ChatTurnFinalizer
-from chat.application.model_resolver import ModelResolver
-from chat.application.skill_matcher import SkillMatcher
-from chat.application.tools.tool_registry import ToolRegistry
+from common.core.exceptions import ServiceException
 from common.kafka.producer import KafkaProducerClient
-
+from common.logger import log_error
+from fastapi import BackgroundTasks
 
 # Skill 脚手架工具的名字集合：Registry 内部它们 reserved=True 默认隐藏
 # 只有 skill 命中时 Coordinator 把本集合作为 `expose` 传入 derive()，从而解禁 schema
@@ -35,43 +49,54 @@ class ChatTurnCoordinator:
     """
 
     def __init__(
-            self,
-            llm: LLMProvider,
-            memory: MemoryProvider,
-            model_resolver: ModelResolver,
-            session_repo: SessionRepository,
-            message_repo: MessageRepository,
-            hot_context_repo: HotContextRepository,
-            tool_registry: ToolRegistry,
-            kafka_producer: KafkaProducerClient,
-            skill_matcher: SkillMatcher,
+        self,
+        llm: LLMProvider,
+        memory: MemoryProvider,
+        model_resolver: ModelResolver,
+        session_repo: SessionRepository,
+        message_repo: MessageRepository,
+        hot_context_repo: HotContextRepository,
+        tool_registry: ToolRegistry,
+        kafka_producer: KafkaProducerClient,
+        skill_matcher: SkillMatcher,
+        search_provider_config_service: Optional[SearchProviderConfigService] = None,
     ):
         self._memory = memory
         self._model_resolver = model_resolver
         self._context_assembler = ChatContextAssembler(
-            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
+            message_repo=message_repo,
+            session_repo=session_repo,
+            hot_context_repo=hot_context_repo,
         )
         self._tool_registry = tool_registry
         self._query_loop_runtime = QueryLoopRuntime(llm=llm)
         self._turn_finalizer = ChatTurnFinalizer(
-            llm=llm, memory=memory,
-            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
-            kafka_producer=kafka_producer
+            llm=llm,
+            memory=memory,
+            message_repo=message_repo,
+            session_repo=session_repo,
+            hot_context_repo=hot_context_repo,
+            kafka_producer=kafka_producer,
         )
         self._skill_matcher = skill_matcher
+        self._search_provider_config_service = search_provider_config_service
 
     # -------------------------------------------------------------------------
     # 公共入口
     # -------------------------------------------------------------------------
     async def handle_chat(
-            self,
-            user_id: str,
-            session_id: str,
-            user_query: str,
-            background_tasks: BackgroundTasks,
-            model_id: Optional[int] = None,
-            states: Optional[List[Dict[str, Any]]] = None,
-            search_override: Optional[Dict[str, Any]] = None,
+        self,
+        user_id: str,
+        session_id: str,
+        user_query: str,
+        background_tasks: BackgroundTasks,
+        model_id: Optional[int] = None,
+        web_search_provider_mode: Optional[str] = None,
+        web_search_custom_provider: Optional[str] = None,
+        web_search_custom_api_key: Optional[str] = None,
+        web_search_use_saved_custom_key: bool = False,
+        web_search_custom_providers: Optional[List[Dict[str, Any]]] = None,
+        states: Optional[List[Dict[str, Any]]] = None,
     ):
         model_id = model_id or settings.DEFAULT_MODEL_ID
 
@@ -79,24 +104,40 @@ class ChatTurnCoordinator:
         resolved = await self._model_resolver.resolve(model_id)
 
         # [Retrieval - 短期记忆] 从 Redis 读取最近对话, 如果 Redis 缓存失效（Cache Miss），会自动从 MongoDB 回填最近的 N 条历史 （可配置），确保对话连贯性。
-        recent_messages = await self._context_assembler.get_or_repopulate_hot_context(session_id)
+        recent_messages = await self._context_assembler.get_or_repopulate_hot_context(
+            session_id
+        )
 
         # [Retrieval - 长期记忆] 从 Memory 按相似度阈值召回跨会话事实 (此处实现是Mem0)
         relevant_facts = await self._memory.search(
-            user_id=user_id, query=user_query, limit=10,
+            user_id=user_id,
+            query=user_query,
+            limit=10,
             score_threshold=0.6,  # 低质量召回直接丢弃，防止噪声污染上下文
         )
 
         # 会话的历史摘要
         session_summary = await self._context_assembler.get_session_summary(session_id)
         # [Token Window] 从后往前累加 Token，超过高水位时将 messages_compress_candidates 压缩为会话的历史摘要（本轮结束时）
-        messages_keep, messages_compress_candidates, needs_compression = await self._context_assembler.build_context_window(recent_messages)
+        (
+            messages_keep,
+            messages_compress_candidates,
+            needs_compression,
+        ) = await self._context_assembler.build_context_window(recent_messages)
 
         tool_context: Dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
-            "search_override": search_override,
-        } 
+        }
+        await self._apply_search_provider_context(
+            tool_context=tool_context,
+            user_id=user_id,
+            provider_mode=web_search_provider_mode,
+            custom_provider=web_search_custom_provider,
+            custom_api_key=web_search_custom_api_key,
+            use_saved_custom_key=web_search_use_saved_custom_key,
+            custom_providers=web_search_custom_providers,
+        )
 
         # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills
         candidate_skills = self._skill_matcher.match(user_query)
@@ -112,7 +153,7 @@ class ChatTurnCoordinator:
         # allow_tool_name_set/deny_tool_name_set 预留给未来"用户级工具偏好"接入，暂时留空
         tool_scope = self._tool_registry.derive(
             session_id=session_id,
-            tool_context=tool_context, 
+            tool_context=tool_context,
             runtime_discovered_tools=None,
             expose_tool_name_set=expose_tool_name_set,
             allow_tool_name_set=None,
@@ -121,7 +162,11 @@ class ChatTurnCoordinator:
 
         # [Context Construction] 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的明细消息组装成 LLM 所需的格式
         messages_for_llm = self._context_assembler.assemble_prompt(
-            session_id, user_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary,
+            session_id,
+            user_query,
+            messages_keep + messages_compress_candidates,
+            relevant_facts,
+            session_summary,
             states=states,
             candidate_skills=candidate_skills or None,
         )
@@ -131,7 +176,9 @@ class ChatTurnCoordinator:
 
         # 在流式推理之前构造 user_msg，确保 created_at 早于所有中间消息
         user_msg = ChatMessage(
-            session_id=session_id, role=Role.USER, content=user_query,
+            session_id=session_id,
+            role=Role.USER,
+            content=user_query,
             metadata={"states": states} if states else {},
         )
 
@@ -170,7 +217,9 @@ class ChatTurnCoordinator:
         #   - _turn_finalizer.summarize_and_compress；调用轻量级模型生成并更新会话的全局摘要
         if background_tasks is not None:
             assistant_msg = ChatMessage(
-                session_id=session_id, role=Role.ASSISTANT, content=full_response_content,
+                session_id=session_id,
+                role=Role.ASSISTANT,
+                content=full_response_content,
                 reasoning_content=full_reasoning_content or None,
                 model_id=model_id,
             )
@@ -179,13 +228,17 @@ class ChatTurnCoordinator:
 
             background_tasks.add_task(
                 self._turn_finalizer.persist_all,
-                user_id, session_id, model_id,
+                user_id,
+                session_id,
+                model_id,
                 resolved.provider_model_name,
-                messages_to_persist
+                messages_to_persist,
             )
             background_tasks.add_task(
                 self._turn_finalizer.auto_generate_title,
-                session_id, user_id, user_query
+                session_id,
+                user_id,
+                user_query,
             )
             if needs_compression:
                 background_tasks.add_task(
@@ -193,5 +246,112 @@ class ChatTurnCoordinator:
                     session_id,
                     messages_keep + messages_to_persist,
                     messages_compress_candidates,
-                    session_summary
+                    session_summary,
                 )
+
+    async def _apply_search_provider_context(
+        self,
+        *,
+        tool_context: Dict[str, Any],
+        user_id: str,
+        provider_mode: Optional[str],
+        custom_provider: Optional[str],
+        custom_api_key: Optional[str],
+        use_saved_custom_key: bool,
+        custom_providers: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        if provider_mode != MODE_CUSTOM:
+            tool_context["web_search_provider_mode"] = MODE_DEFAULT
+            return
+
+        tool_context["web_search_provider_mode"] = MODE_CUSTOM
+
+        if custom_providers:
+            tool_context["web_search_custom_providers"] = custom_providers
+            return
+
+        if custom_provider and custom_api_key and custom_api_key.strip():
+            tool_context["web_search_custom_providers"] = [
+                {
+                    "provider": custom_provider,
+                    "api_key": custom_api_key.strip(),
+                    "enabled": True,
+                }
+            ]
+            return
+
+        if use_saved_custom_key and self._search_provider_config_service is not None:
+            runtime_search_provider = (
+                await self._search_provider_config_service.runtime_context(
+                    user_id=user_id,
+                    require_custom=True,
+                )
+            )
+            self._apply_runtime_search_provider_context(
+                tool_context=tool_context,
+                user_id=user_id,
+                runtime_search_provider=runtime_search_provider,
+                attach_failure_handler=True,
+            )
+            return
+
+        self._apply_runtime_search_provider_context(
+            tool_context=tool_context,
+            user_id=user_id,
+            runtime_search_provider=RuntimeSearchProviderContext(
+                mode=MODE_CUSTOM,
+                custom_providers=[],
+                error_public_code=PUBLIC_ERROR_NOT_CONFIGURED,
+                error_status=STATUS_PROVIDER_ERROR,
+                error_last_error_code=ERROR_NOT_CONFIGURED,
+                error_message=(
+                    "Missing custom provider credential. Provide a temporary custom "
+                    "provider API key or choose a saved key."
+                ),
+            ),
+            attach_failure_handler=False,
+        )
+
+    def _apply_runtime_search_provider_context(
+        self,
+        *,
+        tool_context: Dict[str, Any],
+        user_id: str,
+        runtime_search_provider: RuntimeSearchProviderContext,
+        attach_failure_handler: bool,
+    ) -> None:
+        tool_context["web_search_provider_mode"] = runtime_search_provider.mode
+
+        if runtime_search_provider.custom_providers is not None:
+            tool_context["web_search_custom_providers"] = (
+                runtime_search_provider.custom_providers
+            )
+
+        if runtime_search_provider.error_public_code:
+            tool_context["web_search_custom_provider_error"] = {
+                "public_code": runtime_search_provider.error_public_code,
+                "status": runtime_search_provider.error_status,
+                "last_error_code": runtime_search_provider.error_last_error_code,
+                "message": runtime_search_provider.error_message,
+            }
+
+        if not attach_failure_handler:
+            return
+
+        if self._search_provider_config_service is None:
+            return
+
+        async def record_custom_provider_failure(
+            status: str,
+            last_error_code: str,
+        ) -> None:
+            assert self._search_provider_config_service is not None
+            await self._search_provider_config_service.record_runtime_failure(
+                user_id=user_id,
+                status=status,
+                last_error_code=last_error_code,
+            )
+
+        tool_context["web_search_custom_provider_failure_handler"] = (
+            record_custom_provider_failure
+        )

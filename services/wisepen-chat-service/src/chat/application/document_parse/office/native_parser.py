@@ -1,18 +1,25 @@
 from pathlib import Path
 from typing import List
 
-from chat.application.document_parse.models import DocumentParseResult, ParsedPage, ParsedTable
+from chat.application.document_parse.errors import (
+    UnsupportedDocumentFormatError,
+)
+from chat.application.document_parse.models import (
+    DocumentParseResult,
+    ParsedPage,
+    ParsedTable,
+)
 from chat.application.document_parse.text_utils import normalize_text
-from common.logger import log_event, log_ok
+from common.logger import log_event
 
 
 class OfficeNativeParser:
     def __init__(self):
-        log_ok("OfficeNativeParser init", handler_class=type(self).__name__)
+        log_event("OfficeNativeParser 初始化", handler_class=type(self).__name__)
 
     def parse(self, path: Path, *, file_type: str) -> DocumentParseResult:
         log_event(
-            "OfficeNativeParser route",
+            "OfficeNativeParser 路由",
             path=str(path),
             file_type=file_type,
             handler_class=type(self).__name__,
@@ -23,7 +30,7 @@ class OfficeNativeParser:
         if file_type == "pptx":
             return self._parse_pptx(path)
 
-        raise ValueError(f"Unsupported office document type: {file_type}")
+        raise UnsupportedDocumentFormatError(file_type)
 
     def _parse_docx(self, path: Path) -> DocumentParseResult:
         from docx import Document
@@ -80,8 +87,8 @@ class OfficeNativeParser:
             metadata={"parser": "python_docx"},
             warnings=[],
         )
-        log_ok(
-            "OfficeNativeParser parse",
+        log_event(
+            "OfficeNativeParser parse 完成",
             path=str(path),
             file_type="docx",
             handler_class=type(self).__name__,
@@ -162,8 +169,8 @@ class OfficeNativeParser:
             metadata={"parser": "python_pptx"},
             warnings=[],
         )
-        log_ok(
-            "OfficeNativeParser parse",
+        log_event(
+            "OfficeNativeParser parse 完成",
             path=str(path),
             file_type="pptx",
             handler_class=type(self).__name__,

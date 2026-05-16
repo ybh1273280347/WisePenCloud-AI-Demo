@@ -1,11 +1,7 @@
-import re
 from typing import Dict, List, Tuple
 from urllib.parse import urlparse
 
-from common.logger import log_fail
 from chat.application.web_search.models import SearchResult
-
-_SITE_OPERATOR_RE = re.compile(r"\bsite:", re.IGNORECASE)
 
 
 def extract_domain(url: str) -> str:
@@ -47,7 +43,3 @@ def deduplicate_results_by_domain(
         deduped.append(result)
 
     return tuple(deduped)
-
-
-def has_site_operator(queries: List[str]) -> bool:
-    return any(_SITE_OPERATOR_RE.search(query) is not None for query in queries)

@@ -1,6 +1,5 @@
 import re
 
-
 _EXCESSIVE_BLANK_LINES_RE = re.compile(r"\n{3,}")
 
 

@@ -1,0 +1,10 @@
+cd D:\AgentProject\WisePenCloud-AI\WisePenCloud-AI-clone
+
+$env:DOCKER_REGISTRY="local"
+$env:APP_VERSION="dev"
+
+docker network create wisepen-net 2>$null
+
+docker compose -f docker-compose-app.yml up -d --pull never
+docker compose -f docker-compose-app.yml ps
+docker logs wisepen-chat-service --tail=100

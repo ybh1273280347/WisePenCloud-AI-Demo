@@ -17,6 +17,7 @@ class BootstrapSettings(BaseSettings):
     # 服务身份（子类硬编码覆盖）
     APP_NAME: str = "WisePen Unnamed Service (Python)"
     SERVICE_NAME: str = "wisepen-unnamed-service-py"
+    SERVICE_VERSION: str = "0.1.0"
 
     # 服务监听
     SERVICE_HOST: str = "127.0.0.1"

@@ -71,7 +71,9 @@ class AutomationProfileConfig:
 
         return (Path(profile_dir), channel)
 
-    def save(self, automation_user_data_dir: Path, browser_channel: str) -> Optional[str]:
+    def save(
+        self, automation_user_data_dir: Path, browser_channel: str
+    ) -> Optional[str]:
         payload = json.dumps(
             {
                 _CONFIG_PROFILE_KEY: str(automation_user_data_dir),

@@ -2,6 +2,8 @@ import hashlib
 import uuid
 from typing import Any, Dict, Optional
 
+from common.logger import log_event
+
 from .chunking import create_content_chunks, find_chunk_by_offset
 from .models import ContentWindow, StoredContent
 from .repository import TTLContentRepository
@@ -54,7 +56,9 @@ class ContentStore:
         )
         effective_chunk_size = max(1, effective_chunk_size)
 
-        chunks = create_content_chunks(text, effective_chunk_size)
+        chunks = create_content_chunks(
+            text, effective_chunk_size, content_type=content_type
+        )
 
         stored = StoredContent(
             content_id=content_id,
@@ -124,7 +128,9 @@ class ContentStore:
         if effective_limit == self._default_chunk_size:
             chunks = item.chunks
         else:
-            chunks = create_content_chunks(item.text, effective_limit)
+            chunks = create_content_chunks(
+                item.text, effective_limit, content_type=item.content_type
+            )
 
         chunk = find_chunk_by_offset(chunks, offset)
 
@@ -145,9 +151,20 @@ class ContentStore:
             )
 
         next_offset = chunk.end_offset if chunk.index < len(chunks) - 1 else None
-        window_text = item.text[chunk.start_offset:chunk.end_offset]
+        window_text = item.text[chunk.start_offset : chunk.end_offset]
         returned_length = len(window_text)
         truncated = chunk.index < len(chunks) - 1
+
+        log_event(
+            "分段读取进行中",
+            content_id=content_id,
+            chunk_id=chunk.index,
+            chunk_count=len(chunks),
+            offset=chunk.start_offset,
+            returned_length=returned_length,
+            truncated=truncated,
+            next_offset=next_offset,
+        )
 
         return ContentWindow(
             content_id=content_id,
@@ -301,7 +318,7 @@ def create_uncached_window(
             cache_error="empty_content",
         )
 
-    chunks = create_content_chunks(text, limit)
+    chunks = create_content_chunks(text, limit, content_type=content_type)
 
     chunk = find_chunk_by_offset(chunks, offset)
 
@@ -321,7 +338,7 @@ def create_uncached_window(
             cache_error=cache_error,
         )
 
-    window_text = text[chunk.start_offset:chunk.end_offset]
+    window_text = text[chunk.start_offset : chunk.end_offset]
     returned_length = len(window_text)
     truncated = chunk.index < len(chunks) - 1
 

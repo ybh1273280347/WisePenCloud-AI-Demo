@@ -20,7 +20,7 @@
     4. upsert 进 wisepen_published_skill collection
     5. 为每个 asset 及 SKILL.md 写入与 Java 发布侧一致的 OSS object_key 约定：
        skills/<skill_id>/<version>/<相对路径>；正文不拷贝进 Mongo
-    6. DEV 运行期 LocalFSSkillAssetLoader 先从 SKILL_ASSETS_CACHE_DIR 读盘，未命中回退 OSS；
+    6. DEV 运行期 LocalFSSkillAssetLoader 先从本地 fixture 目录读盘，未命中回退 OSS；
        生产形态（DEV=False）由 Java 上传对象后 chat 经 file-storage 预签名读取并落本地磁盘缓存
 """
 
@@ -32,12 +32,9 @@ from typing import List, Tuple
 
 import yaml
 from beanie import init_beanie
-from pymongo import AsyncMongoClient
-
-from common.logger import log_error, log_event
-
 from chat.domain.entities.skill import Skill, SkillAssetMeta
-
+from common.logger import log_error, log_event
+from pymongo import AsyncMongoClient
 
 # 把 MD 文件归类成 SkillAssetMeta.kind 的简单启发式；Java 服务会按更正式的 schema 填。
 _KIND_BY_FIRST_SEGMENT = {
@@ -76,7 +73,9 @@ def _split_frontmatter(text: str) -> Tuple[dict, str]:
     return meta, body
 
 
-def _scan_assets(version_dir: Path, skill_id: str, version: str) -> List[SkillAssetMeta]:
+def _scan_assets(
+    version_dir: Path, skill_id: str, version: str
+) -> List[SkillAssetMeta]:
     """扫描 bundle 目录下 SKILL.md 以外的文件，生成 assets manifest（POSIX 相对路径 + object_key）。"""
     assets: List[SkillAssetMeta] = []
     for p in sorted(version_dir.rglob("*")):
@@ -153,7 +152,12 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
             updated_at=now,
         )
         await doc.insert()
-        log_event("seed_demo_skills：插入", skill_id=skill_id, version=version, assets=len(assets_manifest))
+        log_event(
+            "seed_demo_skills：插入",
+            skill_id=skill_id,
+            version=version,
+            assets=len(assets_manifest),
+        )
     else:
         existing.display_name = display_name
         existing.description = description
@@ -165,7 +169,12 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
         existing.enabled = enabled
         existing.updated_at = now
         await existing.save()
-        log_event("seed_demo_skills：更新", skill_id=skill_id, version=version, assets=len(assets_manifest))
+        log_event(
+            "seed_demo_skills：更新",
+            skill_id=skill_id,
+            version=version,
+            assets=len(assets_manifest),
+        )
 
 
 async def _main() -> None:
@@ -181,9 +190,7 @@ async def _main() -> None:
         )
         return
 
-    mongo_url = os.environ.get(
-        "SEED_MONGO_URL", "mongodb://root:root@localhost:27017/"
-    )
+    mongo_url = os.environ.get("SEED_MONGO_URL", "mongodb://root:root@localhost:27017/")
     mongo_client = AsyncMongoClient(mongo_url)
     await init_beanie(
         database=mongo_client["wisepen_chat"],

@@ -9,15 +9,14 @@ from .protocol import (
     get_page_state,
     get_session_state,
     make_browser_unavailable_error,
+    make_invalid_browser_channel_error,
     make_profile_locked_error,
     make_profile_unavailable_error,
-    make_invalid_browser_channel_error,
     make_schema_error,
     make_session_error,
 )
 from .session import BrowserSessionError, BrowserSessionManager
 from .snapshot import ref_selector
-
 
 
 def session_state(

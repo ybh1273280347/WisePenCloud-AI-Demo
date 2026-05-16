@@ -2,24 +2,22 @@ from typing import List, Optional, Set, Tuple
 
 from chat.application.web_search.utils.notes import add_note
 
-MAX_SEARCH_QUERY_CHARS = 400
+_MAX_SEARCH_QUERY_CHARS = 400
 
 
 def normalize_queries(
     queries: List[str],
     *,
-    limit: int,
+    limit: Optional[int] = None,
+    language: Optional[str] = None,
     notes: Optional[List[str]] = None,
-) -> List[str]:
+) -> Tuple[List[str], Optional[str]]:
     normalized: List[str] = []
     seen: Set[str] = set()
     skipped_duplicates = 0
     limit_reached = False
 
     for query in queries:
-        if not isinstance(query, str):
-            continue
-
         value = " ".join(query.strip().split())
         if not value:
             continue
@@ -33,7 +31,7 @@ def normalize_queries(
             skipped_duplicates += 1
             continue
 
-        if len(normalized) >= limit:
+        if limit is not None and len(normalized) >= limit:
             limit_reached = True
             break
 
@@ -46,20 +44,20 @@ def normalize_queries(
     if limit_reached:
         add_note(notes, f"Search queries were limited to {limit} focused queries.")
 
-    return normalized
+    return normalized, language
 
 
 def _truncate_query(query: str) -> Tuple[str, bool]:
-    if len(query) <= MAX_SEARCH_QUERY_CHARS:
+    if len(query) <= _MAX_SEARCH_QUERY_CHARS:
         return query, False
 
-    candidate = query[:MAX_SEARCH_QUERY_CHARS].rstrip()
+    candidate = query[:_MAX_SEARCH_QUERY_CHARS].rstrip()
     space_index = candidate.rfind(" ")
 
-    if space_index >= MAX_SEARCH_QUERY_CHARS // 2:
+    if space_index >= _MAX_SEARCH_QUERY_CHARS // 2:
         candidate = candidate[:space_index].rstrip()
 
     if not candidate:
-        candidate = query[:MAX_SEARCH_QUERY_CHARS].rstrip()
+        candidate = query[:_MAX_SEARCH_QUERY_CHARS].rstrip()
 
     return candidate, True

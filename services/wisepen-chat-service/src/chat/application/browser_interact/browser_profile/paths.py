@@ -3,7 +3,12 @@ import sys
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, Tuple
 
-from chat.application.browser_interact.browser_profile.catalog import SYSTEM_BROWSER_CATALOG
+from chat.application.browser_interact.browser_profile.catalog import (
+    SYSTEM_BROWSER_CATALOG,
+    PathBase,
+    PathTemplate,
+    SystemBrowserDefinition,
+)
 
 APP_NAME = "WisePenCloud"
 CONFIG_FILE_NAME = "config.json"

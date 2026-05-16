@@ -2,6 +2,8 @@ from typing import Dict, Optional
 
 from chat.application.web_fetch.content_processor import ContentProcessor
 
+from ..action_runtime import session_state
+from ..intervention import UserInterventionDetector
 from ..protocol import (
     ActionResult,
     build_error_response,
@@ -9,10 +11,9 @@ from ..protocol import (
     get_page_state,
     make_session_error,
 )
-from ..intervention import UserInterventionDetector
 from ..session import BrowserSessionManager
 from ..snapshot import SnapshotManager
-from ..action_runtime import session_state
+
 
 async def handle_status(
     session_manager: BrowserSessionManager,

@@ -1,15 +1,18 @@
-import re
-from urllib.parse import urlparse
-
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 from chat.application.web_fetch.content_processor import ContentProcessor
 from common.logger import log_fail, log_ok
 
+from ..action_runtime import (
+    action_error_response,
+    get_existing_page_or_error,
+    get_or_create_page_or_error,
+    session_state,
+)
+from ..intervention import UserInterventionDetector
 from ..protocol import (
     ActionResult,
-    InterventionSignal,
-    ToolError,
     build_error_response,
     build_success_response,
     get_page_state,
@@ -17,15 +20,8 @@ from ..protocol import (
     make_schema_error,
     make_user_intervention_error_from_signal,
 )
-from ..intervention import UserInterventionDetector
 from ..session import BrowserSessionManager
 from ..snapshot import SnapshotManager
-from ..action_runtime import (
-    action_error_response,
-    get_existing_page_or_error,
-    get_or_create_page_or_error,
-    session_state,
-)
 from .ref import _SETTLE_WAIT_MS
 
 _NAVIGATION_TIMEOUT_MS = 30000
@@ -117,7 +113,11 @@ async def handle_navigate(
         action_result=ActionResult(
             type="navigate",
             status="completed",
-            detail={"url": page.url, "title": page_state.title if page_state else "", "refs_invalidated": True},
+            detail={
+                "url": page.url,
+                "title": page_state.title if page_state else "",
+                "refs_invalidated": True,
+            },
         ),
     )
 

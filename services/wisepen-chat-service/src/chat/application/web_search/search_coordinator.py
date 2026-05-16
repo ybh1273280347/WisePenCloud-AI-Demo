@@ -1,388 +1,399 @@
 import asyncio
-from dataclasses import dataclass
-from typing import Awaitable, Callable, List, Optional, Set, Tuple
+import time
+import uuid
+from typing import Any, List, Optional, Set, Tuple
 
-from chat.application.web_search.cache import (
-    SearchCache,
-    make_search_cache_key,
+from chat.application.web_search.cache import SearchCache
+from chat.application.web_search.errors import (
+    CustomSearchProviderUnavailableError,
+    EmptySearchResultError,
 )
-from chat.application.web_search.models import (
+from chat.application.web_search.models.common import (
     ImageResult,
     SearchResponse,
     SearchResult,
-    has_response_content,
 )
-from chat.application.web_search.searcher import (
-    DuckDuckGoBufferSearcher,
-    SearXNGSearcher,
-    TavilySearcher,
+from chat.application.web_search.planning import (
+    MERGED_CANDIDATE_LIMIT,
+    VariantSearchResponse,
+    WikipediaGroundingResult,
+    build_search_plan,
 )
-from chat.application.web_search.utils import (
-    add_note,
-    deduplicate_results_by_domain,
-    normalize_queries,
-    normalize_url_for_dedup,
+from chat.application.web_search.provider_policy import (
+    select_custom_provider_calls,
+    select_default_provider_calls,
 )
-from chat.core.config.app_settings import settings
-from common.logger import log_event, log_fail, log_ok
+from chat.application.web_search.ranking.url_ranker import (
+    RankedUrlCandidate,
+    rank_urls_pipeline,
+)
+from chat.application.web_search.runner.custom_provider_runner import (
+    run_custom_provider_calls,
+)
+from chat.application.web_search.runner.searxng_variant_runner import (
+    run_searxng_variants,
+)
+from chat.application.web_search.runner.serper_variant_runner import run_serper_variants
+from chat.application.web_search.runner.wikipedia_grounding_runner import (
+    close_wikipedia_grounding_client,
+    run_wikipedia_grounding,
+)
+from chat.application.web_search.search_provider_config.constants import (
+    ERROR_NOT_CONFIGURED,
+    ERROR_PROVIDER_ERROR,
+    PUBLIC_ERROR_NOT_CONFIGURED,
+    PUBLIC_ERROR_PROVIDER_ERROR,
+    STATUS_PROVIDER_ERROR,
+)
+from chat.application.web_search.searcher.searxng_searcher import SearXNGSearcher
+from chat.application.web_search.searcher.serper_searcher import SerperSearcher
+from chat.application.web_search.utils.queries import normalize_queries
+from common.logger import log_event, log_fail
 
-SearchStageFunc = Callable[..., Awaitable[Optional[SearchResponse]]]
-
-MAX_BROAD_SEARCH_QUERIES = 4
-MAX_BROAD_SEARCH_CONCURRENCY = 3
-
-DEFAULT_FINAL_RESULTS = 20
-
-DEFAULT_DEDUPE_DOMAINS = True
-DEFAULT_MAX_PER_DOMAIN = 2
+_DEFAULT_MAX_PER_DOMAIN = 2
 
 
-def _with_source(response: SearchResponse, source: str) -> SearchResponse:
-    return SearchResponse(
-        query=response.query,
-        results=response.results,
-        answer=response.answer,
-        images=response.images,
-        source=source,
+class SearchManyRequest:
+    __slots__ = (
+        "queries",
+        "language",
+        "mode",
+        "with_images",
+        "custom_provider_params",
+        "provider_mode",
+        "user_id",
+        "wikipedia_keywords",
     )
 
+    def __init__(
+        self,
+        queries: List[str],
+        *,
+        language: Optional[str] = None,
+        mode: str = "normal",
+        with_images: bool = False,
+        custom_provider_params: Optional[Any] = None,
+        provider_mode: str = "default",
+        user_id: Optional[str] = None,
+        wikipedia_keywords: Optional[List[str]] = None,
+    ) -> None:
+        self.queries = list(queries)
+        self.language = language
+        self.mode = mode
+        self.with_images = with_images
+        self.custom_provider_params = custom_provider_params
+        self.provider_mode = provider_mode
+        self.user_id = user_id
+        self.wikipedia_keywords = list(wikipedia_keywords) if wikipedia_keywords else []
 
-@dataclass(frozen=True, slots=True)
-class SearchStage:
-    name: str
-    handler: SearchStageFunc
-    cacheable: bool = True
+
+class SearchManyResult:
+    __slots__ = ("response", "grounding")
+
+    def __init__(
+        self,
+        response: SearchResponse,
+        grounding: Tuple[WikipediaGroundingResult, ...] = (),
+    ) -> None:
+        self.response = response
+        self.grounding = grounding
 
 
 class SearchCoordinator:
-    """协调多阶段网页搜索：新鲜缓存、搜索引擎、过期缓存、可选的 Tavily 回退。"""
-
     def __init__(
         self,
         *,
         cache: SearchCache,
         searxng_searcher: SearXNGSearcher,
-        duckduckgo_searcher: DuckDuckGoBufferSearcher,
-        tavily_searcher: TavilySearcher,
-        continue_on_empty: bool = True,
-        disabled_stages: Optional[Set[str]] = None,
+        serper_searcher: SerperSearcher,
+        serper_enabled: bool = False,
     ) -> None:
         self._cache = cache
-        self._searxng = searxng_searcher
-        self._duckduckgo = duckduckgo_searcher
-        self._tavily = tavily_searcher
-        self._continue_on_empty = continue_on_empty
-        self._disabled_stages = disabled_stages or set()
+        self._searxng_searcher = searxng_searcher
+        self._serper_searcher = serper_searcher
+        self._serper_enabled = serper_enabled
 
-        self._chain: Tuple[SearchStage, ...] = (
-            SearchStage("searxng", self._search_searxng, cacheable=True),
-            SearchStage("duckduckgo", self._search_duckduckgo, cacheable=True),
-            SearchStage("stale_cache", self._search_stale_cache, cacheable=False),
-            SearchStage("tavily", self._search_tavily, cacheable=True),
+    async def search_many(self, request: SearchManyRequest) -> SearchManyResult:
+        if not request.queries:
+            raise ValueError("queries is empty")
+
+        search_call_id = uuid.uuid4().hex[:12]
+
+        normalized_queries, _ = normalize_queries(
+            queries=request.queries,
+        )
+        custom_mode = request.provider_mode == "custom"
+
+        plan = build_search_plan(
+            queries=normalized_queries,
+            mode=request.mode,
+            wikipedia_keywords=[] if custom_mode else request.wikipedia_keywords,
         )
 
-    async def search(
-        self,
-        query: str,
-        *,
-        max_results: int = 5,
-        with_images: bool = False,
-        freshness_required: bool = False,
-        allow_paid_fallback: bool = True,
-    ) -> Optional[SearchResponse]:
-        key = make_search_cache_key(
-            query=query,
-            max_results=max_results,
-            with_images=with_images,
+        plan_keyword_values = [kw.text for kw in plan.wikipedia_keywords]
+
+        log_event(
+            "Wikipedia grounding 调用检查",
+            mode=request.mode,
+            keyword_count=len(plan.wikipedia_keywords),
+            keyword_values=plan_keyword_values,
         )
 
-        fresh = await self._cache.get_fresh(key)
-        if fresh is not None:
-            log_ok("网页搜索", stage="fresh_cache", query=query, max_results=max_results, with_images=with_images, results=len(fresh.results), images=len(fresh.images))
-            return _with_source(fresh, "fresh_cache")
-
-        last_empty: Optional[SearchResponse] = None
-        failures: List[str] = []
-
-        for stage in self._chain:
-            if stage.name in self._disabled_stages:
-                failures.append(f"{stage.name}: disabled_by_test")
-
-                log_event("网页搜索跳过：测试注入禁用阶段", stage=stage.name, query=query, max_results=max_results, with_images=with_images)
-                continue
-
-            if stage.name == "stale_cache" and freshness_required:
-                failures.append("stale_cache: skipped_for_freshness_required")
-
-                log_event("网页搜索跳过：要求新鲜度，跳过过期缓存", stage=stage.name, query=query, max_results=max_results, with_images=with_images)
-                continue
-
-            if stage.name == "tavily" and not allow_paid_fallback:
-                failures.append("tavily: skipped_for_paid_fallback_disabled")
-
-                log_event("网页搜索跳过：禁用付费回退，跳过 Tavily", stage=stage.name, query=query, max_results=max_results, with_images=with_images)
-                continue
-
-            try:
-                response = await stage.handler(
-                    query=query,
-                    max_results=max_results,
-                    with_images=with_images,
+        total_started = time.monotonic()
+        grounding_task: Optional[asyncio.Task[Tuple[WikipediaGroundingResult, ...]]] = (
+            None
+        )
+        grounding_started: Optional[float] = None
+        grounding_elapsed_ms = 0
+        if plan.wikipedia_keywords:
+            grounding_started = time.monotonic()
+            grounding_task = asyncio.create_task(
+                self._run_wikipedia_grounding_safe(
+                    keywords=list(plan.wikipedia_keywords),
+                    mode=request.mode,
                 )
-
-            except Exception as e:
-                failures.append(f"{stage.name}: {type(e).__name__}: {e}")
-
-                log_fail("网页搜索", e, stage=stage.name, query=query, max_results=max_results, with_images=with_images)
-                continue
-
-            if response is None:
-                failures.append(f"{stage.name}: returned_none")
-
-                log_event("网页搜索降级：阶段返回空，切换下一阶段", stage=stage.name, query=query, max_results=max_results, with_images=with_images)
-                continue
-
-            if not has_response_content(response):
-                last_empty = response
-                failures.append(f"{stage.name}: empty_result")
-
-                log_event("网页搜索降级：阶段返回空结果，切换下一阶段", stage=stage.name, query=query, max_results=max_results, with_images=with_images, results=len(response.results), images=len(response.images), has_answer=bool(response.answer), source=response.source)
-
-                if self._continue_on_empty:
-                    continue
-
-                return _with_source(response, stage.name)
-
-            response = _with_source(response, stage.name)
-
-            if stage.cacheable:
-                await self._cache.set(key, response)
-
-            log_ok("网页搜索", stage=stage.name, query=query, max_results=max_results, with_images=with_images, results=len(response.results), images=len(response.images))
-
-            return response
-
-        log_fail("网页搜索", "所有搜索阶段均失败", query=query, max_results=max_results, with_images=with_images, freshness_required=freshness_required, failures=failures)
-
-        return last_empty
-
-    async def search_many(
-        self,
-        queries: List[str],
-        *,
-        max_results_per_query: int = 8,
-        final_max_results: int = 20,
-        with_images: bool = False,
-        concurrency: int = MAX_BROAD_SEARCH_CONCURRENCY,
-        dedupe_domains: bool = DEFAULT_DEDUPE_DOMAINS,
-        max_per_domain: int = DEFAULT_MAX_PER_DOMAIN,
-        notes: Optional[List[str]] = None,
-    ) -> SearchResponse:
-        """并发执行多查询搜索并合并结果集。
-
-        每个子查询的 allow_paid_fallback=False，
-        因此 search_many 不会触发 Tavily 付费回退。
-        Tavily 仍可通过 search(... allow_paid_fallback=True) 使用。"""
-        normalized_queries = normalize_queries(
-            queries,
-            limit=MAX_BROAD_SEARCH_QUERIES,
-            notes=notes,
-        )
-
-        if not normalized_queries:
-            return SearchResponse(query="", results=(), images=(), source="multi")
-
-        semaphore = asyncio.Semaphore(concurrency)
-
-        async def _run_one(search_query: str) -> Optional[SearchResponse]:
-            async with semaphore:
-                return await self.search(
-                    query=search_query,
-                    max_results=max_results_per_query,
-                    with_images=with_images,
-                    allow_paid_fallback=False,
-                )
-
-        tasks = [_run_one(search_query) for search_query in normalized_queries]
-        raw_responses = await asyncio.gather(*tasks, return_exceptions=True)
-
-        responses: List[SearchResponse] = []
-        failures: List[str] = []
-
-        for search_query, result in zip(normalized_queries, raw_responses):
-            if isinstance(result, Exception):
-                failures.append(f"{search_query}: {type(result).__name__}: {result}")
-                continue
-            if result is None:
-                failures.append(f"{search_query}: returned_none")
-                continue
-            if not has_response_content(result):
-                failures.append(f"{search_query}: empty_result")
-                continue
-            responses.append(result)
-
-        merged = merge_many_search_responses(
-            query=" | ".join(normalized_queries),
-            responses=responses,
-            final_max_results=final_max_results,
-            dedupe_domains=dedupe_domains,
-            max_per_domain=max_per_domain,
-            notes=notes,
-        )
-
-        log_ok(
-            "web multi-query search",
-            queries=len(normalized_queries),
-            results=len(merged.results),
-            images=len(merged.images),
-            failures=failures,
-        )
-
-        return merged
-
-    async def _search_searxng(
-        self,
-        *,
-        query: str,
-        max_results: int,
-        with_images: bool,
-    ) -> Optional[SearchResponse]:
-        return await self._searxng.search(
-            query=query,
-            max_results=max_results,
-            with_images=with_images,
-        )
-
-    async def _search_duckduckgo(
-        self,
-        *,
-        query: str,
-        max_results: int,
-        with_images: bool,
-    ) -> Optional[SearchResponse]:
-        return await self._duckduckgo.search(
-            query=query,
-            max_results=max_results,
-            with_images=with_images,
-        )
-
-    async def _search_stale_cache(
-        self,
-        *,
-        query: str,
-        max_results: int,
-        with_images: bool,
-    ) -> Optional[SearchResponse]:
-        key = make_search_cache_key(
-            query=query,
-            max_results=max_results,
-            with_images=with_images,
-        )
-
-        return await self._cache.get_stale(key)
-
-    async def _search_tavily(
-        self,
-        *,
-        query: str,
-        max_results: int,
-        with_images: bool,
-    ) -> Optional[SearchResponse]:
-        return await self._tavily.search(
-            query=query,
-            max_results=max_results,
-            with_images=with_images,
-        )
-
-
-def _deduplicate_results_by_url(
-    results: Tuple[SearchResult, ...],
-    *,
-    notes: Optional[List[str]] = None,
-) -> Tuple[SearchResult, ...]:
-    seen: Set[str] = set()
-    deduped: List[SearchResult] = []
-    removed_count = 0
-
-    for result in results:
-        key = normalize_url_for_dedup(result.url)
-        if not key:
-            continue
-
-        if key in seen:
-            removed_count += 1
-            continue
-
-        seen.add(key)
-        deduped.append(result)
-
-    if removed_count:
-        add_note(notes, f"{removed_count} duplicate URLs were removed.")
-
-    return tuple(deduped)
-
-
-def _deduplicate_images(
-    images: Tuple[ImageResult, ...],
-    *,
-    notes: Optional[List[str]] = None,
-) -> Tuple[ImageResult, ...]:
-    seen: Set[str] = set()
-    deduped: List[ImageResult] = []
-    removed_count = 0
-
-    for image in images:
-        key = normalize_url_for_dedup(image.url)
-        if not key:
-            continue
-
-        if key in seen:
-            removed_count += 1
-            continue
-
-        seen.add(key)
-        deduped.append(image)
-
-    if removed_count:
-        add_note(notes, f"{removed_count} duplicate image URLs were removed.")
-
-    return tuple(deduped)
-
-
-def merge_many_search_responses(
-    *,
-    query: str,
-    responses: List[SearchResponse],
-    final_max_results: int,
-    dedupe_domains: bool,
-    max_per_domain: int,
-    notes: Optional[List[str]] = None,
-) -> SearchResponse:
-    results: List[SearchResult] = []
-    images: List[ImageResult] = []
-    answers: List[str] = []
-    source_parts: Set[str] = set()
-
-    for response in responses:
-        results.extend(response.results)
-        images.extend(response.images)
-        if response.answer:
-            answers.append(response.answer)
-        source_parts.update(_split_source(response.source))
-
-    deduped_results = _deduplicate_results_by_url(tuple(results), notes=notes)
-
-    if dedupe_domains:
-        before_domain_dedupe = len(deduped_results)
-        deduped_results = deduplicate_results_by_domain(
-            deduped_results,
-            max_per_domain=max_per_domain,
-        )
-        if len(deduped_results) < before_domain_dedupe:
-            add_note(
-                notes,
-                f"{before_domain_dedupe - len(deduped_results)} same-domain results were removed by domain dedupe.",
             )
+        else:
+            reason = "fast_mode" if request.mode == "fast" else "empty_keywords"
+            log_event(
+                "Wikipedia grounding 未调用",
+                reason=reason,
+                mode=request.mode,
+            )
+
+        all_variants: List[VariantSearchResponse] = []
+        main_search_started = time.monotonic()
+
+        if not custom_mode:
+            log_event(
+                "搜索源调度 SearXNG",
+                search_call_id=search_call_id,
+                variants=len(plan.query_variants),
+                with_images=request.with_images,
+            )
+            searxng_variant_results = await run_searxng_variants(
+                search_call_id=search_call_id,
+                variants=list(plan.query_variants),
+                searcher=self._searxng_searcher,
+                cache=self._cache,
+                with_images=request.with_images,
+            )
+            all_variants.extend(searxng_variant_results)
+            log_event(
+                "搜索源 SearXNG 完成",
+                search_call_id=search_call_id,
+                results=len(searxng_variant_results),
+            )
+
+            default_provider_calls = select_default_provider_calls(
+                mode=request.mode,
+                variants=plan.query_variants,
+                searxng_responses=searxng_variant_results,
+                serper_enabled=self._serper_enabled,
+            )
+
+            if not default_provider_calls:
+                searxng_useful = sum(
+                    1
+                    for r in searxng_variant_results
+                    for item in r.response.results
+                    if item.title.strip() and item.url.strip()
+                )
+                log_event(
+                    "搜索源 Serper 跳过",
+                    search_call_id=search_call_id,
+                    serper_enabled=self._serper_enabled,
+                    mode=request.mode,
+                    searxng_useful=searxng_useful,
+                )
+
+            if default_provider_calls:
+                serper_variants = [call.variant for call in default_provider_calls]
+                log_event(
+                    "搜索源调度 Serper",
+                    search_call_id=search_call_id,
+                    variants=len(serper_variants),
+                    serper_enabled=self._serper_enabled,
+                )
+                serper_variant_results = await run_serper_variants(
+                    variants=serper_variants,
+                    searcher=self._serper_searcher,
+                    cache=self._cache,
+                    with_images=request.with_images,
+                )
+                all_variants.extend(serper_variant_results)
+                log_event(
+                    "搜索源 Serper 完成",
+                    search_call_id=search_call_id,
+                    results=len(serper_variant_results),
+                )
+        else:
+            log_event(
+                "custom 搜索模式跳过平台搜索源",
+                search_call_id=search_call_id,
+                variants=len(plan.query_variants),
+            )
+
+        custom_provider_calls = select_custom_provider_calls(
+            mode=request.mode,
+            variants=plan.query_variants,
+            credentials=request.custom_provider_params or (),
+            force=custom_mode,
+        )
+
+        if custom_mode and not custom_provider_calls:
+            raise _custom_not_configured()
+
+        if custom_provider_calls:
+            try:
+                custom_variant_results = await run_custom_provider_calls(
+                    provider_calls=custom_provider_calls,
+                    credentials=request.custom_provider_params or (),
+                    cache=self._cache,
+                    user_id=request.user_id,
+                    with_images=request.with_images,
+                    strict=custom_mode,
+                )
+                all_variants.extend(custom_variant_results)
+            except CustomSearchProviderUnavailableError:
+                raise
+            except Exception as e:
+                log_fail(
+                    "Custom provider recall",
+                    repr(e),
+                    calls=len(custom_provider_calls),
+                )
+                if custom_mode:
+                    raise _custom_provider_error()
+
+        main_search_elapsed_ms = int((time.monotonic() - main_search_started) * 1000)
+
+        if not all_variants:
+            if grounding_task is not None:
+                grounding_task.cancel()
+                try:
+                    await grounding_task
+                except asyncio.CancelledError:
+                    pass
+
+            total_elapsed_ms = int((time.monotonic() - total_started) * 1000)
+            log_event(
+                "web_search 调度耗时",
+                search_call_id=search_call_id,
+                main_search_elapsed_ms=main_search_elapsed_ms,
+                grounding_elapsed_ms=grounding_elapsed_ms,
+                total_elapsed_ms=total_elapsed_ms,
+                grounding_keyword_count=len(plan.wikipedia_keywords),
+            )
+            queries_str = " | ".join(normalized_queries)
+            raise EmptySearchResultError(
+                provider="all",
+                query=queries_str,
+            )
+
+        grounding: Tuple[WikipediaGroundingResult, ...] = ()
+        if grounding_task is not None:
+            grounding = await grounding_task
+            if grounding_started is not None:
+                grounding_elapsed_ms = int(
+                    (time.monotonic() - grounding_started) * 1000
+                )
+
+        all_images = _collect_images(all_variants)
+        merged_limit = MERGED_CANDIDATE_LIMIT.get(
+            request.mode, MERGED_CANDIDATE_LIMIT["normal"]
+        )
+        ranked_urls = rank_urls_pipeline(
+            variant_responses=all_variants,
+            mode=request.mode,
+            merged_limit=merged_limit,
+            max_urls_per_domain=_DEFAULT_MAX_PER_DOMAIN,
+        )
+
+        source_parts = _collect_source_parts(all_variants)
+        merged_response = _ranked_urls_to_search_response(
+            ranked_urls=ranked_urls,
+            query=" | ".join(normalized_queries),
+            images=all_images,
+            source_parts=source_parts,
+        )
+
+        total_elapsed_ms = int((time.monotonic() - total_started) * 1000)
+        log_event(
+            "web_search 调度耗时",
+            search_call_id=search_call_id,
+            main_search_elapsed_ms=main_search_elapsed_ms,
+            grounding_elapsed_ms=grounding_elapsed_ms,
+            total_elapsed_ms=total_elapsed_ms,
+            grounding_keyword_count=len(plan.wikipedia_keywords),
+        )
+
+        return SearchManyResult(
+            response=merged_response,
+            grounding=grounding,
+        )
+
+    async def _run_wikipedia_grounding_safe(
+        self,
+        *,
+        keywords: List[Any],
+        mode: str,
+    ) -> Tuple[WikipediaGroundingResult, ...]:
+        try:
+            grounding = await run_wikipedia_grounding(
+                keywords=keywords,
+                cache=self._cache,
+                mode=mode,
+            )
+        except Exception as e:
+            log_fail(
+                "Wikipedia grounding",
+                repr(e),
+                keywords=keywords,
+            )
+            return ()
+
+        return tuple(grounding)
+
+    async def close(self) -> None:
+        await self._searxng_searcher.close()
+        await self._serper_searcher.close()
+        await close_wikipedia_grounding_client()
+        log_event("SearchCoordinator 关闭")
+
+
+def _collect_images(all_variants: List[VariantSearchResponse]) -> List[ImageResult]:
+    images: List[ImageResult] = []
+    for vr in all_variants:
+        images.extend(vr.response.images or [])
+    return images
+
+
+def _collect_source_parts(all_variants: List[VariantSearchResponse]) -> Set[str]:
+    source_parts: Set[str] = set()
+    for vr in all_variants:
+        source = vr.response.source
+        if source:
+            normalized = source.removeprefix("multi:")
+            source_parts.update(part for part in normalized.split(",") if part)
+    return source_parts
+
+
+def _ranked_urls_to_search_response(
+    *,
+    ranked_urls: List[RankedUrlCandidate],
+    query: str,
+    images: List[ImageResult],
+    source_parts: Set[str],
+) -> SearchResponse:
+    ranked_results = tuple(
+        SearchResult(
+            title=item.candidate.title,
+            url=item.candidate.url,
+            snippet=item.candidate.snippet,
+        )
+        for item in ranked_urls
+    )
 
     source = "multi"
     if source_parts:
@@ -390,43 +401,27 @@ def merge_many_search_responses(
 
     return SearchResponse(
         query=query,
-        results=deduped_results[:final_max_results],
-        answer=answers[0] if answers else None,
-        images=_deduplicate_images(tuple(images), notes=notes)[:final_max_results],
+        results=ranked_results,
+        images=tuple(images),
         source=source,
     )
 
 
-def _split_source(source: Optional[str]) -> Set[str]:
-    if not source or source == "multi":
-        return set()
-
-    normalized = source.removeprefix("multi:")
-    return {part for part in normalized.split(",") if part}
-
-
-def create_search_coordinator() -> SearchCoordinator:
-    cache = SearchCache(
-        fresh_ttl=settings.WEB_SEARCH_FRESH_CACHE_TTL,
-        stale_ttl=settings.WEB_SEARCH_STALE_CACHE_TTL,
-        maxsize=settings.WEB_SEARCH_CACHE_MAXSIZE,
+def _custom_not_configured() -> CustomSearchProviderUnavailableError:
+    return CustomSearchProviderUnavailableError(
+        provider="custom",
+        public_code=PUBLIC_ERROR_NOT_CONFIGURED,
+        status=STATUS_PROVIDER_ERROR,
+        last_error_code=ERROR_NOT_CONFIGURED,
+        message="Custom provider is not configured.",
     )
 
-    return SearchCoordinator(
-        cache=cache,
-        searxng_searcher=SearXNGSearcher(
-            base_url=settings.SEARXNG_BASE_URL,
-            timeout=settings.SEARXNG_TIMEOUT,
-            language=settings.SEARXNG_LANGUAGE or None,
-            safesearch=settings.SEARXNG_SAFESEARCH,
-        ),
-        duckduckgo_searcher=DuckDuckGoBufferSearcher(
-            timeout=settings.DUCKDUCKGO_TIMEOUT,
-            region=settings.DUCKDUCKGO_REGION,
-            safesearch=settings.DUCKDUCKGO_SAFESEARCH,
-        ),
-        tavily_searcher=TavilySearcher(
-            api_key=settings.TAVILY_API_KEY,
-            timeout=settings.TAVILY_TIMEOUT,
-        ),
+
+def _custom_provider_error() -> CustomSearchProviderUnavailableError:
+    return CustomSearchProviderUnavailableError(
+        provider="custom",
+        public_code=PUBLIC_ERROR_PROVIDER_ERROR,
+        status=STATUS_PROVIDER_ERROR,
+        last_error_code=ERROR_PROVIDER_ERROR,
+        message="Custom provider search failed.",
     )

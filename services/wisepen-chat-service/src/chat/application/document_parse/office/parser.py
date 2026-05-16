@@ -1,12 +1,16 @@
 from pathlib import Path
 from typing import List, Optional
 
+from chat.application.document_parse.base import BaseDocumentParser
+from chat.application.document_parse.errors import (
+    DocumentParseError,
+    UnsupportedDocumentFormatError,
+)
 from chat.application.document_parse.models import DocumentParseResult
 from chat.application.document_parse.office.fallback_parser import OfficeFallbackParser
 from chat.application.document_parse.office.native_parser import OfficeNativeParser
 from chat.application.document_parse.office.primary_parser import OfficePrimaryParser
-from common.logger import log_event, log_fail, log_ok
-
+from common.logger import log_event
 
 _PARSER_NAME = "OfficeParser"
 _PRIMARY_PARSER = "docling"
@@ -14,8 +18,17 @@ _FALLBACK_PARSER = "markitdown"
 _NATIVE_PARSER = "python_fallback"
 _FALLBACK_CHAIN = [_PRIMARY_PARSER, _FALLBACK_PARSER, _NATIVE_PARSER]
 
+_SUFFIX_TO_FILE_TYPE = {
+    ".docx": "docx",
+    ".docm": "docx",
+    ".pptx": "pptx",
+    ".pptm": "pptx",
+}
 
-class OfficeParser:
+
+class OfficeParser(BaseDocumentParser):
+    supported_extensions = (".docx", ".docm", ".pptx", ".pptm")
+
     def __init__(
         self,
         *,
@@ -26,22 +39,28 @@ class OfficeParser:
         self.primary_parser = primary_parser
         self.fallback_parser = fallback_parser
         self.native_parser = native_parser
-        log_ok(
-            "OfficeParser init",
+        log_event(
+            "OfficeParser 初始化",
             primary_parser_class=type(primary_parser).__name__,
             fallback_parser_class=type(fallback_parser).__name__,
             native_parser_class=type(native_parser).__name__,
             fallback_chain=" -> ".join(_FALLBACK_CHAIN),
         )
 
-    def parse(self, path: Path, *, file_type: str) -> DocumentParseResult:
+    async def parse(self, path: Path) -> DocumentParseResult:
+        file_type = _SUFFIX_TO_FILE_TYPE.get(path.suffix.lower())
+        if file_type is None:
+            raise UnsupportedDocumentFormatError(path.suffix)
+        return self._parse_sync(path, file_type=file_type)
+
+    def _parse_sync(self, path: Path, *, file_type: str) -> DocumentParseResult:
         warnings: List[str] = []
         result: Optional[DocumentParseResult] = None
         selected_parser: Optional[str] = None
 
         try:
             log_event(
-                "OfficeParser attempt",
+                "OfficeParser 尝试",
                 path=str(path),
                 file_type=file_type,
                 parser=_PRIMARY_PARSER,
@@ -49,19 +68,19 @@ class OfficeParser:
             )
             result = self.primary_parser.parse(path, file_type=file_type)
             selected_parser = _PRIMARY_PARSER
-            log_ok(
-                "OfficeParser attempt",
+            log_event(
+                "OfficeParser 尝试完成",
                 path=str(path),
                 file_type=file_type,
                 parser=_PRIMARY_PARSER,
                 handler_class=type(self.primary_parser).__name__,
                 length=len(result.text),
             )
-        except Exception as exc:
-            warnings.append(f"docling_failed: {type(exc).__name__}: {exc}")
-            log_fail(
-                "OfficeParser attempt",
-                exc,
+        except Exception as e:
+            warnings.append(f"docling_failed: {type(e).__name__}: {e}")
+            log_event(
+                "OfficeParser 尝试未完成",
+                error=repr(e),
                 path=str(path),
                 file_type=file_type,
                 parser=_PRIMARY_PARSER,
@@ -71,7 +90,7 @@ class OfficeParser:
         if result is None:
             try:
                 log_event(
-                    "OfficeParser attempt",
+                    "OfficeParser 尝试",
                     path=str(path),
                     file_type=file_type,
                     parser=_FALLBACK_PARSER,
@@ -79,19 +98,19 @@ class OfficeParser:
                 )
                 result = self.fallback_parser.parse(path, file_type=file_type)
                 selected_parser = _FALLBACK_PARSER
-                log_ok(
-                    "OfficeParser attempt",
+                log_event(
+                    "OfficeParser 尝试完成",
                     path=str(path),
                     file_type=file_type,
                     parser=_FALLBACK_PARSER,
                     handler_class=type(self.fallback_parser).__name__,
                     length=len(result.text),
                 )
-            except Exception as exc:
-                warnings.append(f"markitdown_failed: {type(exc).__name__}: {exc}")
-                log_fail(
-                    "OfficeParser attempt",
-                    exc,
+            except Exception as e:
+                warnings.append(f"markitdown_failed: {type(e).__name__}: {e}")
+                log_event(
+                    "OfficeParser 尝试未完成",
+                    error=repr(e),
                     path=str(path),
                     file_type=file_type,
                     parser=_FALLBACK_PARSER,
@@ -101,7 +120,7 @@ class OfficeParser:
         if result is None:
             try:
                 log_event(
-                    "OfficeParser attempt",
+                    "OfficeParser 尝试",
                     path=str(path),
                     file_type=file_type,
                     parser=_NATIVE_PARSER,
@@ -109,28 +128,28 @@ class OfficeParser:
                 )
                 result = self.native_parser.parse(path, file_type=file_type)
                 selected_parser = _NATIVE_PARSER
-                log_ok(
-                    "OfficeParser attempt",
+                log_event(
+                    "OfficeParser 尝试完成",
                     path=str(path),
                     file_type=file_type,
                     parser=_NATIVE_PARSER,
                     handler_class=type(self.native_parser).__name__,
                     length=len(result.text),
                 )
-            except Exception as exc:
-                warnings.append(f"python_fallback_failed: {type(exc).__name__}: {exc}")
-                log_fail(
-                    "OfficeParser attempt",
-                    exc,
+            except Exception as e:
+                warnings.append(f"python_fallback_failed: {type(e).__name__}: {e}")
+                log_event(
+                    "OfficeParser 尝试未完成",
+                    error=repr(e),
                     path=str(path),
                     file_type=file_type,
                     parser=_NATIVE_PARSER,
                     handler_class=type(self.native_parser).__name__,
                 )
-                raise RuntimeError(
+                raise DocumentParseError(
                     "Office parsing failed after all fallback parsers: "
                     + " | ".join(warnings)
-                ) from exc
+                ) from e
 
         result.metadata["parser"] = _PARSER_NAME
         result.metadata["selected_parser"] = selected_parser
@@ -139,8 +158,8 @@ class OfficeParser:
         result.metadata["table_count"] = len(result.tables)
         result.warnings = warnings + result.warnings
 
-        log_ok(
-            "OfficeParser parse",
+        log_event(
+            "OfficeParser 完成",
             path=str(path),
             file_type=file_type,
             selected_parser=selected_parser,

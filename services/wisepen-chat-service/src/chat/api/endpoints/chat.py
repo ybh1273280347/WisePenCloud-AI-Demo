@@ -1,21 +1,23 @@
 import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
-from fastapi.responses import StreamingResponse
-from dependency_injector.wiring import inject, Provide
-
-from chat.api.vercel_formats import (
-    message_start, message_finish, stream_done, abort, error,
-)
-
-from common.security import require_login
-from common.logger import log_event, log_error
 from chat.api.schemas.chat import ChatRequest
+from chat.api.vercel_formats import (
+    abort,
+    error,
+    message_finish,
+    message_start,
+    stream_done,
+)
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.container import Container
 from chat.core.config.app_settings import settings
 from chat.domain.repositories import SessionRepository
+from common.logger import log_error, log_event
+from common.security import require_login
+from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 router = APIRouter()
 
@@ -34,12 +36,14 @@ async def _vercel_generator(chat_gen, model_name: str):
 
     except asyncio.CancelledError:
         log_event("用户取消请求")
+        yield message_finish()
         yield abort(reason="user_cancelled")
         yield stream_done()
         raise
 
     except Exception as e:
         log_error("流生成", e)
+        yield message_finish()
         yield error(error_text=str(e))
         yield stream_done()
 
@@ -47,11 +51,13 @@ async def _vercel_generator(chat_gen, model_name: str):
 @router.post("/completions")
 @inject
 async def chat_completions(
-        req: ChatRequest,
-        background_tasks: BackgroundTasks,
-        user_id: str = Depends(require_login),
-        coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
-        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+    req: ChatRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_login),
+    coordinator: ChatTurnCoordinator = Depends(
+        Provide[Container.chat_turn_coordinator]
+    ),
+    session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
     """
     请求格式:
@@ -82,8 +88,11 @@ async def chat_completions(
         user_query=req.query,
         background_tasks=background_tasks,
         model_id=resolved_model_id,
+        web_search_provider_mode=req.web_search_provider_mode,
+        web_search_custom_provider=req.web_search_custom_provider,
+        web_search_custom_api_key=req.web_search_custom_api_key,
+        web_search_use_saved_custom_key=req.web_search_use_saved_custom_key,
         states=req.states,
-        search_override=req.search_override,
     )
 
     return StreamingResponse(

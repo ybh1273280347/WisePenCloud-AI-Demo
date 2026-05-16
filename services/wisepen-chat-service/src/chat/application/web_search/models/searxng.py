@@ -7,8 +7,10 @@ from chat.application.web_search.models.common import (
     SearchResult,
 )
 from chat.application.web_search.models.helpers import is_valid_result, to_optional_str
-from chat.application.web_search.utils import deduplicate_results_by_domain, deduplicate_images
-from common.logger import log_fail
+from chat.application.web_search.utils.domains import deduplicate_results_by_domain
+from chat.application.web_search.utils.images import deduplicate_images
+from common.logger import log_event
+
 
 def _map_searxng_result(item: Mapping[str, Any]) -> SearchResult:
     return SearchResult(
@@ -17,6 +19,13 @@ def _map_searxng_result(item: Mapping[str, Any]) -> SearchResult:
         snippet=str(item.get("content") or item.get("snippet") or ""),
         images=_map_result_images(item),
     )
+
+
+def _as_sequence(value: Any) -> Sequence[Any]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return value
+
+    return ()
 
 
 def _map_result_images(item: Mapping[str, Any]) -> Tuple[ImageResult, ...]:
@@ -42,6 +51,7 @@ def _map_result_images(item: Mapping[str, Any]) -> Tuple[ImageResult, ...]:
 class SearXNGSearchRequest:
     query: str
     category: Optional[str] = None
+    engines: Optional[List[str]] = None
     language: Optional[str] = None
     safesearch: Optional[int] = None
 
@@ -51,16 +61,46 @@ class SearXNGSearchRequest:
             "format": "json",
         }
 
-        if self.category:
+        if self.engines:
+            params["engines"] = ",".join(self.engines)
+        elif self.category:
             params["categories"] = self.category
 
-        if self.language:
+        if self.language is not None:
             params["language"] = self.language
 
         if self.safesearch is not None:
             params["safesearch"] = self.safesearch
 
         return params
+
+
+def _log_empty_mapped_results(
+    *,
+    query: str,
+    raw_count: int,
+    raw_results: Sequence[Any],
+) -> None:
+    first_item = next((item for item in raw_results if isinstance(item, Mapping)), None)
+    first_item_keys = list(first_item.keys()) if first_item is not None else []
+    first_title = str(first_item.get("title") or "") if first_item is not None else ""
+    first_url = str(first_item.get("url") or "") if first_item is not None else ""
+    first_content = (
+        str(first_item.get("content") or first_item.get("snippet") or "")[:200]
+        if first_item is not None
+        else ""
+    )
+
+    log_event(
+        "SearXNG 搜索",
+        reason="mapped_results_empty",
+        query=query,
+        raw_count=raw_count,
+        first_item_keys=first_item_keys,
+        first_title=first_title,
+        first_url=first_url,
+        first_content=first_content,
+    )
 
 
 def map_searxng_response(
@@ -90,7 +130,6 @@ def map_searxng_response(
         return SearchResponse(
             query=query,
             results=(),
-            answer=to_optional_str(data.get("answer")),
             images=images[:max_results],
         )
 
@@ -107,11 +146,10 @@ def map_searxng_response(
         mapped_results.append(result)
 
     if raw_count > 0 and not mapped_results:
-        log_fail(
-            "SearXNG结果过滤",
-            "原始结果全部被过滤",
+        _log_empty_mapped_results(
             query=query,
             raw_count=raw_count,
+            raw_results=raw_results,
         )
 
     results = deduplicate_results_by_domain(
@@ -122,7 +160,6 @@ def map_searxng_response(
     return SearchResponse(
         query=query,
         results=results[:max_results],
-        answer=to_optional_str(data.get("answer")),
     )
 
 
@@ -133,7 +170,6 @@ def merge_search_responses(
     return SearchResponse(
         query=web_response.query,
         results=web_response.results,
-        answer=web_response.answer or image_response.answer,
         images=image_response.images,
         source=web_response.source or image_response.source,
     )

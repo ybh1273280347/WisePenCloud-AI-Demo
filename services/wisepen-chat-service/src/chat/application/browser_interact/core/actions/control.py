@@ -3,6 +3,12 @@ from typing import Dict, List, Optional
 from chat.application.web_fetch.content_processor import ContentProcessor
 from common.logger import log_fail
 
+from ..action_runtime import (
+    action_error_response,
+    get_existing_page_or_error,
+    session_state,
+)
+from ..intervention import UserInterventionDetector
 from ..protocol import (
     ActionResult,
     build_error_response,
@@ -12,14 +18,8 @@ from ..protocol import (
     make_schema_error,
     make_user_intervention_error_from_signal,
 )
-from ..intervention import UserInterventionDetector
 from ..session import BrowserSessionManager
 from ..snapshot import SnapshotManager
-from ..action_runtime import (
-    action_error_response,
-    get_existing_page_or_error,
-    session_state,
-)
 
 _SCROLL_STEP_PX = 100
 _SETTLE_WAIT_MS = 800

@@ -6,11 +6,10 @@ from chat.application.web_search.models.common import (
     SearchResponse,
     SearchResult,
 )
-from chat.application.web_search.models.helpers import is_valid_result, to_optional_str
-from chat.application.web_search.utils import (
-    deduplicate_results_by_domain,
-    deduplicate_images,
-)
+from chat.application.web_search.models.helpers import is_valid_result
+from chat.application.web_search.utils.domains import deduplicate_results_by_domain
+from chat.application.web_search.utils.images import deduplicate_images
+
 
 def _map_tavily_result(item: Mapping[str, Any]) -> SearchResult:
     return SearchResult(
@@ -21,7 +20,7 @@ def _map_tavily_result(item: Mapping[str, Any]) -> SearchResult:
     )
 
 
-def _map_images(items) -> Tuple[ImageResult, ...]:
+def _map_images(items: Any) -> Tuple[ImageResult, ...]:
     if not isinstance(items, Sequence) or isinstance(items, str):
         return ()
 
@@ -35,7 +34,7 @@ def _map_images(items) -> Tuple[ImageResult, ...]:
     return deduplicate_images(images)
 
 
-def _map_image(item) -> Optional[ImageResult]:
+def _map_image(item: Any) -> Optional[ImageResult]:
     if isinstance(item, str):
         return ImageResult(url=item)
 
@@ -79,7 +78,8 @@ class TavilySearchRequest:
             "max_results": self.max_results,
             "include_answer": False,
             "include_raw_content": False,
-            "include_images": self.with_images,
+            "include_images": False,
+            "include_usage": True,
             "search_depth": "basic",
         }
 
@@ -108,6 +108,5 @@ def map_tavily_response(
     return SearchResponse(
         query=str(data.get("query") or ""),
         results=results,
-        answer=to_optional_str(data.get("answer")),
-        images=_map_images(data.get("images"))[:max_results],
+        images=(),
     )

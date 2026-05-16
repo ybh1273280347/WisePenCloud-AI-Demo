@@ -1,15 +1,13 @@
-import yaml
 import asyncio
+import os
 import threading
-from pathlib import Path
-from typing import Literal
-from pydantic import BaseModel
+from typing import Literal, Optional
 
+import yaml
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from common.cloud.nacos_client import nacos_client_manager
-from common.logger import log_event, log_error
-
-SERVICE_ROOT = Path(__file__).resolve().parents[4]
+from common.logger import log_error, log_event
+from pydantic import BaseModel
 
 
 class CoreSettings(BaseModel):
@@ -57,134 +55,70 @@ class StorageSettings(BaseModel):
 
 class WebSearchSettings(BaseModel):
     # Web Search 工具配置
-    TAVILY_API_KEY: str = "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"
-    TAVILY_ENABLED: bool = True
-    TAVILY_TIMEOUT: float = 15.0
-
-    SEARXNG_ENABLED: bool = False
+    SERPER_ENABLED: bool = True
     SEARXNG_BASE_URL: str = "http://localhost:8080"
-    SEARXNG_TIMEOUT: float = 5.0
-    SEARXNG_LANGUAGE: str = ""
-    SEARXNG_SAFESEARCH: int = 1
+    SERPER_API_KEY: Optional[str] = "ce1fb242cbfc5dd0097d97f0ea866bf34f571ba3"
+    SERPER_BASE_URL: str = "https://google.serper.dev"
+    TAVILY_BASE_URL: str = "https://api.tavily.com"
+    BRAVE_SEARCH_BASE_URL: str = "https://api.search.brave.com"
+    SERPAPI_BASE_URL: str = "https://serpapi.com"
+    EXA_BASE_URL: str = "https://api.exa.ai"
+    PERPLEXITY_BASE_URL: str = "https://api.perplexity.ai"
+    WIKIPEDIA_BASE_URL_TEMPLATE: str = "https://{language}.wikipedia.org"
 
-    DUCKDUCKGO_BUFFER_ENABLED: bool = True
-    DUCKDUCKGO_TIMEOUT: float = 8.0
-    DUCKDUCKGO_REGION: str = "wt-wt"
-    DUCKDUCKGO_SAFESEARCH: str = "moderate"
 
-    WEB_SEARCH_FRESH_CACHE_TTL: int = 3600
-    WEB_SEARCH_STALE_CACHE_TTL: int = 86400
-    WEB_SEARCH_CACHE_MAXSIZE: int = 1024
+class SearchProviderCredentialSettings(BaseModel):
+    SEARCH_PROVIDER_CREDENTIAL_MASTER_KEY: Optional[str] = None
+    SEARCH_PROVIDER_CREDENTIAL_KEY_ID: Optional[str] = None
+    SEARCH_PROVIDER_CREDENTIAL_HMAC_SECRET: Optional[str] = None
+
+
+class PaperSearchSettings(BaseModel):
+    TOOL_CONTACT_EMAIL: Optional[str] = None
+    TOOL_USER_AGENT: str = "WisePenCloud-AI/1.0"
+    PAPER_SEARCH_ENABLE_CROSSREF: bool = True
+    PAPER_SEARCH_ENABLE_ARXIV: bool = True
+    PAPER_SEARCH_ENABLE_DATACITE: bool = True
+    PAPER_SEARCH_ENABLE_UNPAYWALL: bool = True
+    CROSSREF_BASE_URL: str = "https://api.crossref.org"
+    DATACITE_BASE_URL: str = "https://api.datacite.org"
+    UNPAYWALL_BASE_URL: str = "https://api.unpaywall.org"
 
 
 class WebFetchSettings(BaseModel):
     # Web Fetch 工具配置
     STEEL_BASE_URL: str = "http://localhost:3000"
-    WEB_FETCH_MIN_CONTENT_LENGTH: int = 400
-    WEB_FETCH_DOCUMENT_MIN_CONTENT_LENGTH: int = 50
-    WEB_FETCH_LAST_RESORT_MIN_LENGTH: int = 50
-    WEB_FETCH_MAX_DOCUMENT_SIZE: int = 50 * 1024 * 1024
-    WEB_FETCH_STATIC_TIMEOUT: float = 15.0
-    WEB_FETCH_BROWSER_TIMEOUT: float = 60.0
-    WEB_FETCH_CACHE_TTL_SECONDS: int = 10 * 60
-    WEB_FETCH_CACHE_MAX_ITEMS: int = 128
+    STEEL_USE_PROXY: bool = False
+    STEEL_REGION: Optional[str] = None
 
 
 class OcrSettings(BaseModel):
     ENABLE_OCR: bool = True
-    OCR_DEFAULT_MAX_PAGES: int = 3
-    OCR_MAX_PAGES: int = 10
-    OCR_RENDER_DPI: int = 180
-    OCR_MAX_IMAGE_PIXELS: int = 20_000_000
-    OCR_MAX_FILE_BYTES: int = 50 * 1024 * 1024
-    OCR_TIMEOUT_SECONDS: float = 120.0
-
-    OCR_BACKEND: str = "paddleocr"
-    OCR_LANGUAGE: str = "ch"
-    OCR_WORKER_MODE: str = "lazy_persistent"
-    OCR_WORKER_IDLE_TTL_SECONDS: int = 30 * 60
-    OCR_USE_DOC_ORIENTATION_CLASSIFY: bool = False
-    OCR_USE_DOC_UNWARPING: bool = False
-    OCR_USE_TEXTLINE_ORIENTATION: bool = False
 
 
-class ContextSettings(BaseModel):
-    # Token 动态滑动窗口 + 双水位压缩配置
-    # 模型上下文窗口总大小（token 数），默认对齐 gpt-4o 的 128k 上下文 128000
-    CTX_TOKEN_LIMIT: int = 128000
-    # 高水位线（触发阈值）：上下文累计 Token 达到此比例时触发摘要压缩
-    CTX_HIGH_WATERMARK_RATIO: float = 0.8
-    # 低水位线（安全退役线）：切分时按 Token 保留此比例以内的最新明细
-    # 最老的 (HIGH - LOW) 比例的 Token 对应的消息将被送去摘要
-    CTX_LOW_WATERMARK_RATIO: float = 0.5
-    # Redis 回填时从 MongoDB 拉取的历史消息条数上限
-    CTX_FALLBACK_HISTORY_LIMIT: int = 20
+class ExternalStateSettings(BaseModel):
+    OPEN_METEO_GEOCODING_URL: str = "https://geocoding-api.open-meteo.com/v1/search"
+    OPEN_METEO_FORECAST_URL: str = "https://api.open-meteo.com/v1/forecast"
+    OPEN_METEO_AIR_QUALITY_URL: str = (
+        "https://air-quality-api.open-meteo.com/v1/air-quality"
+    )
 
 
-class AgentSettings(BaseModel):
-    # Agentic ReAct 循环配置
-    # ReAct 最大推理迭代次数，防止工具调用产生无限循环
-    AGENT_MAX_ITERATIONS: int = 15
-    # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
-    TOOL_RESULT_MAX_CHARS: int = 4000
-
-
-class DocumentParserSettings(BaseModel):
-    # 文档解析引擎配置
-    # docling: 使用 Docling 高质量解析（需安装 doc 依赖组）
-    # native: 仅使用 openpyxl/python-pptx 等轻量解析
-    DOCUMENT_PARSER_BACKEND: Literal["docling", "native"] = "docling"
-    # Docling OCR 阶段（RapidOCR/ONNXRuntime）默认关闭，扫描件 OCR 由上层显式触发
-    DOCUMENT_PARSER_ENABLE_OCR: bool = False
-    # 表格结构解析（保留）
-    DOCUMENT_PARSER_ENABLE_TABLE_STRUCTURE: bool = True
-    DOCUMENT_PARSER_ENABLE_NATIVE_FALLBACK: bool = True
-
-
-class ToolContentStoreSettings(BaseModel):
-    # ToolContentStore 缓存配置
-    TOOL_CONTENT_STORE_TTL_SECONDS: int = 30 * 60
-    TOOL_CONTENT_STORE_MAX_TOTAL_CHARS: int = 20_000_000
-    TOOL_CONTENT_STORE_MAX_ITEM_CHARS: int = 20_000_000
-
-
-class SkillSettings(BaseModel):
-    # Skill 子系统配置（chat-service 作为只读消费方）
-    # 开发期 fixture 根目录：DEV=True 时 LocalFS 加载器先在这里找资产，找不到才回退 OSS
-    # 生产形态（DEV=False）完全不读这个目录，直接走 OssSkillAssetLoader
-    SKILL_ASSETS_CACHE_DIR: str = "dev_fixtures/skill_bundles"
-    # OSS 资产本地磁盘缓存目录（运行期管理，GC 自动清理）
-    SKILL_OSS_CACHE_DIR: str = "dev_fixtures/skill_oss_cache"
-    # 缓存文件 TTL：mtime 距今超过该秒数 → GC 清理（默认 6 小时）
-    SKILL_OSS_CACHE_TTL_SECONDS: int = 6 * 3600
-    # GC 扫描周期（秒）
-    SKILL_OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
-    # Matcher 每轮给 LLM 暴露的 skill 候选上限（受控披露，防 LLM 误加载）
-    SKILL_MATCH_TOP_K: int = 2
-    # Skill 元数据缓存 TTL（秒）。用户/Java 端发布的新 Skill 最坏需等 TTL 才被当前副本感知
-    # 过小会增加 Mongo 读压力；过大会让新 Skill 生效滞后
-    # 未来接 Kafka 事件驱动刷新后可放大此值作为兜底轮询
-    SKILL_CACHE_TTL_SECONDS: int = 30
-
-    @property
-    def skill_assets_cache_path(self) -> Path:
-        path = Path(self.SKILL_ASSETS_CACHE_DIR)
-        if path.is_absolute():
-            return path
-        return (SERVICE_ROOT / path).resolve()
-
-    @property
-    def skill_oss_cache_path(self) -> Path:
-        path = Path(self.SKILL_OSS_CACHE_DIR)
-        if path.is_absolute():
-            return path
-        return (SERVICE_ROOT / path).resolve()
+class SecurityNetworkSettings(BaseModel):
+    WEB_ACCESS_DOH_SERVERS: tuple[str, ...] = (
+        "https://dns.alidns.com/dns-query",
+        "https://doh.pub/dns-query",
+        "https://cloudflare-dns.com/dns-query",
+        "https://dns.google/dns-query",
+    )
 
 
 class RpcSettings(BaseModel):
     # ---- 内部 RPC / 服务发现（wisepen-common 基建） ----
     # Nacos 服务发现客户端侧负载均衡策略：weighted_random | round_robin | random
-    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = "weighted_random"
+    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = (
+        "weighted_random"
+    )
     # 单次请求超时（秒）
     RPC_DEFAULT_TIMEOUT: float = 5.0
     # 单次调用最多额外重试次数（故障转移跨实例）；真实请求次数 = retries + 1
@@ -193,41 +127,73 @@ class RpcSettings(BaseModel):
     SERVICE_DISCOVERY_CACHE_TTL_SECONDS: float = 30.0
 
 
+class MathReasoningSettings(BaseModel):
+    MATH_SAGE_ENABLED: bool = False
+    MATH_SAGE_WORKER_URL: str = "http://sage-math-worker:8000"
+
+
+class TranslationSettings(BaseModel):
+    TRANSLATION_DEVICE: str = "auto"
+
+
+class GitHubSearchSettings(BaseModel):
+    GITHUB_TOKEN: Optional[str] = None
+    GITHUB_API_BASE_URL: str = "https://api.github.com"
+    GITHUB_API_VERSION: str = "2026-03-10"
+
+
+class PackageIntelligenceSettings(BaseModel):
+    DEPS_DEV_API_BASE_URL: str = "https://api.deps.dev/v3"
+    PYPI_API_BASE_URL: str = "https://pypi.org"
+    NPM_REGISTRY_BASE_URL: str = "https://registry.npmjs.org"
+    OPENSFF_SCORECARD_API_BASE_URL: str = "https://api.securityscorecards.dev"
+
+
 class AppSettings(
     CoreSettings,
     LlmSettings,
     MessagingSettings,
     StorageSettings,
     WebSearchSettings,
+    SearchProviderCredentialSettings,
+    PaperSearchSettings,
     WebFetchSettings,
     OcrSettings,
-    ContextSettings,
-    AgentSettings,
-    DocumentParserSettings,
-    ToolContentStoreSettings,
-    SkillSettings,
+    ExternalStateSettings,
+    SecurityNetworkSettings,
     RpcSettings,
+    MathReasoningSettings,
+    TranslationSettings,
+    GitHubSearchSettings,
+    PackageIntelligenceSettings,
 ):
     """全量应用配置，字段保持扁平化，外部继续使用 settings.FIELD_NAME 访问。"""
-    pass
+
+
+def _load_env_overrides() -> dict[str, str]:
+    return {
+        key: value
+        for key in AppSettings.model_fields
+        if (value := os.getenv(key)) is not None
+    }
 
 
 def _run_async(coro):
     """在新线程的独立事件循环中执行协程，兼容 uvicorn 启动时已有运行中事件循环的场景。"""
-    result, exc = None, None
+    result, e = None, None
 
     def _target():
-        nonlocal result, exc
+        nonlocal result, e
         try:
             result = asyncio.run(coro)
-        except Exception as e:
-            exc = e
+        except Exception as exc:
+            e = exc
 
     t = threading.Thread(target=_target)
     t.start()
     t.join()
-    if exc:
-        raise exc
+    if e:
+        raise e
     return result
 
 
@@ -236,12 +202,19 @@ def load_settings() -> AppSettings:
         log_event("从 Nacos 拉取核心业务配置")
         raw_yaml = _run_async(nacos_client_manager.pull_config())
         config_dict = yaml.safe_load(raw_yaml) if raw_yaml else {}
-        full_config = {**bootstrap_settings.model_dump(), **config_dict}
+        env_config = _load_env_overrides()
+        # Precedence: Nacos > container environment > AppSettings/bootstrap defaults.
+        full_config = {
+            **bootstrap_settings.model_dump(),
+            **env_config,
+            **config_dict,
+        }
         if "DEV" not in full_config:
             full_config["DEV"] = bootstrap_settings.IS_DEV
         return AppSettings(**full_config)
     except Exception as e:
         log_error("Nacos 配置拉取或解析", e)
         raise
+
 
 settings = load_settings()

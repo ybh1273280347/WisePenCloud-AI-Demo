@@ -1,9 +1,9 @@
 from pathlib import Path
 
+from chat.application.document_parse.errors import EmptyParsedContentError
 from chat.application.document_parse.models import DocumentParseResult, ParsedPage
 from chat.application.document_parse.text_utils import normalize_text
-from common.logger import log_event, log_ok
-
+from common.logger import log_event
 
 _PARSER_NAME = "markitdown"
 _PAGE_TYPE_DOCUMENT = "document"
@@ -12,12 +12,12 @@ _PAGE_TYPE_DOCUMENT = "document"
 class OfficeFallbackParser:
     def __init__(self):
         self._converter = None
-        log_ok("OfficeFallbackParser init", handler_class=type(self).__name__)
+        log_event("OfficeFallbackParser 初始化", handler_class=type(self).__name__)
 
     def parse(self, path: Path, *, file_type: str) -> DocumentParseResult:
         converter = self._get_converter()
         log_event(
-            "OfficeFallbackParser parse start",
+            "OfficeFallbackParser parse 开始",
             path=str(path),
             file_type=file_type,
             handler_class=type(self).__name__,
@@ -27,7 +27,7 @@ class OfficeFallbackParser:
         text = normalize_text(result.text_content)
 
         if not text:
-            raise ValueError(f"No text extracted from document: {path}")
+            raise EmptyParsedContentError(str(path))
 
         page = ParsedPage(
             page_index=0,
@@ -46,8 +46,8 @@ class OfficeFallbackParser:
             metadata={"parser": _PARSER_NAME},
             warnings=[],
         )
-        log_ok(
-            "OfficeFallbackParser parse",
+        log_event(
+            "OfficeFallbackParser parse 完成",
             path=str(path),
             file_type=file_type,
             handler_class=type(self).__name__,
@@ -62,15 +62,20 @@ class OfficeFallbackParser:
     def _get_converter(self):
         if self._converter is not None:
             log_event(
-                "MarkItDown converter reuse",
+                "MarkItDown converter 复用",
                 converter_class=type(self._converter).__name__,
             )
             return self._converter
 
-        log_event("MarkItDown converter import start")
+        log_event("MarkItDown converter import 开始")
         from markitdown import MarkItDown
 
-        log_event("MarkItDown converter init start", converter_class=MarkItDown.__name__)
+        log_event(
+            "MarkItDown converter 初始化开始", converter_class=MarkItDown.__name__
+        )
         self._converter = MarkItDown()
-        log_ok("MarkItDown converter init", converter_class=type(self._converter).__name__)
+        log_event(
+            "MarkItDown converter 初始化完成",
+            converter_class=type(self._converter).__name__,
+        )
         return self._converter

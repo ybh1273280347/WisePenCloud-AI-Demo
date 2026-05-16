@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Optional, Tuple
 
+
 class PathBase(Enum):
     HOME = "home"
     ENV = "env"

@@ -1,17 +1,29 @@
-from chat.application.web_search.models.common import ImageResult, SearchResult, SearchResponse
-from chat.application.web_search.models.helpers import has_response_content, is_valid_result
-from chat.application.web_search.models.tavily import TavilySearchRequest, map_tavily_response
-from chat.application.web_search.models.searxng import SearXNGSearchRequest, map_searxng_response, merge_search_responses
+from chat.application.web_search.models.brave import BraveSearchRequest
+from chat.application.web_search.models.common import (
+    ImageResult,
+    SearchResponse,
+    SearchResult,
+)
+from chat.application.web_search.models.exa import ExaSearchRequest
+from chat.application.web_search.models.perplexity import PerplexitySearchRequest
+from chat.application.web_search.models.searxng import (
+    SearXNGSearchRequest,
+    merge_search_responses,
+)
+from chat.application.web_search.models.serpapi import SerpApiSearchRequest
+from chat.application.web_search.models.serper import SerperSearchRequest
+from chat.application.web_search.models.tavily import TavilySearchRequest
 
 __all__ = [
+    "BraveSearchRequest",
+    "ExaSearchRequest",
     "ImageResult",
-    "SearchResult",
+    "PerplexitySearchRequest",
     "SearchResponse",
-    "has_response_content",
-    "is_valid_result",
-    "TavilySearchRequest",
-    "map_tavily_response",
+    "SearchResult",
     "SearXNGSearchRequest",
-    "map_searxng_response",
+    "SerperSearchRequest",
+    "SerpApiSearchRequest",
+    "TavilySearchRequest",
     "merge_search_responses",
 ]

@@ -1,0 +1,314 @@
+.markdown-content {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+
+  color: rgba(248, 250, 255, 0.96);
+
+  font-family:
+    "Kaiti SC",
+    "STKaiti",
+    "KaiTi",
+    "楷体",
+    "LXGW WenKai",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    sans-serif;
+
+  font-size: 16.5px;
+  font-weight: 500;
+  line-height: 1.72;
+  letter-spacing: 0.012em;
+  white-space: normal;
+
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: auto;
+  text-shadow: none;
+}
+
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content pre,
+.markdown-content table {
+  margin: 0 0 13px;
+}
+
+.markdown-content > :last-child,
+.markdown-content li > :last-child,
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  margin: 24px 0 13px;
+
+  color: rgba(252, 253, 255, 0.98);
+
+  font-family:
+    "Kaiti SC",
+    "STKaiti",
+    "KaiTi",
+    "楷体",
+    "LXGW WenKai",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    sans-serif;
+
+  font-weight: 600;
+  line-height: 1.28;
+  letter-spacing: 0.01em;
+  text-shadow: none;
+}
+
+.markdown-content h1 {
+  font-size: 27px;
+}
+
+.markdown-content h2 {
+  font-size: 23px;
+}
+
+.markdown-content h3 {
+  font-size: 19px;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 13px 0;
+  padding-left: 22px;
+}
+
+.markdown-content li {
+  margin: 8px 0;
+  color: rgba(246, 249, 255, 0.95);
+  font-size: 16.5px;
+  font-weight: 500;
+  line-height: 1.72;
+}
+
+.markdown-content li::marker {
+  color: rgba(238, 243, 252, 0.88);
+}
+
+.markdown-content blockquote {
+  padding: 10px 14px;
+  border-left: 2px solid rgba(246, 249, 255, 0.32);
+  border-radius: 0 14px 14px 0;
+  background: rgba(255, 255, 255, 0.055);
+
+  color: rgba(246, 249, 255, 0.93);
+  font-size: 16.2px;
+  font-weight: 500;
+  line-height: 1.72;
+}
+
+.markdown-content code {
+  padding: 2px 6px;
+  border: 1px solid rgba(246, 249, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+
+  color: rgba(246, 249, 255, 0.95);
+
+  font-family:
+    "SFMono-Regular",
+    "JetBrains Mono",
+    Consolas,
+    "Liberation Mono",
+    ui-monospace,
+    monospace;
+
+  font-size: 0.88em;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.markdown-content pre {
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 16px;
+  border: 1px solid rgba(246, 249, 255, 0.12);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.45);
+
+  color: rgba(236, 242, 252, 0.92);
+
+  font-family:
+    "SFMono-Regular",
+    "JetBrains Mono",
+    Consolas,
+    "Liberation Mono",
+    ui-monospace,
+    monospace;
+
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.68;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.markdown-content pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.markdown-content a {
+  color: rgba(252, 253, 255, 0.98);
+  font-weight: 500;
+  text-decoration-color: rgba(252, 253, 255, 0.52);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+  overflow-wrap: anywhere;
+}
+
+.markdown-content table {
+  display: block;
+  overflow-x: auto;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+  border-radius: 14px;
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 9px 11px;
+  border: 1px solid rgba(246, 249, 255, 0.12);
+  background: rgba(255, 255, 255, 0.045);
+
+  color: rgba(244, 248, 255, 0.94);
+  text-align: left;
+  vertical-align: top;
+
+  font-size: 15.8px;
+  font-weight: 500;
+  line-height: 1.65;
+}
+
+.markdown-content th {
+  background: rgba(255, 255, 255, 0.085);
+  color: rgba(252, 253, 255, 0.98);
+  font-weight: 600;
+}
+
+.markdown-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  margin: 16px 0;
+  padding: 8px 0;
+}
+
+.markdown-content .katex {
+  color: inherit;
+  font-size: 1.04em;
+}
+
+.user-markdown {
+  color: rgba(250, 252, 255, 0.97);
+
+  font-family:
+    "Kaiti SC",
+    "STKaiti",
+    "KaiTi",
+    "楷体",
+    "LXGW WenKai",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    sans-serif;
+
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.68;
+  letter-spacing: 0.012em;
+
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: auto;
+  text-shadow: none;
+}
+
+.user-markdown h1,
+.user-markdown h2,
+.user-markdown h3,
+.user-markdown .katex {
+  color: inherit;
+}
+
+.user-markdown a {
+  color: rgba(252, 253, 255, 0.98);
+  font-weight: 500;
+  text-decoration-color: rgba(252, 253, 255, 0.52);
+}
+
+.user-markdown blockquote {
+  border-left-color: rgba(246, 249, 255, 0.32);
+  background: rgba(255, 255, 255, 0.055);
+
+  color: rgba(246, 249, 255, 0.94);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.68;
+}
+
+.user-markdown code {
+  border-color: rgba(246, 249, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+
+  color: rgba(246, 249, 255, 0.96);
+
+  font-family:
+    "SFMono-Regular",
+    "JetBrains Mono",
+    Consolas,
+    "Liberation Mono",
+    ui-monospace,
+    monospace;
+
+  font-size: 0.88em;
+  font-weight: 500;
+}
+
+.user-markdown pre {
+  border-color: rgba(246, 249, 255, 0.12);
+  background: rgba(0, 0, 0, 0.62);
+
+  color: rgba(238, 244, 255, 0.94);
+
+  font-family:
+    "SFMono-Regular",
+    "JetBrains Mono",
+    Consolas,
+    "Liberation Mono",
+    ui-monospace,
+    monospace;
+
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.68;
+}
+
+.user-markdown th,
+.user-markdown td {
+  border-color: rgba(246, 249, 255, 0.12);
+  background: rgba(255, 255, 255, 0.045);
+
+  color: rgba(244, 248, 255, 0.94);
+  font-size: 15.8px;
+  font-weight: 500;
+  line-height: 1.65;
+}
+
+.user-markdown th {
+  background: rgba(255, 255, 255, 0.085);
+  color: rgba(252, 253, 255, 0.98);
+  font-weight: 600;
+}

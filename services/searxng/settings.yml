@@ -1,0 +1,38 @@
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "WisePen SearXNG"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  base_url: "http://searxng:8080/"
+  secret_key: "change-this-secret-key-in-production"
+  limiter: false
+  image_proxy: false
+
+ui:
+  static_use_hash: true
+  default_locale: "en"
+
+outgoing:
+  request_timeout: 8.0
+  max_request_timeout: 15.0
+  pool_connections: 50
+  pool_maxsize: 10
+  enable_http2: true
+
+enabled_plugins:
+  - "Hash plugin"
+  - "Self Information"
+  - "Tracker URL remover"
+  - "Ahmia blacklist"

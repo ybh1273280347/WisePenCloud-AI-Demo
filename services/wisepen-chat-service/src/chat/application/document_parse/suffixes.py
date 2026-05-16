@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from chat.application.document_parse.errors import UnsupportedDocumentFormatError
 
 DOCUMENT_TYPE_PDF = "pdf"
 DOCUMENT_TYPE_DOCX = "docx"
@@ -8,17 +9,20 @@ DOCUMENT_TYPE_EPUB = "epub"
 DOCUMENT_TYPE_SPREADSHEET = "spreadsheet"
 
 PDF_SUFFIXES = {".pdf"}
-OFFICE_SUFFIXES = {".docx", ".pptx"}
+OFFICE_SUFFIXES = {".docx", ".docm", ".pptx", ".pptm"}
 EPUB_SUFFIXES = {".epub"}
-SPREADSHEET_SUFFIXES = {".xlsx", ".xls", ".ods"}
+SPREADSHEET_SUFFIXES = {".xlsx", ".xls", ".xlsm", ".ods"}
 
 _DOCUMENT_TYPE_BY_SUFFIX = {
     ".pdf": DOCUMENT_TYPE_PDF,
     ".docx": DOCUMENT_TYPE_DOCX,
+    ".docm": DOCUMENT_TYPE_DOCX,
     ".pptx": DOCUMENT_TYPE_PPTX,
+    ".pptm": DOCUMENT_TYPE_PPTX,
     ".epub": DOCUMENT_TYPE_EPUB,
     ".xlsx": DOCUMENT_TYPE_SPREADSHEET,
     ".xls": DOCUMENT_TYPE_SPREADSHEET,
+    ".xlsm": DOCUMENT_TYPE_SPREADSHEET,
     ".ods": DOCUMENT_TYPE_SPREADSHEET,
 }
 
@@ -50,11 +54,11 @@ def detect_document_type_by_suffix(path: Path) -> str:
     suffix = path.suffix.lower()
 
     if not suffix:
-        raise ValueError("Unsupported document type: missing file suffix.")
+        raise UnsupportedDocumentFormatError("missing file suffix")
 
     document_type = _DOCUMENT_TYPE_BY_SUFFIX.get(suffix)
     if document_type:
         return document_type
 
     guidance = _UNSUPPORTED_GUIDANCE.get(suffix, "")
-    raise ValueError(f"不支持的文件类型: {suffix}。{guidance}".rstrip())
+    raise UnsupportedDocumentFormatError(suffix, guidance)

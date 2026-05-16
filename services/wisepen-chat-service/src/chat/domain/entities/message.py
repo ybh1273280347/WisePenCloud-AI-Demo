@@ -1,10 +1,11 @@
-from enum import Enum
-import jieba
-from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+import jieba
 from beanie import Document
-from pydantic import Field, ConfigDict
-from pymongo import IndexModel, ASCENDING
+from pydantic import ConfigDict, Field
+from pymongo import ASCENDING, IndexModel
 
 
 class Role(str, Enum):
@@ -16,14 +17,17 @@ class Role(str, Enum):
 
 class ChatMessage(Document):
     """单条消息实体（Beanie Document，映射到 chat_messages 集合）"""
+
     session_id: str
     role: Role
     model_id: Optional[int] = None  # 生成该消息所用的模型 ID，仅 assistant 消息必填
-    content: Optional[str] = None   # 大模型在返回 tool_calls 时 content 经常为 None
+    content: Optional[str] = None  # 大模型在返回 tool_calls 时 content 经常为 None
     reasoning_content: Optional[str] = None  # 大模型的推理/思考内容（DeepSeek R1 等）
-    search_tokens: Optional[str] = None # 专门用于规避 MongoDB 中文分词缺陷的隐藏字段
+    search_tokens: Optional[str] = None  # 专门用于规避 MongoDB 中文分词缺陷的隐藏字段
 
-    token_count: Optional[int] = None # 消息内容对应的 Token 数，随消息创建时一次性计算并持久化
+    token_count: Optional[int] = (
+        None  # 消息内容对应的 Token 数，随消息创建时一次性计算并持久化
+    )
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     tool_calls: Optional[List[Dict[str, Any]]] = None
@@ -51,7 +55,6 @@ class ChatMessage(Document):
     @property
     def is_human(self) -> bool:
         return self.role == Role.USER
-
 
     def build_search_tokens(self) -> None:
         """

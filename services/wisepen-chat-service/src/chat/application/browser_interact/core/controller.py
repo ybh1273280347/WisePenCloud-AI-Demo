@@ -1,12 +1,14 @@
 import asyncio
+import time
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from chat.application.web_fetch.content_processor import ContentProcessor
-from common.logger import log_error
+from common.logger import log_error, log_event
 
 from .actions import (
-    handle_click_ref,
     handle_check_ref,
+    handle_click_ref,
     handle_fill_ref,
     handle_get_content,
     handle_go_back,
@@ -20,6 +22,7 @@ from .actions import (
     handle_status,
     handle_wait,
 )
+from .intervention import UserInterventionDetector
 from .protocol import (
     build_error_response,
     get_page_state,
@@ -29,7 +32,6 @@ from .protocol import (
     make_schema_error,
     make_unknown_action_error,
 )
-from .intervention import UserInterventionDetector
 from .session import BrowserSessionManager
 from .snapshot import SnapshotManager
 
@@ -64,6 +66,15 @@ ACTION_HANDLERS: Dict[str, ActionHandler] = {
 }
 
 
+_NEW_SESSION_LOCK_KEY = "__new_browser_session__"
+
+
+@dataclass(slots=True)
+class _SessionLockEntry:
+    lock: asyncio.Lock
+    ref_count: int = 0
+
+
 class BrowserInteractController:
     def __init__(
         self,
@@ -83,20 +94,46 @@ class BrowserInteractController:
         self._snapshot_manager = SnapshotManager()
         self._intervention = UserInterventionDetector()
         self._processor = ContentProcessor()
-        self._execute_lock = asyncio.Lock()
+        self._session_locks: Dict[str, _SessionLockEntry] = {}
+        self._session_locks_guard = asyncio.Lock()
 
     async def cleanup(self) -> None:
         await self._session_manager.cleanup()
+        async with self._session_locks_guard:
+            self._session_locks.clear()
+        log_event("browse_interact controller 已关闭")
 
     async def execute(
         self,
         request: Dict[str, Any],
         context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        async with self._execute_lock:
-            return await self._execute_inner(
-                request=request,
-                context=context,
+        lock_key = self._session_lock_key(request)
+        lock_entry = await self._borrow_session_lock(lock_key)
+        started = time.monotonic()
+        action_type = _action_type(request)
+        result = ""
+        success = False
+
+        try:
+            async with lock_entry.lock:
+                result = await self._execute_inner(
+                    request=request,
+                    context=context,
+                )
+                success = '"success": true' in result[:80]
+                return result
+        finally:
+            await self._release_session_lock(lock_key)
+            log_event(
+                "tool_perf",
+                tool_name="browse_interact",
+                stage=action_type,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                success=success,
+                cache_hit=False,
+                fallback_used=False,
+                worker_count=len(self._session_locks),
             )
 
     async def _execute_inner(
@@ -135,7 +172,7 @@ class BrowserInteractController:
             )
         except Exception as error:
             log_error(
-                "browse_interact 执行异常",
+                "browse_interact 执行",
                 str(error),
                 action_type=act_type,
             )
@@ -180,3 +217,40 @@ class BrowserInteractController:
             page_state=await get_page_state(self._session_manager.page),
             error=make_unknown_action_error(act_type),
         )
+
+    def _session_lock_key(self, request: Dict[str, Any]) -> str:
+        raw_browser_session_id = request.get("browser_session_id")
+        if isinstance(raw_browser_session_id, str) and raw_browser_session_id.strip():
+            return raw_browser_session_id.strip()
+
+        current_session_id = self._session_manager.session_id
+        if current_session_id:
+            return current_session_id
+
+        return _NEW_SESSION_LOCK_KEY
+
+    async def _borrow_session_lock(self, key: str) -> _SessionLockEntry:
+        async with self._session_locks_guard:
+            entry = self._session_locks.get(key)
+            if entry is None:
+                entry = _SessionLockEntry(lock=asyncio.Lock())
+                self._session_locks[key] = entry
+            entry.ref_count += 1
+            return entry
+
+    async def _release_session_lock(self, key: str) -> None:
+        async with self._session_locks_guard:
+            entry = self._session_locks.get(key)
+            if entry is None:
+                return
+            entry.ref_count = max(0, entry.ref_count - 1)
+            if entry.ref_count == 0 and not entry.lock.locked():
+                self._session_locks.pop(key, None)
+
+
+def _action_type(request: Dict[str, Any]) -> str:
+    action = request.get("action")
+    if not isinstance(action, dict):
+        return "invalid_action"
+    act_type = action.get("type")
+    return act_type if isinstance(act_type, str) and act_type else "unknown_action"

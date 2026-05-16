@@ -1,7 +1,8 @@
 from typing import List, Sequence, Set, Tuple
 
+from chat.application.algorithms.url import canonicalize_url
 from chat.application.web_search.models import ImageResult
-from chat.application.web_search.utils.urls import normalize_url_for_dedup
+
 
 def deduplicate_images(
     images: Sequence[ImageResult],
@@ -10,7 +11,7 @@ def deduplicate_images(
     deduped: List[ImageResult] = []
 
     for image in images:
-        key = normalize_url_for_dedup(image.url)
+        key = canonicalize_url(image.url)
         if not key or key in seen:
             continue
 

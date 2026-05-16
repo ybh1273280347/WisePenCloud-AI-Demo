@@ -4,8 +4,8 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 from common.logger import log_fail
-
 from playwright.async_api import Page
+
 
 @dataclass(frozen=True, slots=True)
 class PageState:
@@ -304,7 +304,8 @@ def make_action_failed_error(
             "action_type": action_type,
             **(context or {}),
         },
-        recovery_hint=recovery_hint or RecoveryHint(
+        recovery_hint=recovery_hint
+        or RecoveryHint(
             type="inspect_page_state",
             required_before_retry=False,
             reason=(
@@ -322,14 +323,11 @@ def make_user_intervention_error_from_signal(signal: InterventionSignal) -> Tool
             "请在打开的浏览器窗口中完成登录或验证，然后让 agent 继续。"
         )
         message = (
-            "Authentication or verification is required "
-            "in the visible browser window."
+            "Authentication or verification is required in the visible browser window."
         )
     elif signal.type == "captcha":
         user_action_type = "captcha"
-        user_action_message = (
-            "请在打开的浏览器窗口中完成验证码，然后让 agent 继续。"
-        )
+        user_action_message = "请在打开的浏览器窗口中完成验证码，然后让 agent 继续。"
         message = "CAPTCHA detected on the page. User intervention required."
     else:
         user_action_type = signal.type
@@ -575,7 +573,7 @@ async def get_page_state(page: Optional[Page]) -> Optional[PageState]:
         )
 
     except Exception:
-        log_fail("获取页面状态失败")
+        log_fail("获取页面状态", "")
         return PageState(
             url=getattr(page, "url", ""),
             title="",

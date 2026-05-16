@@ -3,6 +3,13 @@ from typing import Dict, Optional
 from chat.application.web_fetch.content_processor import ContentProcessor
 from common.logger import log_fail, log_ok
 
+from ..action_runtime import (
+    action_error_response,
+    get_existing_page_or_error,
+    selector_or_error_response,
+    session_state,
+)
+from ..intervention import UserInterventionDetector
 from ..protocol import (
     ActionResult,
     RecoveryHint,
@@ -14,16 +21,8 @@ from ..protocol import (
     make_schema_error,
     make_user_intervention_error_from_signal,
 )
-from ..intervention import UserInterventionDetector
 from ..session import BrowserSessionManager
 from ..snapshot import SnapshotManager
-from ..action_runtime import (
-    action_error_response,
-    get_existing_page_or_error,
-    selector_or_error_response,
-    session_state,
-)
-
 
 _SETTLE_WAIT_MS = 800
 
@@ -184,7 +183,9 @@ async def handle_click_ref(
         await page.wait_for_timeout(_SETTLE_WAIT_MS)
 
         pages_after = list(page.context.pages)
-        new_pages = [candidate for candidate in pages_after if candidate not in pages_before]
+        new_pages = [
+            candidate for candidate in pages_after if candidate not in pages_before
+        ]
         if new_pages:
             page = new_pages[-1]
             session_manager.set_current_page(page)
@@ -449,7 +450,7 @@ async def handle_select_ref(
 
         await page.wait_for_timeout(_SETTLE_WAIT_MS)
     except Exception as error:
-        log_fail("浏览器选择失败", str(error))
+        log_fail("浏览器选择", str(error))
         page_state = await get_page_state(page)
         return build_error_response(
             session_state=session_state(session_manager),
@@ -562,7 +563,7 @@ async def handle_check_ref(
 
         await page.wait_for_timeout(_SETTLE_WAIT_MS)
     except Exception as error:
-        log_fail("浏览器勾选失败", str(error))
+        log_fail("浏览器勾选", str(error))
         page_state = await get_page_state(page)
         return build_error_response(
             session_state=session_state(session_manager),

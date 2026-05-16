@@ -84,7 +84,10 @@ class NacosClientManager:
                     group_name=bootstrap_settings.NACOS_GROUP,
                     ip=host,
                     port=bootstrap_settings.SERVICE_PORT,
-                    metadata={"version": "0.1.0", "framework": "fastapi"},
+                    metadata={
+                        "version": bootstrap_settings.SERVICE_VERSION,
+                        "framework": "fastapi",
+                    },
                     healthy=True,
                     ephemeral=True,
                 )

@@ -1,11 +1,15 @@
 import base64
 from typing import Dict, Optional
 
-from playwright.async_api import Page
-
 from chat.application.web_fetch.content_processor import ContentProcessor
 from common.logger import log_fail
+from playwright.async_api import Page
 
+from ..action_runtime import (
+    get_existing_page_or_error,
+    session_state,
+)
+from ..intervention import UserInterventionDetector
 from ..protocol import (
     ActionResult,
     build_error_response,
@@ -14,14 +18,8 @@ from ..protocol import (
     make_action_failed_error,
     make_schema_error,
 )
-from ..intervention import UserInterventionDetector
 from ..session import BrowserSessionManager
 from ..snapshot import SnapshotManager
-from ..action_runtime import (
-    get_existing_page_or_error,
-    session_state,
-)
-
 
 _SCREENSHOT_JPEG_QUALITY = 40
 
@@ -251,7 +249,7 @@ async def handle_screenshot(
     try:
         screenshot_bytes = await page.screenshot(
             type="jpeg",
-            quality=SCREENSHOT_JPEG_QUALITY,
+            quality=_SCREENSHOT_JPEG_QUALITY,
             scale="css",
             full_page=False,
         )
@@ -298,9 +296,9 @@ async def handle_get_content(
         return session_error_response
 
     try:
-        content = await extract_rendered_content(page)
+        content = await _extract_rendered_content(page)
     except Exception as error:
-        log_fail("渲染页面内容提取失败", str(error))
+        log_fail("渲染页面内容提取", str(error))
         content = ""
 
     if not content:
@@ -309,7 +307,7 @@ async def handle_get_content(
             cleaned = processor.process(html)
             content = cleaned if cleaned else ""
         except Exception as error:
-            log_fail("页面内容备用提取失败", str(error))
+            log_fail("页面内容备用提取", str(error))
             page_state = await get_page_state(page)
             return build_error_response(
                 session_state=session_state(session_manager),

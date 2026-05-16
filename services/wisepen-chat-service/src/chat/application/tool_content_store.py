@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 
-from chat.core.config.app_settings import settings
+from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
 from chat.core.content_store import (
     ContentStore,
     ContentWindow,
@@ -8,11 +8,13 @@ from chat.core.content_store import (
 )
 from chat.core.content_store.formatters import format_tool_content_window
 from chat.core.content_store.models import (
-    ContentChunk,
     StoredContent,
-    StoredToolContent,
-    WindowedContent,
 )
+from common.logger import log_event
+
+_TOOL_CONTENT_STORE_TTL_SECONDS = 30 * 60
+_TOOL_CONTENT_STORE_MAX_TOTAL_CHARS = 20_000_000
+_TOOL_CONTENT_STORE_MAX_ITEM_CHARS = 20_000_000
 
 
 class ToolContentStore:
@@ -25,11 +27,19 @@ class ToolContentStore:
     ):
         self._store = ContentStore(
             repository=TTLContentRepository(
-                ttl_seconds=ttl_seconds if ttl_seconds is not None else settings.TOOL_CONTENT_STORE_TTL_SECONDS,
-                max_total_chars=max_total_chars if max_total_chars is not None else settings.TOOL_CONTENT_STORE_MAX_TOTAL_CHARS,
+                ttl_seconds=ttl_seconds
+                if ttl_seconds is not None
+                else _TOOL_CONTENT_STORE_TTL_SECONDS,
+                max_total_chars=max_total_chars
+                if max_total_chars is not None
+                else _TOOL_CONTENT_STORE_MAX_TOTAL_CHARS,
             ),
-            default_chunk_size=default_chunk_size if default_chunk_size is not None else settings.TOOL_RESULT_MAX_CHARS,
-            max_item_chars=max_item_chars if max_item_chars is not None else settings.TOOL_CONTENT_STORE_MAX_ITEM_CHARS,
+            default_chunk_size=default_chunk_size
+            if default_chunk_size is not None
+            else TOOL_RESULT_MAX_CHARS,
+            max_item_chars=max_item_chars
+            if max_item_chars is not None
+            else _TOOL_CONTENT_STORE_MAX_ITEM_CHARS,
             normalize_text=True,
         )
 
@@ -126,7 +136,7 @@ def cache_and_window(
     content_type: str = "text/markdown",
     metadata: Optional[Dict[str, Any]] = None,
     offset: int = 0,
-    limit: int = 4000,
+    limit: Optional[int] = None,
 ) -> ContentWindow:
     return tool_content_store.put_and_read_window(
         session_id=session_id,
@@ -149,7 +159,7 @@ def cache_and_format(
     content_type: str = "text/markdown",
     metadata: Optional[Dict[str, Any]] = None,
     offset: int = 0,
-    limit: int = 4000,
+    limit: Optional[int] = None,
 ) -> str:
     window = cache_and_window(
         session_id=session_id,
@@ -172,10 +182,17 @@ def read_tool_content_window(
     limit: Optional[int] = None,
 ) -> str:
     if limit is None:
-        limit = settings.TOOL_RESULT_MAX_CHARS
+        limit = TOOL_RESULT_MAX_CHARS
 
     offset = max(0, offset)
-    limit = min(max(1, limit), settings.TOOL_RESULT_MAX_CHARS)
+    limit = min(max(1, limit), TOOL_RESULT_MAX_CHARS)
+
+    log_event(
+        "分段读取请求",
+        content_id=content_id,
+        offset=offset,
+        limit=limit,
+    )
 
     window = tool_content_store.read_window(
         content_id=content_id,

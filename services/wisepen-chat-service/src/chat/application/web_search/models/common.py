@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
-from chat.application.web_search.models.helpers import normalize_optional_str, to_optional_str
+from chat.application.web_search.models.helpers import normalize_optional_str
+
 
 @dataclass(frozen=True, slots=True)
 class ImageResult:
@@ -17,7 +18,9 @@ class ImageResult:
         object.__setattr__(self, "url", self.url.strip())
         object.__setattr__(self, "desc", normalize_optional_str(self.desc))
         object.__setattr__(self, "source_url", normalize_optional_str(self.source_url))
-        object.__setattr__(self, "thumbnail_url", normalize_optional_str(self.thumbnail_url))
+        object.__setattr__(
+            self, "thumbnail_url", normalize_optional_str(self.thumbnail_url)
+        )
         object.__setattr__(self, "resolution", normalize_optional_str(self.resolution))
 
 
@@ -43,17 +46,21 @@ class SearchResponse:
 
     query: str
     results: Tuple[SearchResult, ...] = field(default_factory=tuple)
-    answer: Optional[str] = None
     images: Tuple[ImageResult, ...] = field(default_factory=tuple)
 
-    # fresh_cache / searxng / duckduckgo / stale_cache / tavily
+    # searxng / tavily / wikipedia:{lang} / multi:{providers} / empty
     source: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "query", self.query.strip())
         object.__setattr__(self, "results", tuple(self.results))
-        object.__setattr__(self, "answer", normalize_optional_str(self.answer))
         object.__setattr__(self, "images", tuple(self.images))
         object.__setattr__(self, "source", normalize_optional_str(self.source))
 
-
+    def with_source(self, source: str) -> "SearchResponse":
+        return SearchResponse(
+            query=self.query,
+            results=self.results,
+            images=self.images,
+            source=source,
+        )

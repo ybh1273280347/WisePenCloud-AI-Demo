@@ -1,9 +1,9 @@
+from chat.application.browser_interact.bootstrap import setup_browser_automation_profile
 from chat.application.browser_interact.core import (
-    BrowserInteractController,
     WAIT_DURATION_MAX_S,
+    BrowserInteractController,
     ToolErrorCode,
 )
-from chat.application.browser_interact.bootstrap import setup_browser_automation_profile
 
 __all__ = [
     "BrowserInteractController",

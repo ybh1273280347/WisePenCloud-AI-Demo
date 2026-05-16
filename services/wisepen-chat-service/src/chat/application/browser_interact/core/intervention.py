@@ -4,6 +4,19 @@ from playwright.async_api import Page
 
 from .protocol import InterventionSignal
 
+AUTH_PAGE_INDICATORS = (
+    "/login",
+    "/signin",
+    "/sign-in",
+    "/auth",
+    "/oauth",
+    "/sso",
+    "/passport",
+    "/verify",
+    "/captcha",
+)
+
+
 class UserInterventionDetector:
     async def detect(self, page: Page) -> Optional[InterventionSignal]:
         url = page.url.lower()

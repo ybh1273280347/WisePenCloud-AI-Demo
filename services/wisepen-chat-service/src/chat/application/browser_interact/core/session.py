@@ -2,18 +2,19 @@ import asyncio
 import secrets
 from typing import Optional, Tuple
 
+from common.logger import log_error, log_fail
 from playwright.async_api import BrowserContext, Page, async_playwright
 
-from common.logger import log_fail, log_error
-
-from .protocol import ToolErrorCode
 from ..browser_profile.checker import check_profile_dir
+from .protocol import ToolErrorCode
 
 _SESSION_ID_BYTES = 12
 
 
 class BrowserSessionError(RuntimeError):
-    def __init__(self, message: str, diagnostic_code: str = "BROWSER_SESSION_ERROR") -> None:
+    def __init__(
+        self, message: str, diagnostic_code: str = "BROWSER_SESSION_ERROR"
+    ) -> None:
         super().__init__(message)
         self.diagnostic_code = diagnostic_code
 
@@ -63,21 +64,21 @@ class BrowserSessionManager:
             try:
                 await self._page.close()
             except Exception:
-                log_fail("关闭 page 失败，可能存在资源泄漏")
+                log_fail("关闭 page，可能存在资源泄漏", "")
             self._page = None
 
         if self._context is not None:
             try:
                 await self._context.close()
             except Exception:
-                log_fail("关闭 browser context 失败，可能存在资源泄漏")
+                log_fail("关闭 browser context，可能存在资源泄漏", "")
             self._context = None
 
         if self._playwright is not None:
             try:
                 await self._playwright.stop()
             except Exception:
-                log_fail("停止 Playwright 失败，可能存在资源泄漏")
+                log_fail("停止 Playwright，可能存在资源泄漏", "")
             self._playwright = None
 
         self._session_id = None
@@ -153,8 +154,10 @@ class BrowserSessionManager:
                 if launch_args:
                     launch_kwargs["args"] = launch_args
 
-                self._context = await self._playwright.chromium.launch_persistent_context(
-                    **launch_kwargs
+                self._context = (
+                    await self._playwright.chromium.launch_persistent_context(
+                        **launch_kwargs
+                    )
                 )
 
                 self._page = (
@@ -162,24 +165,24 @@ class BrowserSessionManager:
                     if self._context.pages
                     else await self._context.new_page()
                 )
-                self._session_id = secrets.token_hex(SESSION_ID_BYTES)
+                self._session_id = secrets.token_hex(_SESSION_ID_BYTES)
 
                 return self._page, None
 
-            except Exception as exc:
-                diagnostic_code = self._classify_launch_error(exc)
+            except Exception as e:
+                diagnostic_code = self._classify_launch_error(e)
                 log_error(
                     "浏览器启动",
-                    str(exc),
+                    str(e),
                     diagnostic_code=diagnostic_code,
                     automation_user_data_dir=str(self._automation_user_data_dir),
                     browser_channel=self._browser_channel,
                 )
                 await self._close()
                 raise BrowserSessionError(
-                    f"Failed to create browser session: {exc}",
+                    f"Failed to create browser session: {e}",
                     diagnostic_code=diagnostic_code,
-                ) from exc
+                ) from e
 
     def _pre_launch_check(self) -> Optional[ToolErrorCode]:
         if self._automation_user_data_dir:
@@ -208,15 +211,19 @@ class BrowserSessionManager:
         return None
 
     @staticmethod
-    def _classify_launch_error(exc: Exception) -> str:
-        message = str(exc).lower()
+    def _classify_launch_error(e: Exception) -> str:
+        message = str(e).lower()
         if "executable doesn't exist" in message or "executable not found" in message:
             return "INVALID_BROWSER_CHANNEL"
         if "profile is locked" in message or "singletonlock" in message:
             return "PROFILE_LOCKED"
         if "permission denied" in message or "access is denied" in message:
             return "PROFILE_UNAVAILABLE"
-        if "no display" in message or "missing x server" in message or "xvfb" in message:
+        if (
+            "no display" in message
+            or "missing x server" in message
+            or "xvfb" in message
+        ):
             return "NO_DISPLAY_SERVER"
         if "target page, context or browser has been closed" in message:
             return "BROWSER_CRASHED_ON_START"

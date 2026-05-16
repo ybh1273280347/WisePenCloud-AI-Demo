@@ -1,20 +1,23 @@
 # src/chat/domain/interfaces/tool.py
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 class BaseTool(ABC):
     @property
     @abstractmethod
-    def name(self) -> str: pass
+    def name(self) -> str:
+        pass
 
     @property
     @abstractmethod
-    def description(self) -> str: pass
+    def description(self) -> str:
+        pass
 
     @property
     @abstractmethod
-    def parameters_schema(self) -> Dict[str, Any]: pass
+    def parameters_schema(self) -> Dict[str, Any]:
+        pass
 
     @property
     def is_ephemeral_output(self) -> bool:
@@ -44,8 +47,8 @@ class BaseTool(ABC):
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters_schema
-            }
+                "parameters": self.parameters_schema,
+            },
         }
 
     @abstractmethod

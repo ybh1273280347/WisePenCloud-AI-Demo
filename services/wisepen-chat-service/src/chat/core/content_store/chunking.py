@@ -4,8 +4,27 @@ from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 
 from .models import ContentChunk
 
+_PLAIN_TEXT_SEPARATORS = ["\n\n", "\n", " ", ""]
+_MARKDOWN_SEPARATORS = [
+    "\n\n# ",
+    "\n\n## ",
+    "\n\n### ",
+    "\n\n#### ",
+    "\n\n```",
+    "\n\n---",
+    "\n\n",
+    "\n",
+    "。",
+    ". ",
+    " ",
+    "",
+]
+_MARKDOWN_CONTENT_TYPE = "text/markdown"
 
-def create_content_chunks(text: str, chunk_size: int) -> List[ContentChunk]:
+
+def create_content_chunks(
+    text: str, chunk_size: int, *, content_type: Optional[str] = None
+) -> List[ContentChunk]:
     if not text:
         return []
 
@@ -14,22 +33,28 @@ def create_content_chunks(text: str, chunk_size: int) -> List[ContentChunk]:
         # 如果未来 RAG 需要重叠分块，请创建专用的 RagChunker 而非修改此函数。
         chunk_size=chunk_size,
         chunk_overlap=0,
-        separators=["\n\n", "\n", " ", ""],
+        separators=_separators_for_content_type(content_type),
         length_function=len,
+        add_start_index=True,
         strip_whitespace=False,
     )
 
-    pieces = [piece for piece in splitter.split_text(text) if piece]
+    documents = [
+        document
+        for document in splitter.create_documents([text])
+        if document.page_content
+    ]
 
     chunks: List[ContentChunk] = []
     previous_end = 0
 
-    for index, piece in enumerate(pieces):
-        start = text.find(piece, previous_end)
+    for index, document in enumerate(documents):
+        piece = document.page_content
+        start = document.metadata.get("start_index")
 
-        if start < 0:
+        if not isinstance(start, int) or start < 0:
             raise ValueError(
-                "Unable to align chunk back to source text: "
+                "Missing valid chunk start_index metadata: "
                 f"chunk_index={index}, previous_end={previous_end}, "
                 f"piece_length={len(piece)}, piece_preview={piece[:80]!r}"
             )
@@ -42,15 +67,22 @@ def create_content_chunks(text: str, chunk_size: int) -> List[ContentChunk]:
                 f"chunk_index={index}, end_offset={end}, text_length={len(text)}"
             )
 
+        if text[start:end] != piece:
+            raise ValueError(
+                "Chunk text does not match source text at start_index: "
+                f"chunk_index={index}, start={start}, end={end}, "
+                f"piece_preview={piece[:80]!r}"
+            )
+
         if end <= start:
             raise ValueError(
                 f"Chunk end_offset must be greater than start_offset: "
                 f"chunk_index={index}, start={start}, end={end}"
             )
 
-        if start < previous_end:
+        if start != previous_end:
             raise ValueError(
-                f"Chunk offsets must be non-overlapping and monotonic: "
+                f"Chunk offsets must be contiguous and monotonic: "
                 f"chunk_index={index}, start={start}, previous_end={previous_end}"
             )
 
@@ -67,7 +99,16 @@ def create_content_chunks(text: str, chunk_size: int) -> List[ContentChunk]:
     return chunks
 
 
-def find_chunk_by_offset(chunks: List[ContentChunk], offset: int) -> Optional[ContentChunk]:
+def _separators_for_content_type(content_type: Optional[str]) -> List[str]:
+    if content_type == _MARKDOWN_CONTENT_TYPE:
+        return _MARKDOWN_SEPARATORS
+
+    return _PLAIN_TEXT_SEPARATORS
+
+
+def find_chunk_by_offset(
+    chunks: List[ContentChunk], offset: int
+) -> Optional[ContentChunk]:
     offset = max(0, offset)
 
     for chunk in chunks:

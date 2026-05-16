@@ -4,7 +4,6 @@ from typing import Optional, Tuple
 
 from .models import ProfileDirCheck
 
-
 LOCK_FILE_PREFIXES: Tuple[str, ...] = ("SingletonLock",)
 
 
@@ -48,7 +47,7 @@ def check_profile_dir(
         readable = False
         detail = str(error)
 
-    writable = _check_writable(profile_dir, probe_writable)
+    writable = check_writable(profile_dir, probe_writable)
 
     return ProfileDirCheck(
         path=profile_dir,

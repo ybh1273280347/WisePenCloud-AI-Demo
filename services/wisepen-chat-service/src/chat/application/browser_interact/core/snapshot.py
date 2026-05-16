@@ -180,11 +180,7 @@ def normalize_text(value: str) -> str:
 
 def normalize_goal_terms(goal: Optional[str]) -> List[str]:
     normalized_goal = normalize_text(goal or "")
-    raw_terms = [
-        term
-        for term in re.split(r"\W+", normalized_goal)
-        if term
-    ]
+    raw_terms = [term for term in re.split(r"\W+", normalized_goal) if term]
     terms = []
 
     for term in raw_terms:
@@ -212,7 +208,9 @@ class SnapshotManager:
     def invalidate(self) -> None:
         self._current_snapshot_id = None
 
-    def resolve_current(self, snapshot_id: Optional[str]) -> Tuple[Optional[str], Optional[ToolError]]:
+    def resolve_current(
+        self, snapshot_id: Optional[str]
+    ) -> Tuple[Optional[str], Optional[ToolError]]:
         if snapshot_id is None:
             if self._current_snapshot_id is None:
                 return None, make_snapshot_required_error()

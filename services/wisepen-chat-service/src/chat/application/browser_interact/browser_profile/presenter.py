@@ -7,6 +7,7 @@ from .models import (
     ResolveSuccess,
 )
 
+
 def describe_resolve_result(result: ResolveResult) -> str:
     if isinstance(result, ResolveSuccess):
         return describe_success(result)
@@ -60,10 +61,7 @@ def describe_failure(result: ResolveFailure) -> str:
         if check is None:
             return "自动化浏览器 profile 不可用。"
 
-        return (
-            f"自动化浏览器 profile 不可用: "
-            f"{check.path} ({summarize_check(check)})"
-        )
+        return f"自动化浏览器 profile 不可用: {check.path} ({summarize_check(check)})"
 
     if result.reason == ResolveFailureReason.UNSUPPORTED_PLATFORM:
         return result.message or "当前平台不支持自动化浏览器 profile 管理。"
