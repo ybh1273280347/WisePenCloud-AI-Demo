@@ -1,13 +1,11 @@
 import { apiBaseUrl, makeHeaders } from "./client";
 import { parseSseBlock, splitSseBuffer } from "./sseParser";
-import type { SearchProviderRuntimeSelection } from "./searchProvider";
 import type { SseEvent } from "../types/sse";
 
 type StreamChatOptions = {
   sessionId: string;
   query: string;
   modelId?: number | null;
-  searchProvider?: SearchProviderRuntimeSelection;
   signal: AbortSignal;
   onEvent: (event: SseEvent) => void;
 };
@@ -16,7 +14,6 @@ export async function streamChat({
   sessionId,
   query,
   modelId,
-  searchProvider,
   signal,
   onEvent,
 }: StreamChatOptions): Promise<void> {
@@ -27,7 +24,6 @@ export async function streamChat({
       session_id: sessionId,
       query,
       ...(modelId ? { model: modelId } : {}),
-      ...buildSearchProviderPayload(searchProvider),
     }),
     signal,
   });
@@ -67,19 +63,4 @@ export async function streamChat({
       onEvent(event);
     }
   }
-}
-
-function buildSearchProviderPayload(
-  selection?: SearchProviderRuntimeSelection,
-): Record<string, unknown> {
-  if (!selection || selection.mode === "default") {
-    return { web_search_provider_mode: "default" };
-  }
-
-  return {
-    web_search_provider_mode: "custom",
-    ...(selection.provider ? { web_search_custom_provider: selection.provider } : {}),
-    ...(selection.apiKey ? { web_search_custom_api_key: selection.apiKey } : {}),
-    web_search_use_saved_custom_key: selection.useSavedKey,
-  };
 }

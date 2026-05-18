@@ -1,9 +1,9 @@
 from typing import Any
 
-from chat.application.document_parse.factory import build_document_parse_service
-from chat.application.document_parse.file_resolver import LocalDocumentFileResolver
-from chat.application.ocr import OcrImageAdapter, OcrProcessor
-from chat.application.ocr.config import (
+from chat.application.tools.services.document_parse.factory import build_document_parse_service
+from chat.application.tools.services.document_file import DocumentTempFileResolver
+from chat.application.tools.common.ocr import OcrImageAdapter, OcrProcessor
+from chat.application.tools.common.ocr.config import (
     OCR_BACKEND,
     OCR_LANGUAGE,
     OCR_TIMEOUT_SECONDS,
@@ -41,5 +41,5 @@ def register_document_parse_providers(container_cls: Any) -> None:
         local_ocr_processor=container_cls.ocr_processor,
     )
     container_cls.document_file_resolver = providers.Singleton(
-        LocalDocumentFileResolver,
+        DocumentTempFileResolver,
     )

@@ -1,6 +1,6 @@
 from typing import Any, List
 
-from chat.application.tool_content_store import tool_content_store
+from chat.application.tools.common.tool_content_store import tool_content_store
 from chat.application.tools import (
     AirQualityTool,
     AttachmentReadTool,
@@ -131,7 +131,7 @@ def register_tool_providers(container_cls: Any) -> None:
         "document_parse_tool",
         DocumentParseTool,
         parse_service=container_cls.document_parse_service,
-        file_resolver=container_cls.document_file_resolver,
+        temp_file_resolver=container_cls.document_file_resolver,
     )
     tool(
         "document_export_tool",

@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 
-from chat.application.tool_content_store import read_tool_content_window
+from chat.application.tools.common.tool_content_store import read_tool_content_window
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_event
 

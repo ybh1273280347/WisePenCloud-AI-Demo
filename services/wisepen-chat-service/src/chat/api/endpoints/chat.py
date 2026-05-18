@@ -72,7 +72,7 @@ async def chat_completions(
          ]
        }
     """
-    resolved_model_id = req.model or settings.DEFAULT_MODEL_ID
+    resolved_model_id = req.model if req.model is not None else settings.DEFAULT_MODEL_ID
 
     if not req.query:
         raise HTTPException(status_code=400, detail="缺少查询内容")
@@ -88,10 +88,6 @@ async def chat_completions(
         user_query=req.query,
         background_tasks=background_tasks,
         model_id=resolved_model_id,
-        web_search_provider_mode=req.web_search_provider_mode,
-        web_search_custom_provider=req.web_search_custom_provider,
-        web_search_custom_api_key=req.web_search_custom_api_key,
-        web_search_use_saved_custom_key=req.web_search_use_saved_custom_key,
         states=req.states,
     )
 

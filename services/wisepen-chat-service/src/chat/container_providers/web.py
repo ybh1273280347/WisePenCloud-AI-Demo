@@ -1,8 +1,9 @@
 from typing import Any
 
-from chat.application.web_crawl import WebCrawlService
-from chat.application.web_fetch import ContentProcessor, FetchCoordinator
-from chat.application.web_fetch.config import (
+from chat.application.tools.services.web_crawl import WebCrawlService
+from chat.application.tools.services.web_fetch import FetchCoordinator
+from chat.application.tools.services.web_fetch.content_processor import ContentProcessor
+from chat.application.tools.services.web_fetch.config import (
     STEEL_CONCURRENCY,
     STEEL_DELAY_MS,
     STEEL_MAX_RETRIES,
@@ -17,13 +18,15 @@ from chat.application.web_fetch.config import (
     WEB_FETCH_MIN_CONTENT_LENGTH,
     WEB_FETCH_STATIC_TIMEOUT,
 )
-from chat.application.web_fetch.fetcher import (
+from chat.application.tools.services.web_fetch.fetcher.local_fetcher import (
     LocalScriptFetcher,
-    StaticFetcher,
+)
+from chat.application.tools.services.web_fetch.fetcher.static_fetcher import StaticFetcher
+from chat.application.tools.services.web_fetch.fetcher.steel_fetcher import (
     SteelFetcher,
     SteelFetcherConfig,
 )
-from chat.application.web_search.factory import create_search_coordinator
+from chat.application.web_search.internal.factory import create_search_coordinator
 from chat.core.config.app_settings import settings
 from dependency_injector import providers
 

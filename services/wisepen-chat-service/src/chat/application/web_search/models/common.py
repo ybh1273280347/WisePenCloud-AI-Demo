@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
-from chat.application.web_search.models.helpers import normalize_optional_str
+from chat.application.web_search.internal.models.helpers import normalize_optional_str
 
 
 @dataclass(frozen=True, slots=True)

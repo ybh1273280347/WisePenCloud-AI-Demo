@@ -115,6 +115,7 @@ class ChatContextAssembler:
         session_summary: Optional[str],
         states: Optional[List[Dict[str, Any]]] = None,
         candidate_skills: Optional[List[SkillMeta]] = None,
+        locale: str = "zh-CN",
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表。"""
         system_prompt = """
@@ -125,12 +126,19 @@ class ChatContextAssembler:
         Answer the user's queries accurately and comprehensively, relying strictly on the provided retrieved context.
         
         # Constraints & Guidelines
-        1. Language Consistency: **ALWAYS respond in the exact same language as the user's prompt.** (e.g., If the user asks in Simplified Chinese, respond in Simplified Chinese; if in English, respond in English).
+        1. Language Consistency: Prefer the language of the user's current message. If the user explicitly requests a response language in this turn, that request has the highest priority. If the user's language is ambiguous, use the user's preferred locale below.
         2. Contextual Grounding: Base your answers ONLY on the `<retrieved_context>`. Do not introduce outside information or hallucinate facts. 
         3. Handling Unknowns: If the provided context does not contain the information needed to answer the question, clearly and politely state that you do not have enough information, rather than guessing.
         4. Tone: Maintain a professional, encouraging, and clear tone suitable for users of an advanced educational and productivity tool.
         5. Formatting: Use Markdown (e.g., bullet points, bold text, code blocks) to structure your response for maximum readability.
         """  # 全局指令
+
+        system_prompt += (
+            f"\n[User Language Preference]\n"
+            f"User preferred locale: {locale}.\n"
+            "Prefer the language of the user's current message. "
+            "If the user's language is ambiguous, use the preferred locale.\n"
+        )
 
         # 如果有从 Mem0 召回的相关事实，作为补充信息拼接到 System Prompt 中
         if relevant_facts:

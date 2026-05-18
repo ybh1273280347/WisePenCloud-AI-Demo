@@ -123,7 +123,10 @@ def log_error(op: str, error: Any, **fields: Any) -> None:
     操作异常，非预期的系统故障（ERROR）
     格式："{module} | {op}异常 | k=v ...: {error}"
     """
-    logger.opt(depth=1).error(f"{_caller_module()} | {op}异常{fmt(**fields)}: {error}")
+    logger.opt(
+        depth=1,
+        exception=error if isinstance(error, BaseException) else None,
+    ).error(f"{_caller_module()} | {op}异常{fmt(**fields)}: {error}")
 
 
 def log_event(event: str, **fields: Any) -> None:

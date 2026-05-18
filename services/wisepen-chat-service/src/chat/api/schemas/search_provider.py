@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
-from chat.application.web_search.search_provider_config.constants import (
+from chat.application.web_search.search_provider_config import (
     MODES,
     PROVIDERS,
 )
@@ -56,6 +56,8 @@ class SetCustomSearchProviderRequest(BaseModel):
     @field_validator("api_key")
     @classmethod
     def validate_api_key(cls, value: str) -> str:
-        if not value.strip():
+        if not value:
             raise ValueError("api_key is required")
+        if value != value.strip():
+            raise ValueError("api_key must not contain leading or trailing whitespace")
         return value

@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any, Dict, List, Optional
 
-from chat.application.evidence_ranking import (
+from chat.application.tools.services.evidence_ranking import (
     format_evidence_result,
     rank_evidence,
 )
@@ -43,7 +43,10 @@ TOOL_SCHEMA = {
             "minLength": 1,
             "description": (
                 "The user's question or information need used to rank evidence snippets. "
-                "Usually use the same language as the user's question."
+                "Use the user's current question as-is when possible. If you must rewrite it, "
+                "follow any explicit response-language request first, otherwise use the current "
+                "message language, and use the preferred locale only when the message language "
+                "is ambiguous."
             ),
         },
         "content_ids": {

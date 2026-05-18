@@ -5,7 +5,7 @@ from chat.api.schemas.search_provider import (
     SetCustomSearchProviderRequest,
     SetSearchProviderModeRequest,
 )
-from chat.application.web_search.search_provider_config.service import (
+from chat.application.web_search.search_provider_config import (
     SearchProviderConfigService,
 )
 from chat.container import Container

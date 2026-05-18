@@ -1,29 +1,29 @@
 import asyncio
 from pathlib import Path
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict, Tuple
 
 import pytest
 
-from chat.application.attachment_read import (
+from chat.application.tools.services.attachment_read import (
     AttachmentKind,
     AttachmentReadRequest,
     AttachmentReadService,
     AttachmentStatus,
     ResolvedAttachment,
-    StubAttachmentResolver,
 )
-from chat.application.attachment_read.formatting import format_attachment_read_result
-from chat.application.attachment_read.models import AttachmentReadItem, AttachmentReadResult
-from chat.application.attachment_read.text_reader import ATTACHMENT_TEXT_MAX_BYTES, read_text_file
-from chat.application.content_detection import ContentDetection, ContentKind, DetectionConfidence, DetectionHints
-from chat.application.file_handoff import TemporaryFileHandoffStore
+from chat.application.tools.services.attachment_read.formatting import format_attachment_read_result
+from chat.application.tools.services.attachment_read.models import AttachmentReadItem, AttachmentReadResult
+from chat.application.tools.services.attachment_read.resolver import StubAttachmentResolver
+from chat.application.tools.services.attachment_read.text_reader import read_text_file
+from chat.application.tools.common.content_detection import ContentDetection, ContentKind, DetectionConfidence, DetectionHints
+from chat.application.tools.common.file_handoff import TemporaryFileHandoffStore
 
 pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture(autouse=True)
 def stub_cache_and_format(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("chat.application.attachment_read.service.cache_and_format", lambda **kwargs: "[cached block]")
+    monkeypatch.setattr("chat.application.tools.services.attachment_read.service.cache_and_format", lambda **kwargs: "[cached block]")
 
 
 async def test_service_calls_resolver_with_context_and_preserves_order(tmp_path: Path) -> None:
@@ -68,7 +68,7 @@ async def test_direct_text_kinds_are_read_and_cached(tmp_path: Path, monkeypatch
         cache_calls.append(kwargs)
         return "[cached block]"
 
-    monkeypatch.setattr("chat.application.attachment_read.service.cache_and_format", fake_cache_and_format)
+    monkeypatch.setattr("chat.application.tools.services.attachment_read.service.cache_and_format", fake_cache_and_format)
     service = _service(
         resolver=RecordingResolver([_resolved("att_text", "notes.txt", file_path)]),
         detector=StaticDetector(_detection(kind, "text/plain", ".txt")),
@@ -119,7 +119,9 @@ async def test_document_creates_document_parse_file_ref(tmp_path: Path) -> None:
     assert item.file_ref != item.attachment_ref
     assert not item.file_ref.startswith("cnt_")
     assert Path(item.file_ref).suffix == ".pdf"
-    assert Path(item.file_ref).name[:16].isalnum()
+    assert len(Path(item.file_ref).name.split("-", 1)[0]) == 32
+    assert Path(item.file_ref).parent.name == "session"
+    assert Path(item.file_ref).parent.parent.name == "user"
 
 
 async def test_mixed_text_and_document_batch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,7 +129,7 @@ async def test_mixed_text_and_document_batch(tmp_path: Path, monkeypatch: pytest
     doc_file = tmp_path / "report.pdf"
     text_file.write_text("notes", encoding="utf-8")
     doc_file.write_bytes(b"%PDF-1.7")
-    monkeypatch.setattr("chat.application.attachment_read.service.cache_and_format", lambda **kwargs: "[cached]")
+    monkeypatch.setattr("chat.application.tools.services.attachment_read.service.cache_and_format", lambda **kwargs: "[cached]")
     service = _service(
         resolver=RecordingResolver(
             [
@@ -159,7 +161,7 @@ async def test_image_ocr_success_is_cached_and_returns_image_ref(tmp_path: Path,
         cache_calls.append(kwargs)
         return "[ocr cached]"
 
-    monkeypatch.setattr("chat.application.attachment_read.service.cache_and_format", fake_cache_and_format)
+    monkeypatch.setattr("chat.application.tools.services.attachment_read.service.cache_and_format", fake_cache_and_format)
     ocr_adapter = FakeOcrAdapter(text="hello from image")
     service = _service(
         resolver=RecordingResolver([_resolved("att_img", "screenshot.png", image, "image/png")]),
@@ -342,7 +344,7 @@ async def test_formatting_collects_document_refs_and_instructions() -> None:
                 size_bytes=3,
                 kind=AttachmentKind.BINARY_DOCUMENT.value,
                 status=AttachmentStatus.DOCUMENT_PARSE_REQUIRED.value,
-                file_ref="/tmp/wisepen-file-handoff/session/0123456789abcdef-report.pdf",
+                file_ref="/tmp/wisepen-chat-upload-files/user/session/0123456789abcdef0123456789abcdef-report.pdf",
             ),
             AttachmentReadItem(
                 attachment_ref="att_img",
@@ -376,7 +378,7 @@ async def test_formatting_collects_document_refs_and_instructions() -> None:
     output = format_attachment_read_result(result)
 
     assert "Document parse required:" in output
-    assert "- /tmp/wisepen-file-handoff/session/0123456789abcdef-report.pdf" in output
+    assert "- /tmp/wisepen-chat-upload-files/user/session/0123456789abcdef0123456789abcdef-report.pdf" in output
     assert "Call document_parse once with all file_refs" in output
     assert "ocr_content:" in output
     assert "[ocr cached]" in output
@@ -394,7 +396,10 @@ async def test_formatting_collects_document_refs_and_instructions() -> None:
     assert "file_path" not in output
 
 
-async def test_text_reader_encodings_and_truncation(tmp_path: Path) -> None:
+async def test_text_reader_encodings_and_truncation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     utf8 = tmp_path / "utf8.txt"
     utf8_sig = tmp_path / "utf8_sig.txt"
     gbk = tmp_path / "gbk.txt"
@@ -404,7 +409,11 @@ async def test_text_reader_encodings_and_truncation(tmp_path: Path) -> None:
     utf8_sig.write_bytes("hello".encode("utf-8-sig"))
     gbk.write_bytes("你好".encode("gbk"))
     latin1.write_bytes("café".encode("latin-1"))
-    huge.write_bytes(b"a" * (ATTACHMENT_TEXT_MAX_BYTES + 2))
+    monkeypatch.setattr(
+        "chat.application.tools.services.attachment_read.text_reader.ATTACHMENT_TEXT_MAX_BYTES",
+        8,
+    )
+    huge.write_bytes(b"a" * 10)
 
     assert await read_text_file(path=utf8, attachment_ref="a") == "hello"
     assert await read_text_file(path=utf8_sig, attachment_ref="a") == "hello"

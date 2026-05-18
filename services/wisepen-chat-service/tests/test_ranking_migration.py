@@ -5,7 +5,9 @@ import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List
 
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "src"))
@@ -21,22 +23,24 @@ from chat.application.algorithms.ranking import (
     weighted_rrf,
 )
 from chat.application.algorithms.url import canonicalize_url, stable_hash
-from chat.application.code_search.github_search import service as github_service_module
-from chat.application.code_search.github_search.models import (
+from chat.application.tools.services.code_search.github_search import service as github_service_module
+from chat.application.tools.services.code_search.github_search.models import (
     GitHubIssueResult,
     GitHubReleaseResult,
     GitHubRepositoryResult,
 )
-from chat.application.code_search.github_search.ranking import (
+from chat.application.tools.services.code_search.github_search.ranking import (
     rank_issues,
     rank_repositories,
 )
-from chat.application.code_search.github_search.service import GitHubSearchService
-from chat.application.paper_search.dedup import deduplicate_papers
-from chat.application.paper_search.models import PaperSearchResponse, PaperSearchResult
-from chat.application.paper_search.ranking import rank_papers
-from chat.application.web_search.ranking.models import SearchUrlCandidate
-from chat.application.web_search.ranking.url_ranker import deduplicate_by_canonical_url
+from chat.application.tools.services.code_search.github_search.service import GitHubSearchService
+from chat.application.tools.services.paper_search.dedup import deduplicate_papers
+from chat.application.tools.services.paper_search.models import PaperSearchResponse, PaperSearchResult
+from chat.application.tools.services.paper_search.ranking import rank_papers
+from chat.application.web_search.internal.ranking.models import SearchUrlCandidate
+from chat.application.web_search.internal.ranking.url_ranker import (
+    deduplicate_by_canonical_url,
+)
 
 
 def test_tokenize_for_bm25_english_and_chinese() -> None:
@@ -166,6 +170,7 @@ def test_issue_ranking_relevance_comments_and_updated_at() -> None:
     assert ranked[0].title == "async timeout bug"
 
 
+@pytest.mark.asyncio
 async def test_search_operations_call_ranking() -> None:
     service = GitHubSearchService(_FakeGitHubClient())
     original_repo_ranker = github_service_module.ranking.rank_repositories
@@ -205,6 +210,7 @@ async def test_search_operations_call_ranking() -> None:
         github_service_module.ranking.rank_issues = original_issue_ranker
 
 
+@pytest.mark.asyncio
 async def test_get_operations_do_not_call_ranking() -> None:
     service = GitHubSearchService(_FakeGitHubClient())
     original_repo_ranker = github_service_module.ranking.rank_repositories

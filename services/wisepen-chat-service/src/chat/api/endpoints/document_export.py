@@ -1,12 +1,12 @@
 import time
 from urllib.parse import quote
 
-from chat.application.document_export.config import document_export_output_path
-from chat.application.document_export.download_resolver import (
+from chat.application.document_export import (
     DocumentDownloadResolver,
+    ExportOutputError,
+    document_export_output_path,
+    guess_export_content_type,
 )
-from chat.application.document_export.errors import ExportOutputError
-from chat.application.document_export.mime import guess_export_content_type
 from chat.domain.repositories import SessionRepository
 from common.logger import log_event
 from common.security import require_login
@@ -41,7 +41,7 @@ async def download_generated_document(
     resolver = DocumentDownloadResolver(output_root=document_export_output_path())
 
     try:
-        resolved = resolver.resolve(download_ref=ref)
+        resolved = resolver.resolve(download_ref=ref, user_id=user_id)
     except ExportOutputError as exc:
         log_event(
             "document_export_download invalid_ref",

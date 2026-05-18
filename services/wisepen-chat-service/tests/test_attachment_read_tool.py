@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from chat.application.attachment_read import (
+from chat.application.tools.services.attachment_read import (
     AttachmentKind,
     AttachmentReadItem,
     AttachmentReadResult,
     AttachmentStatus,
-    StubAttachmentResolver,
 )
+from chat.application.tools.services.attachment_read.resolver import StubAttachmentResolver
 _TOOL_PATH = (
     Path(__file__).parents[1]
     / "src"

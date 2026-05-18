@@ -16,7 +16,6 @@ import {
   ApiStatusError,
   rollbackSessionToMessage,
 } from "../api/session";
-import type { SearchProviderRuntimeSelection } from "../api/searchProvider";
 import { streamChat } from "../api/streamChat";
 import type {
   AssistantMessage,
@@ -214,8 +213,6 @@ export function ChatPage() {
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [inputDraft, setInputDraft] = useState("");
-  const [searchProviderSelection, setSearchProviderSelection] =
-    useState<SearchProviderRuntimeSelection>({ mode: "default" });
   const abortRef = useRef<AbortController | null>(null);
 
   const models = useMemo(() => flattenModels(modelGroups), [modelGroups]);
@@ -516,7 +513,6 @@ export function ChatPage() {
           sessionId,
           query: attachFileRefsToQuery(text, messageFiles),
           modelId: selectedModelId,
-          searchProvider: searchProviderSelection,
           signal: controller.signal,
           onEvent: (event) => handleSseEvent(assistantId, event),
         });
@@ -551,7 +547,6 @@ export function ChatPage() {
       patchAssistant,
       refreshCurrentMessages,
       refreshSessions,
-      searchProviderSelection,
       selectedModelId,
       sessionId,
       streaming,
@@ -815,7 +810,6 @@ export function ChatPage() {
             modelGroups={modelGroups}
             selectedModelId={selectedModelId}
             onModelChange={setSelectedModelId}
-            onSearchProviderChange={setSearchProviderSelection}
             connectionStatus={connectionStatus}
             streaming={streaming}
             fileCount={files.length}

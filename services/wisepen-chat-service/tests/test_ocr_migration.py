@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from chat.application.document_parse.factory import build_document_parse_service
-from chat.application.document_parse.pdf.parser import PdfParser
-from chat.application.ocr import OcrImageAdapter, OcrProcessor, OcrResult
+from chat.application.tools.services.document_parse.factory import build_document_parse_service
+from chat.application.tools.services.document_parse.pdf.parser import PdfParser
+from chat.application.tools.common.ocr import OcrImageAdapter, OcrProcessor, OcrResult
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -54,7 +54,7 @@ def test_pdf_parser_accepts_public_ocr_adapter() -> None:
 def test_ocr_processor_worker_module_path_uses_public_module() -> None:
     source = inspect.getsource(OcrProcessor._start_worker)
 
-    assert "chat.application.ocr.worker" in source
+    assert "chat.application.tools.common.ocr.worker" in source
     assert ".".join(["chat", "application", "document_parse", "ocr", "worker"]) not in source
 
 
@@ -88,15 +88,21 @@ def test_no_forbidden_ocr_backends_or_abstractions_are_introduced() -> None:
 
 
 def test_container_wires_attachment_read_to_shared_ocr_adapter() -> None:
-    source = (SRC_ROOT / "chat" / "container.py").read_text(encoding="utf-8")
+    document_parse_source = (
+        SRC_ROOT / "chat" / "container_providers" / "document_parse.py"
+    ).read_text(encoding="utf-8")
+    attachment_read_source = (
+        SRC_ROOT / "chat" / "container_providers" / "attachment_read.py"
+    ).read_text(encoding="utf-8")
 
-    assert "from chat.application.ocr import OcrImageAdapter, OcrProcessor" in source
-    assert "container_cls.ocr_processor = providers.Singleton(" in source
-    assert "container_cls.ocr_image_adapter = providers.Singleton(" in source
-    assert "local_ocr_processor=container_cls.ocr_processor" in source
-    assert "ocr_image_adapter=container_cls.ocr_image_adapter" in source
-    assert source.count("providers.Singleton(\n        OcrProcessor") == 1
-    assert ".".join(["chat", "application", "document_parse", "ocr"]) not in source
+    assert "from chat.application.tools.common.ocr import OcrImageAdapter, OcrProcessor" in document_parse_source
+    assert "container_cls.ocr_processor = providers.Singleton(" in document_parse_source
+    assert "container_cls.ocr_image_adapter = providers.Singleton(" in document_parse_source
+    assert "local_ocr_processor=container_cls.ocr_processor" in document_parse_source
+    assert "ocr_image_adapter=container_cls.ocr_image_adapter" in attachment_read_source
+    assert document_parse_source.count("providers.Singleton(\n        OcrProcessor") == 1
+    assert ".".join(["chat", "application", "document_parse", "ocr"]) not in document_parse_source
+    assert ".".join(["chat", "application", "document_parse", "ocr"]) not in attachment_read_source
 
 
 def _iter_python_files(root: Path):

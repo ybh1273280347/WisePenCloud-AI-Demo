@@ -10,16 +10,16 @@ from chat.application.query_loop_runtime import (
     StepStartEvent,
     TextDeltaEvent,
 )
+from chat.application.runtime_context import RUNTIME_CONTEXT_KEY, RuntimeContext
 from chat.application.skill_matcher import SkillMatcher
 from chat.application.tools.runtime.tool_registry import ToolRegistry
-from chat.application.web_search.search_provider_config.constants import (
-    ERROR_NOT_CONFIGURED,
-    MODE_CUSTOM,
-    MODE_DEFAULT,
-    PUBLIC_ERROR_NOT_CONFIGURED,
-    STATUS_PROVIDER_ERROR,
+from chat.application.user_preferences import (
+    DEFAULT_LOCALE,
+    DEFAULT_TIMEZONE,
+    UserPreferencesService,
 )
-from chat.application.web_search.search_provider_config.service import (
+from chat.application.web_search.search_provider_config import (
+    MODE_DEFAULT,
     RuntimeSearchProviderContext,
     SearchProviderConfigService,
 )
@@ -60,6 +60,7 @@ class ChatTurnCoordinator:
         kafka_producer: KafkaProducerClient,
         skill_matcher: SkillMatcher,
         search_provider_config_service: Optional[SearchProviderConfigService] = None,
+        user_preferences_service: Optional[UserPreferencesService] = None,
     ):
         self._memory = memory
         self._model_resolver = model_resolver
@@ -80,6 +81,7 @@ class ChatTurnCoordinator:
         )
         self._skill_matcher = skill_matcher
         self._search_provider_config_service = search_provider_config_service
+        self._user_preferences_service = user_preferences_service
 
     # -------------------------------------------------------------------------
     # 公共入口
@@ -91,14 +93,10 @@ class ChatTurnCoordinator:
         user_query: str,
         background_tasks: BackgroundTasks,
         model_id: Optional[int] = None,
-        web_search_provider_mode: Optional[str] = None,
-        web_search_custom_provider: Optional[str] = None,
-        web_search_custom_api_key: Optional[str] = None,
-        web_search_use_saved_custom_key: bool = False,
-        web_search_custom_providers: Optional[List[Dict[str, Any]]] = None,
         states: Optional[List[Dict[str, Any]]] = None,
     ):
-        model_id = model_id or settings.DEFAULT_MODEL_ID
+        if model_id is None:
+            model_id = settings.DEFAULT_MODEL_ID
 
         # [Model Resolve] 通过映射表查找首选供应商，获取实际模型名和 API 凭证
         resolved = await self._model_resolver.resolve(model_id)
@@ -125,18 +123,10 @@ class ChatTurnCoordinator:
             needs_compression,
         ) = await self._context_assembler.build_context_window(recent_messages)
 
-        tool_context: Dict[str, Any] = {
-            "session_id": session_id,
-            "user_id": user_id,
-        }
-        await self._apply_search_provider_context(
-            tool_context=tool_context,
-            user_id=user_id,
-            provider_mode=web_search_provider_mode,
-            custom_provider=web_search_custom_provider,
-            custom_api_key=web_search_custom_api_key,
-            use_saved_custom_key=web_search_use_saved_custom_key,
-            custom_providers=web_search_custom_providers,
+        runtime_context = await self._build_runtime_context(user_id=user_id)
+        tool_context: Dict[str, Any] = self._build_tool_context(
+            session_id=session_id,
+            runtime_context=runtime_context,
         )
 
         # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills
@@ -169,6 +159,7 @@ class ChatTurnCoordinator:
             session_summary,
             states=states,
             candidate_skills=candidate_skills or None,
+            locale=runtime_context.locale,
         )
 
         # 记录进入 Agent 循环前的列表长度
@@ -249,109 +240,57 @@ class ChatTurnCoordinator:
                     session_summary,
                 )
 
-    async def _apply_search_provider_context(
-        self,
-        *,
-        tool_context: Dict[str, Any],
-        user_id: str,
-        provider_mode: Optional[str],
-        custom_provider: Optional[str],
-        custom_api_key: Optional[str],
-        use_saved_custom_key: bool,
-        custom_providers: Optional[List[Dict[str, Any]]],
-    ) -> None:
-        if provider_mode != MODE_CUSTOM:
-            tool_context["web_search_provider_mode"] = MODE_DEFAULT
-            return
-
-        tool_context["web_search_provider_mode"] = MODE_CUSTOM
-
-        if custom_providers:
-            tool_context["web_search_custom_providers"] = custom_providers
-            return
-
-        if custom_provider and custom_api_key and custom_api_key.strip():
-            tool_context["web_search_custom_providers"] = [
-                {
-                    "provider": custom_provider,
-                    "api_key": custom_api_key.strip(),
-                    "enabled": True,
-                }
-            ]
-            return
-
-        if use_saved_custom_key and self._search_provider_config_service is not None:
-            runtime_search_provider = (
-                await self._search_provider_config_service.runtime_context(
-                    user_id=user_id,
-                    require_custom=True,
-                )
-            )
-            self._apply_runtime_search_provider_context(
-                tool_context=tool_context,
-                user_id=user_id,
-                runtime_search_provider=runtime_search_provider,
-                attach_failure_handler=True,
-            )
-            return
-
-        self._apply_runtime_search_provider_context(
-            tool_context=tool_context,
-            user_id=user_id,
-            runtime_search_provider=RuntimeSearchProviderContext(
-                mode=MODE_CUSTOM,
-                custom_providers=[],
-                error_public_code=PUBLIC_ERROR_NOT_CONFIGURED,
-                error_status=STATUS_PROVIDER_ERROR,
-                error_last_error_code=ERROR_NOT_CONFIGURED,
-                error_message=(
-                    "Missing custom provider credential. Provide a temporary custom "
-                    "provider API key or choose a saved key."
-                ),
-            ),
-            attach_failure_handler=False,
-        )
-
-    def _apply_runtime_search_provider_context(
-        self,
-        *,
-        tool_context: Dict[str, Any],
-        user_id: str,
-        runtime_search_provider: RuntimeSearchProviderContext,
-        attach_failure_handler: bool,
-    ) -> None:
-        tool_context["web_search_provider_mode"] = runtime_search_provider.mode
-
-        if runtime_search_provider.custom_providers is not None:
-            tool_context["web_search_custom_providers"] = (
-                runtime_search_provider.custom_providers
-            )
-
-        if runtime_search_provider.error_public_code:
-            tool_context["web_search_custom_provider_error"] = {
-                "public_code": runtime_search_provider.error_public_code,
-                "status": runtime_search_provider.error_status,
-                "last_error_code": runtime_search_provider.error_last_error_code,
-                "message": runtime_search_provider.error_message,
-            }
-
-        if not attach_failure_handler:
-            return
-
+    async def _build_runtime_context(self, *, user_id: str) -> RuntimeContext:
         if self._search_provider_config_service is None:
-            return
-
-        async def record_custom_provider_failure(
-            status: str,
-            last_error_code: str,
-        ) -> None:
-            assert self._search_provider_config_service is not None
-            await self._search_provider_config_service.record_runtime_failure(
+            search_config = RuntimeSearchProviderContext(mode=MODE_DEFAULT)
+        else:
+            search_config = await self._search_provider_config_service.runtime_context(
                 user_id=user_id,
-                status=status,
-                last_error_code=last_error_code,
+                require_custom=False,
             )
 
-        tool_context["web_search_custom_provider_failure_handler"] = (
-            record_custom_provider_failure
+        if self._user_preferences_service is None:
+            timezone = DEFAULT_TIMEZONE
+            locale = DEFAULT_LOCALE
+        else:
+            preferences = await self._user_preferences_service.get_preferences(
+                user_id=user_id
+            )
+            timezone = preferences.timezone
+            locale = preferences.locale
+
+        return RuntimeContext(
+            user_id=user_id,
+            timezone=timezone,
+            locale=locale,
+            search_config=search_config,
         )
+
+    def _build_tool_context(
+        self,
+        *,
+        session_id: str,
+        runtime_context: RuntimeContext,
+    ) -> Dict[str, Any]:
+        tool_context: Dict[str, Any] = {
+            "session_id": session_id,
+            "user_id": runtime_context.user_id,
+            RUNTIME_CONTEXT_KEY: runtime_context,
+        }
+        if self._search_provider_config_service is not None:
+
+            async def record_custom_provider_failure(
+                status: str,
+                last_error_code: str,
+            ) -> None:
+                assert self._search_provider_config_service is not None
+                await self._search_provider_config_service.record_runtime_failure(
+                    user_id=runtime_context.user_id,
+                    status=status,
+                    last_error_code=last_error_code,
+                )
+
+            tool_context["search_provider_failure_handler"] = (
+                record_custom_provider_failure
+            )
+        return tool_context

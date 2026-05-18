@@ -1,8 +1,8 @@
-from chat.application.document_export.download_reference import (
+from chat.application.document_export import (
+    GeneratedDocumentFile,
     build_download_ref,
     build_download_url,
 )
-from chat.application.document_export.models import GeneratedDocumentFile
 
 _DOWNLOAD_REF_USAGE_NOTE = (
     "download_ref is for user download and preview only. Do not pass download_ref to "
@@ -12,11 +12,14 @@ _DOWNLOAD_REF_USAGE_NOTE = (
 
 def format_generated_document_result(
     *,
+    user_id: str,
     session_id: str,
     generated: GeneratedDocumentFile,
 ) -> str:
     download_ref = build_download_ref(
-        session_id=session_id, file_name=generated.file_name
+        user_id=user_id,
+        session_id=session_id,
+        storage_file_name=generated.storage_file_name,
     )
     download_url = build_download_url(download_ref=download_ref)
     return (

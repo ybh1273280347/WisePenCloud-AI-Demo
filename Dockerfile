@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM ghcr.io/astral-sh/uv:0.6-python3.11-bookworm-slim AS builder
 
 ARG HTTP_PROXY
@@ -11,6 +13,7 @@ ENV UV_LINK_MODE=copy
 ENV HF_HOME=/opt/wisepen/models/huggingface
 ENV HF_TOKEN=${HF_TOKEN}
 ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
@@ -49,6 +52,21 @@ COPY services/wisepen-chat-service/pyproject.toml /app/services/wisepen-chat-ser
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package wisepen-chat-service --no-install-workspace
 
+# Install Python Playwright Chromium before copying source code.
+# This prevents normal Python source changes from invalidating the browser download layer.
+#
+# Important:
+# - Do not mount /ms-playwright itself as a cache mount, because cache mount contents are not committed
+#   into the final image layer.
+# - Download into a BuildKit cache directory, then copy the cached browser files into /ms-playwright,
+#   which is committed into this builder stage and later copied into the app stage.
+RUN --mount=type=cache,target=/tmp/ms-playwright-cache \
+    PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright-cache \
+    /app/.venv/bin/python -m playwright install chromium \
+    && rm -rf /ms-playwright \
+    && mkdir -p /ms-playwright \
+    && cp -a /tmp/ms-playwright-cache/. /ms-playwright/
+
 # Install spaCy English model required by mem0.
 # Keep this before COPY services/ so normal source changes do not re-run this layer.
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -61,7 +79,8 @@ spacy.load("en_core_web_sm")
 print("en_core_web_sm loaded")
 PY
 
-# Preload Docling-related models into HF_HOME.
+# Preload Docling-related models for existing non-PDF office parsing into HF_HOME.
+# PDF parsing/conversion must not depend on Docling.
 # Keep this before COPY services/ so normal source changes do not re-run model preload.
 RUN --mount=type=cache,target=/root/.cache/huggingface \
     /app/.venv/bin/python -c "from docling.document_converter import DocumentConverter; DocumentConverter()"
@@ -108,12 +127,17 @@ ARG https_proxy
 ARG NODE_VERSION=20.18.3
 
 ENV PATH="/app/.venv/bin:$PATH"
-ENV DOCUMENT_PARSER_BACKEND=docling
+ENV DOCUMENT_TEMP_FILE_ROOT=/tmp/wisepen-chat-upload-files
 ENV HF_HOME=/opt/wisepen/models/huggingface
 ENV TRANSLATION_DEVICE=cpu
+ENV DOCUMENT_EXPORT_PLAYWRIGHT_DISABLE_SANDBOX=true
 ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
+
+RUN mkdir -p /tmp/wisepen-chat-upload-files \
+    && chmod 700 /tmp/wisepen-chat-upload-files
 
 # Runtime subprocess dependencies:
 # - pandoc: document conversion
@@ -168,8 +192,15 @@ RUN curl -L --retry 3 --retry-delay 5 \
     && npm --version
 
 # Install web_fetch JS dependencies.
-# The package postinstall may preload Chromium for rebrowser-playwright.
-# Chromium system libraries must already be installed before this layer.
+#
+# Keep this before copying Python source/runtime artifacts.
+# This keeps npm dependency installation cached when only Python source files change.
+#
+# Note:
+# We intentionally do not set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD globally here.
+# Node-side rebrowser-playwright and Python Playwright can require different browser revisions.
+# For correctness, Node-side browser handling should remain owned by the Node dependency layer,
+# while Python Playwright's browser is preloaded in the builder stage and copied below.
 COPY package.json package-lock.json /app/
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev \
@@ -177,8 +208,18 @@ RUN --mount=type=cache,target=/root/.npm \
     && node -e "const { chromium } = require('rebrowser-playwright'); console.log('rebrowser-playwright chromium available:', Boolean(chromium));" \
     && pandoc --version >/dev/null
 
+# Copy Python runtime artifacts and preloaded models.
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /opt/wisepen/models /opt/wisepen/models
+
+# Copy preloaded Python Playwright browser cache.
+# This replaces the previous final-stage `python -m playwright install chromium`.
+COPY --from=builder /ms-playwright /ms-playwright
+
+# Python document_export uses Python Playwright.
+# Browser binaries are already copied from builder; this layer only verifies runtime availability.
+RUN python -c "from pathlib import Path; from tempfile import TemporaryDirectory; from playwright.sync_api import sync_playwright; tmp = TemporaryDirectory(); out = Path(tmp.name) / 'playwright-smoke.pdf'; p = sync_playwright().start(); browser = p.chromium.launch(headless=True, args=['--disable-dev-shm-usage', '--disable-gpu', '--no-sandbox']); page = browser.new_page(java_script_enabled=False); page.set_content('<html><body><h1>ok</h1></body></html>'); page.pdf(path=str(out), print_background=True); browser.close(); p.stop(); assert out.is_file() and out.stat().st_size > 0, 'Python Playwright PDF smoke test did not create a PDF'; tmp.cleanup()"
+
 COPY --from=builder /app/services /app/services
 
 WORKDIR /app/services/wisepen-chat-service/src

@@ -99,18 +99,22 @@ class SearchProviderConfigService:
         api_key: str,
     ) -> UserSearchProviderConfig:
         _validate_provider(provider)
-        normalized_key = api_key.strip()
-        if not normalized_key:
+        if not api_key:
             raise ServiceException(
                 ChatErrorCode.CUSTOM_PROVIDER_NOT_CONFIGURED,
                 custom_msg="自定义搜索源 API Key 不能为空",
+            )
+        if api_key != api_key.strip():
+            raise ServiceException(
+                ChatErrorCode.CUSTOM_PROVIDER_NOT_CONFIGURED,
+                custom_msg="自定义搜索源 API Key 不能包含首尾空白",
             )
 
         try:
             encrypted = self._cipher.encrypt(
                 user_id=user_id,
                 provider=provider,
-                api_key=normalized_key,
+                api_key=api_key,
             )
         except CredentialEncryptionError as e:
             raise ServiceException(
@@ -206,6 +210,10 @@ class SearchProviderConfigService:
             if require_custom:
                 return _missing_custom_provider_context()
             return RuntimeSearchProviderContext(mode=MODE_DEFAULT)
+
+        _validate_mode(config.mode)
+        if config.provider is not None:
+            _validate_provider(config.provider)
 
         if config.mode == MODE_DEFAULT and not require_custom:
             return RuntimeSearchProviderContext(mode=MODE_DEFAULT)
@@ -316,7 +324,7 @@ def _missing_custom_provider_context() -> RuntimeSearchProviderContext:
         error_status=STATUS_PROVIDER_ERROR,
         error_last_error_code=ERROR_NOT_CONFIGURED,
         error_message=(
-            "Missing custom provider credential. Provide a temporary custom provider "
-            "API key or choose a saved key."
+            "Missing custom provider credential. Create or update the custom provider "
+            "credential in search provider settings, or switch back to default search mode."
         ),
     )

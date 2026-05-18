@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from chat.application.web_crawl import CrawlRequest, WebCrawlService
-from chat.application.web_crawl.errors import CrawlConfigurationError, CrawlInputError
-from chat.application.web_crawl.formatting import format_crawl_result
+from chat.application.tools.services.web_crawl import CrawlRequest, WebCrawlService
+from chat.application.tools.services.web_crawl.errors import CrawlConfigurationError, CrawlInputError
+from chat.application.tools.services.web_crawl.formatting import format_crawl_result
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_error, log_event
 
@@ -74,6 +74,9 @@ class WebCrawlTool(BaseTool):
         session_id = context.get("session_id")
         if not isinstance(session_id, str) or not session_id.strip():
             return "[Tool Error] session_id is required for web_crawl."
+        user_id = context.get("user_id")
+        if not isinstance(user_id, str) or not user_id.strip():
+            return "[Tool Error] user_id is required for web_crawl."
 
         seed_urls = kwargs.get("seed_urls")
         if not isinstance(seed_urls, list) or not seed_urls:
@@ -103,6 +106,7 @@ class WebCrawlTool(BaseTool):
             )
             result = await self._service.crawl(
                 CrawlRequest(
+                    user_id=user_id.strip(),
                     session_id=session_id.strip(),
                     seed_urls=[item.strip() for item in seed_urls],
                     objective=objective.strip(),

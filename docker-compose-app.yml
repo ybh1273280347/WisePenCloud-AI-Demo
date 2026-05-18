@@ -29,6 +29,9 @@ services:
       # translation_assist
       - TRANSLATION_DEVICE=cpu
 
+      # document temp file protocol
+      - DOCUMENT_TEMP_FILE_ROOT=/tmp/wisepen-chat-upload-files
+
       # math_compute Sage backend
       - MATH_SAGE_ENABLED=true
 
@@ -38,6 +41,7 @@ services:
 
     volumes:
       - ../logs/chat:/logs
+      - wisepen-document-temp:/tmp/wisepen-chat-upload-files
     ports:
       - "${CHAT_SERVICE_PORT:-9200}:9200"
     networks:
@@ -134,6 +138,8 @@ volumes:
   steel-logs:
     driver: local
   steel-exports:
+    driver: local
+  wisepen-document-temp:
     driver: local
 
 networks:

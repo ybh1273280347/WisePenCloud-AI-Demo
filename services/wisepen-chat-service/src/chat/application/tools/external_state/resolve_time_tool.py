@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional
 
-from chat.application.temporal import (
+from chat.application.runtime_context import get_runtime_context
+from chat.application.tools.services.temporal import (
     ResolvedTimeRange,
     TimeResolveError,
     resolve_time_text,
@@ -75,7 +76,17 @@ class ResolveTimeTool(BaseTool):
         if not isinstance(text, str) or not text.strip():
             return "[Tool Error] Missing required text parameter."
 
-        timezone_name = kwargs.get("timezone") or DEFAULT_TOOL_TIMEZONE
+        runtime_context = get_runtime_context(context)
+        timezone_arg = kwargs.get("timezone")
+        if timezone_arg is None:
+            timezone_name = (
+                runtime_context.timezone
+                if runtime_context is not None
+                else DEFAULT_TOOL_TIMEZONE
+            )
+        else:
+            timezone_name = timezone_arg
+        locale = runtime_context.locale if runtime_context is not None else None
         default_recent_days = kwargs.get("recent_days", 30)
         domain_sensitivity: Optional[str] = kwargs.get("domain_sensitivity")
 
@@ -83,6 +94,7 @@ class ResolveTimeTool(BaseTool):
             resolved = resolve_time_text(
                 text=text,
                 timezone_name=timezone_name,
+                locale=locale,
                 default_recent_days=default_recent_days,
                 domain_sensitivity=domain_sensitivity,
             )

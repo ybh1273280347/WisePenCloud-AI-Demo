@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from chat.application.air_quality import (
+from chat.application.tools.services.air_quality import (
     AirQualityApiError,
     AirQualityResult,
     OpenMeteoAirQualityClient,

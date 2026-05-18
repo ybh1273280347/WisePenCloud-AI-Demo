@@ -21,7 +21,8 @@ def test_download_route_returns_generated_file_with_chinese_filename(
     monkeypatch,
 ) -> None:
     output_root = tmp_path / "generated"
-    file_path = output_root / "session" / "复旦大学计算机_信息概要.md"
+    storage_file_name = "0123456789abcdef0123456789abcdef-复旦大学计算机_信息概要.md"
+    file_path = output_root / "user" / "session" / "outputs" / storage_file_name
     file_path.parent.mkdir(parents=True)
     file_path.write_text("# hello", encoding="utf-8")
     repo = FakeSessionRepository()
@@ -29,7 +30,7 @@ def test_download_route_returns_generated_file_with_chinese_filename(
 
     response = client.get(
         "/api/document-export/download",
-        params={"ref": "session/复旦大学计算机_信息概要.md"},
+        params={"ref": f"user/session/{storage_file_name}"},
     )
 
     assert response.status_code == 200
@@ -49,7 +50,7 @@ def test_download_route_rejects_invalid_ref_before_session_lookup(
     repo = FakeSessionRepository()
     client = _client(tmp_path=tmp_path, repo=repo, monkeypatch=monkeypatch)
 
-    response = client.get("/api/document-export/download", params={"ref": "a/b/c.md"})
+    response = client.get("/api/document-export/download", params={"ref": "a/b"})
 
     assert response.status_code == 400
     assert repo.calls == []
@@ -64,7 +65,7 @@ def test_download_route_returns_404_for_missing_file(
 
     response = client.get(
         "/api/document-export/download",
-        params={"ref": "session/missing.md"},
+        params={"ref": "user/session/missing.md"},
     )
 
     assert response.status_code == 404

@@ -20,15 +20,6 @@ export type SearchProviderConfig = {
   lastErrorCode: string | null;
 };
 
-export type SearchProviderRuntimeSelection =
-  | { mode: "default" }
-  | {
-      mode: "custom";
-      provider: SearchProviderName | null;
-      useSavedKey: boolean;
-      apiKey?: string | null;
-    };
-
 type SearchProviderConfigDto = {
   mode: SearchProviderMode;
   provider?: SearchProviderName | null;
@@ -109,19 +100,6 @@ export async function verifyCustomSearchProvider(): Promise<SearchProviderConfig
     "验证自定义搜索源失败",
   );
   return mapConfig(data);
-}
-
-export function runtimeSelectionFromConfig(
-  config: SearchProviderConfig,
-): SearchProviderRuntimeSelection {
-  if (config.mode === "custom" && config.provider && config.keyLast4) {
-    return {
-      mode: "custom",
-      provider: config.provider,
-      useSavedKey: true,
-    };
-  }
-  return { mode: "default" };
 }
 
 function mapConfig(dto: SearchProviderConfigDto): SearchProviderConfig {

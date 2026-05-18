@@ -1,19 +1,17 @@
 from typing import Any, Dict, Optional
 
-from chat.application.document_convert import DocumentConvertService
-from chat.application.document_convert.errors import DocumentConvertError
-from chat.application.document_export.errors import DocumentExportError
+from chat.application.document_export import DocumentExportError
 from chat.application.tools.document.formatting import format_generated_document_result
+from chat.application.tools.services.document_convert import DocumentConvertService
+from chat.application.tools.services.document_convert.errors import DocumentConvertError
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_fail, log_ok
 
 _TOOL_DESCRIPTION = (
-    "Converts a local or cached binary document file referenced by file_ref into a generated file. "
-    "The conversion always parses the source document into Markdown first, then exports that Markdown to the requested target format. "
-    "Supports output formats: markdown, html, pdf, docx, and txt. "
-    "Use this when the user asks to convert an uploaded or cached document file into another downloadable file format. "
-    "Does not fetch URLs. "
-    "Does not perform direct high-fidelity file-to-file conversion."
+    "Converts a server-side temporary document file_ref into a generated downloadable file. "
+    "The source must already be an ingested server temporary file_ref. Markdown/plain text/HTML "
+    "are read directly and exported; binary documents are parsed by the existing document_parse "
+    "strategy before export. Supports output formats: markdown, html, pdf, docx, and txt."
 )
 
 _TOOL_SCHEMA = {
@@ -22,7 +20,7 @@ _TOOL_SCHEMA = {
         "file_ref": {
             "type": "string",
             "minLength": 1,
-            "description": "Reference to a local or cached binary document file.",
+            "description": "Server-side temporary document file path issued by the system.",
         },
         "target_format": {
             "type": "string",
@@ -35,6 +33,7 @@ _TOOL_SCHEMA = {
         },
     },
     "required": ["file_ref", "target_format"],
+    "additionalProperties": False,
 }
 
 
@@ -58,13 +57,20 @@ class DocumentConvertTool(BaseTool):
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
+        user_id: Optional[str] = context.get("user_id")
+        if not user_id:
+            return "[Tool Error] Missing user_id in execution context."
 
-        file_ref: str = kwargs["file_ref"]
+        file_ref: Optional[str] = kwargs.get("file_ref")
+        if not isinstance(file_ref, str) or not file_ref.strip():
+            return "[Tool Error] Missing required file_ref parameter."
+
         target_format: str = kwargs["target_format"]
         file_name: Optional[str] = kwargs.get("file_name")
 
         try:
-            generated = await self.convert_service.convert_file(
+            generated = await self.convert_service.convert_document(
+                user_id=user_id,
                 session_id=session_id,
                 file_ref=file_ref,
                 target_format=target_format,
@@ -73,26 +79,28 @@ class DocumentConvertTool(BaseTool):
 
             log_ok(
                 "document_convert",
+                user_id=user_id,
                 session_id=session_id,
-                file_ref=file_ref,
                 target_format=target_format,
                 file_name=generated.file_name,
             )
 
             return format_generated_document_result(
-                session_id=session_id, generated=generated
+                user_id=user_id,
+                session_id=session_id,
+                generated=generated,
             )
 
-        except DocumentExportError as e:
-            return f"[Tool Error] Export failed: {e}"
-        except DocumentConvertError as e:
-            return f"[Tool Error] {e}"
-        except Exception as e:
+        except DocumentExportError as exc:
+            return f"[Tool Error] Export failed: {exc}"
+        except DocumentConvertError as exc:
+            return f"[Tool Error] {exc}"
+        except Exception as exc:
             log_fail(
                 "document_convert",
-                e,
+                exc,
+                user_id=user_id,
                 session_id=session_id,
-                file_ref=file_ref,
                 target_format=target_format,
             )
             return "[Tool Error] Unexpected error while converting document."

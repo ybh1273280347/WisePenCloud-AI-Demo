@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from chat.application.tool_content_store import cache_and_format
+from chat.application.tools.common.tool_content_store import cache_and_format
 from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
 from chat.domain.interfaces.tool import BaseTool
 from chat.domain.repositories import MessageRepository
@@ -26,8 +26,11 @@ class SearchHistoricalMessagesTool(BaseTool):
         return (
             "Search historical chat messages by keyword and optional time range. "
             "Use this when you need to recall specific facts, events, or details "
-            "from earlier in the conversation that may not be in the current context window."
-            "NOTE that the search keyword's language should match the user's chat language;otherwise, the search may fail. If no results are found, consider switching the keyword's language. "
+            "from earlier in the conversation that may not be in the current context window. "
+            "Choose keyword language from the content you are trying to recall: start with "
+            "the user's current message language, use the user's preferred locale when the "
+            "current message is ambiguous, and try another likely conversation language if "
+            "no results are found. "
             "Long results are returned as ToolContent windows; continue with tool_content_read "
             "using content_id and next_offset when truncated=true."
         )
@@ -40,7 +43,12 @@ class SearchHistoricalMessagesTool(BaseTool):
             "properties": {
                 "keyword": {
                     "type": "string",
-                    "description": "The keyword or phrase to search for in message history. The keyword argument must be in the same language as the user's query.",
+                    "description": (
+                        "The keyword or phrase to search for in message history. "
+                        "Use the language likely used in the historical message; start "
+                        "with the current message language, and use the preferred locale "
+                        "only when the current message is ambiguous."
+                    ),
                 },
                 "start_time": {
                     "type": "string",

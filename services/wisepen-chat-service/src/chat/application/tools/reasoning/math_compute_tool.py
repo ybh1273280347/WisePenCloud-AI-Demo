@@ -2,10 +2,10 @@ from typing import Any, Dict, Optional, Tuple
 
 import httpx
 
-from chat.application.math_reasoning.common.errors import MathEngineError
-from chat.application.math_reasoning.common.formatting import format_math_result
-from chat.application.math_reasoning.compute.service import MathComputeService
-from chat.application.math_reasoning.config import MATH_SAGE_TIMEOUT_SECONDS
+from chat.application.tools.services.math_reasoning.common.errors import MathEngineError
+from chat.application.tools.services.math_reasoning.common.formatting import format_math_result
+from chat.application.tools.services.math_reasoning.compute.service import MathComputeService
+from chat.application.tools.services.math_reasoning.config import MATH_SAGE_TIMEOUT_SECONDS
 from chat.core.config.app_settings import settings
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_event

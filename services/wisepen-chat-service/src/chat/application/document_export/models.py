@@ -15,6 +15,7 @@ class ExportOptions:
 @dataclass(frozen=True, slots=True)
 class ExportRequest:
     session_id: str
+    user_id: str
     markdown: str
     target_format: str
     output_path: Path
@@ -26,6 +27,9 @@ class ExportRequest:
 class GeneratedDocumentFile:
     file_path: Path
     file_name: str
+    storage_file_name: str
+    user_id: str
+    session_id: str
     content_type: str
     target_format: str
     size_bytes: int

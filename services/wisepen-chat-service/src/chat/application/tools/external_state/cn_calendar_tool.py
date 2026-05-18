@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from chat.application.cn_calendar import CnCalendarError, CnCalendarService, CalendarStatusResult
+from chat.application.tools.services.cn_calendar import CnCalendarError, CnCalendarService, CalendarStatusResult
 from chat.application.tools.config import DEFAULT_TOOL_TIMEZONE
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_fail, log_ok

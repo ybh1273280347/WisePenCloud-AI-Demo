@@ -1,7 +1,7 @@
 import type { ConnectionStatus, ModelGroups } from "../types/chat";
-import type { SearchProviderRuntimeSelection } from "../api/searchProvider";
 import { ModelSelector } from "./ModelSelector";
 import { SearchProviderSelector } from "./SearchProviderSelector";
+import { UserPreferencesSelector } from "./UserPreferencesSelector";
 
 type ChatHeaderProps = {
   title: string;
@@ -9,7 +9,6 @@ type ChatHeaderProps = {
   modelGroups: ModelGroups;
   selectedModelId: number | null;
   onModelChange: (modelId: number | null) => void;
-  onSearchProviderChange: (selection: SearchProviderRuntimeSelection) => void;
   connectionStatus: ConnectionStatus;
   streaming: boolean;
   fileCount: number;
@@ -22,7 +21,6 @@ export function ChatHeader({
   modelGroups,
   selectedModelId,
   onModelChange,
-  onSearchProviderChange,
   connectionStatus,
   streaming,
   fileCount,
@@ -52,8 +50,8 @@ export function ChatHeader({
         />
         <SearchProviderSelector
           disabled={streaming}
-          onSelectionChange={onSearchProviderChange}
         />
+        <UserPreferencesSelector disabled={streaming} />
         <span className={`header-pill connection-pill connection-pill-${connectionStatus}`}>
           <span className="status-dot" />
           {statusLabel}

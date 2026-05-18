@@ -4,6 +4,9 @@ import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
+
+import pytest
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -11,23 +14,24 @@ sys.path.insert(0, str(_ROOT / "src"))
 sys.path.insert(0, str(_ROOT.parent / "wisepen-common" / "src"))
 
 from chat.application.algorithms.url import canonicalize_url
-from chat.application.web_crawl import CrawlRequest, WebCrawlService
-from chat.application.web_crawl.formatting import format_crawl_result
-from chat.application.web_crawl.frontier import CrawlFrontier
-from chat.application.web_crawl.link_extractor import (
+from chat.application.tools.services.web_crawl import CrawlRequest, WebCrawlService
+from chat.application.tools.services.web_crawl.formatting import format_crawl_result
+from chat.application.tools.services.web_crawl.frontier import CrawlFrontier
+from chat.application.tools.services.web_crawl.link_extractor import (
     extract_markdown_links,
     extract_markdown_title,
 )
-from chat.application.web_crawl.models import (
+from chat.application.tools.services.web_crawl.models import (
     CrawlItemKind,
     CrawlResultItem,
     CrawlSkipReason,
 )
-from chat.application.web_crawl.politeness import PerHostPoliteness
-from chat.application.web_crawl.robots import RobotsDecision
-from chat.application.web_fetch.fetch_coordinator import FetchResultItem
-from chat.application.web_fetch.models import FetchedDocument
-from chat.application.web_crawl import service as service_module
+from chat.application.tools.services.web_crawl.politeness import PerHostPoliteness
+from chat.application.tools.services.web_crawl.robots import RobotsDecision
+from chat.application.tools.services.web_fetch.fetch_coordinator import FetchResultItem
+from chat.application.tools.services.web_fetch.models import FetchedDocument
+from chat.application.tools.services.web_crawl import service as service_module
+
 
 
 def test_markdown_link_extraction() -> None:
@@ -69,6 +73,7 @@ def test_frontier_external_budgets() -> None:
     assert reason4 == CrawlSkipReason.EXTERNAL_BUDGET_EXCEEDED.value
 
 
+@pytest.mark.asyncio
 async def test_crawl_fetches_relevant_links_and_skips_blocked_path() -> None:
     seed = "https://docs.example.com/"
     auth = "https://docs.example.com/api/auth"
@@ -94,6 +99,7 @@ async def test_crawl_fetches_relevant_links_and_skips_blocked_path() -> None:
 
     result = await service.crawl(
         CrawlRequest(
+            user_id="u1",
             session_id="s1",
             seed_urls=[seed],
             objective="api authentication",
@@ -112,6 +118,7 @@ async def test_crawl_fetches_relevant_links_and_skips_blocked_path() -> None:
     assert result.fetched_pages >= 2
 
 
+@pytest.mark.asyncio
 async def test_max_depth_controls_second_layer_fetching() -> None:
     seed = "https://docs.example.com/"
     auth = "https://docs.example.com/api/auth"
@@ -124,6 +131,7 @@ async def test_max_depth_controls_second_layer_fetching() -> None:
 
     shallow = await _service(FakeFetchCoordinator(mapping)).crawl(
         CrawlRequest(
+            user_id="u1",
             session_id="s1",
             seed_urls=[seed],
             objective="api authentication token",
@@ -133,6 +141,7 @@ async def test_max_depth_controls_second_layer_fetching() -> None:
     )
     deep = await _service(FakeFetchCoordinator(mapping)).crawl(
         CrawlRequest(
+            user_id="u1",
             session_id="s1",
             seed_urls=[seed],
             objective="api authentication token",
@@ -145,6 +154,7 @@ async def test_max_depth_controls_second_layer_fetching() -> None:
     assert token in [item.url for item in deep.items]
 
 
+@pytest.mark.asyncio
 async def test_document_result_outputs_file_ref_only() -> None:
     seed = "https://docs.example.com/"
     pdf = "https://docs.example.com/paper.pdf"
@@ -166,6 +176,7 @@ async def test_document_result_outputs_file_ref_only() -> None:
 
     result = await _service(coordinator).crawl(
         CrawlRequest(
+            user_id="u1",
             session_id="s1",
             seed_urls=[seed],
             objective="paper document",
@@ -178,9 +189,15 @@ async def test_document_result_outputs_file_ref_only() -> None:
     assert "Document parse required:" in formatted
     assert "file_ref:" not in formatted
     assert "download_ref" not in formatted
-    assert any(item.kind == CrawlItemKind.DOCUMENT.value and item.file_ref == "handoff://paper.pdf" for item in result.items)
+    assert any(
+        item.kind == CrawlItemKind.DOCUMENT.value
+        and item.file_ref
+        == "/tmp/wisepen-chat-upload-files/u1/s1/0123456789abcdef0123456789abcdef-paper.pdf"
+        for item in result.items
+    )
 
 
+@pytest.mark.asyncio
 async def test_robots_and_rate_limit_failures_do_not_block_other_hosts() -> None:
     seed = "https://docs.example.com/"
     denied = "https://docs.example.com/private"
@@ -216,6 +233,7 @@ async def test_robots_and_rate_limit_failures_do_not_block_other_hosts() -> None
 
     result = await service.crawl(
         CrawlRequest(
+            user_id="u1",
             session_id="s1",
             seed_urls=[seed],
             objective="denied private alpha beta other",
@@ -258,7 +276,16 @@ def test_formatting_assistant_instructions() -> None:
 
 
 def test_service_does_not_import_fetchers_or_web_search() -> None:
-    source = (_ROOT / "src" / "chat" / "application" / "web_crawl" / "service.py").read_text(encoding="utf-8")
+    source = (
+        _ROOT
+        / "src"
+        / "chat"
+        / "application"
+        / "tools"
+        / "services"
+        / "web_crawl"
+        / "service.py"
+    ).read_text(encoding="utf-8")
     forbidden = [
         "StaticFetcher",
         "SteelFetcher",
@@ -286,7 +313,7 @@ def _frontier_external(url: str):
 def _service(
     coordinator: "FakeFetchCoordinator",
     *,
-    robots_policy: "FakeRobotsPolicy | None" = None,
+    robots_policy: Optional["FakeRobotsPolicy"] = None,
 ) -> WebCrawlService:
     return WebCrawlService(
         fetch_coordinator=coordinator,
@@ -313,7 +340,7 @@ class FakeFetchCoordinator:
 
 
 class FakeRobotsPolicy:
-    def __init__(self, decisions: dict[str, RobotsDecision] | None = None):
+    def __init__(self, decisions: Optional[dict[str, RobotsDecision]] = None):
         self.decisions = decisions or {}
         self.calls: list[tuple[str, bool]] = []
 
@@ -323,8 +350,24 @@ class FakeRobotsPolicy:
 
 
 class FakeHandoffStore:
-    def write_bytes(self, *, session_id: str, filename: str, content: bytes, canonical_suffix: str):
-        return FakeHandoffResult(file_ref=f"handoff://{filename}")
+    def write_bytes(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        filename: str,
+        content: bytes,
+        canonical_suffix: str,
+        content_type: Optional[str] = None,
+    ):
+        assert user_id == "u1"
+        assert session_id == "s1"
+        return FakeHandoffResult(
+            file_ref=(
+                "/tmp/wisepen-chat-upload-files/u1/s1/"
+                f"0123456789abcdef0123456789abcdef-{filename}"
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,6 +387,11 @@ def _patch_runtime_dependencies() -> None:
     service_module.cache_and_format = (
         lambda **kwargs: f"content_id: cnt_{service_module.stable_hash(kwargs['source'])}\n{kwargs['text'][:80]}"
     )
+
+
+@pytest.fixture(autouse=True)
+def patch_runtime_dependencies():
+    _patch_runtime_dependencies()
 
 
 def main() -> None:

@@ -2,8 +2,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from chat.application.browser_interact.core.actions.control import WAIT_DURATION_MAX_S
-from chat.application.browser_interact.core.controller import BrowserInteractController
+from chat.application.tools.services.browser_interact.core.actions.control import WAIT_DURATION_MAX_S
+from chat.application.tools.services.browser_interact.core.controller import BrowserInteractController
 from chat.domain.interfaces.tool import BaseTool
 
 TOOL_DESCRIPTION = (

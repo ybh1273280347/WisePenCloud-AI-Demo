@@ -1,25 +1,23 @@
 from typing import Any
 
 from chat.application.document_export import DocumentExportService
-from chat.application.document_export.atomic_writer import AtomicExportWriter
 from chat.application.document_export.config import (
     DOCUMENT_EXPORT_MAX_PDF_CONTEXTS,
     DOCUMENT_EXPORT_PANDOC_BIN,
     DOCUMENT_EXPORT_PLAYWRIGHT_DISABLE_SANDBOX,
     document_export_output_path,
 )
-from chat.application.document_export.infrastructure.playwright_pool import (
+from chat.application.document_export.internal.atomic_writer import AtomicExportWriter
+from chat.application.document_export.internal.infrastructure.playwright_pool import (
     PlaywrightBrowserPool,
 )
-from chat.application.document_export.normalizer import ContentNormalizer
-from chat.application.document_export.renderers import (
-    DocxRenderer,
-    HtmlRenderer,
-    MarkdownRenderer,
-    PdfRenderer,
-    RendererRegistry,
-    TxtRenderer,
-)
+from chat.application.document_export.internal.normalizer import ContentNormalizer
+from chat.application.document_export.internal.renderers.docx_renderer import DocxRenderer
+from chat.application.document_export.internal.renderers.html_renderer import HtmlRenderer
+from chat.application.document_export.internal.renderers.markdown_renderer import MarkdownRenderer
+from chat.application.document_export.internal.renderers.pdf_renderer import PdfRenderer
+from chat.application.document_export.internal.renderers.registry import RendererRegistry
+from chat.application.document_export.internal.renderers.txt_renderer import TxtRenderer
 from dependency_injector import providers
 
 

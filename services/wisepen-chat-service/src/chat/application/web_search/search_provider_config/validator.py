@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from chat.application.web_search.errors import CustomSearchProviderUnavailableError
-from chat.application.web_search.runner.custom_provider_runner import (
+from chat.application.web_search.internal.runner.custom_provider_runner import (
     run_custom_provider_verification,
 )
 from chat.application.web_search.search_provider_config.constants import (

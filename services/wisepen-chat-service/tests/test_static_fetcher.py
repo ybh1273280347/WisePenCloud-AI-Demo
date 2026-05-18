@@ -4,16 +4,16 @@ import zipfile
 import httpx
 import pytest
 
-from chat.application.content_detection import (
+from chat.application.tools.common.content_detection import (
     ContentDetection,
     ContentKind,
     DetectionConfidence,
     DetectionHints,
 )
-from chat.application.web_fetch.errors import UnsupportedMediaError
-from chat.application.web_fetch.fetcher import static_fetcher as static_fetcher_module
-from chat.application.web_fetch.fetcher.static_fetcher import StaticFetcher
-from chat.application.web_fetch.models import FetchedDocument
+from chat.application.tools.services.web_fetch.errors import UnsupportedMediaError
+from chat.application.tools.services.web_fetch.fetcher import static_fetcher as static_fetcher_module
+from chat.application.tools.services.web_fetch.fetcher.static_fetcher import StaticFetcher
+from chat.application.tools.services.web_fetch.models import FetchedDocument
 
 pytestmark = pytest.mark.asyncio
 

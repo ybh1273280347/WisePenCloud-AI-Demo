@@ -1,13 +1,13 @@
 import pytest
 
-from chat.application.content_detection import (
+from chat.application.tools.common.content_detection import (
     ContentDetection,
     ContentKind,
     DetectionConfidence,
     DetectionHints,
 )
-from chat.application.web_fetch.errors import UnsupportedMediaError
-from chat.application.web_fetch.fetcher.content_detection_adapter import (
+from chat.application.tools.services.web_fetch.errors import UnsupportedMediaError
+from chat.application.tools.services.web_fetch.fetcher.content_detection_adapter import (
     build_document_filename,
     build_web_fetch_detection_hints,
     build_web_fetch_result,
@@ -15,7 +15,7 @@ from chat.application.web_fetch.fetcher.content_detection_adapter import (
     is_declared_unsupported_media,
     should_read_web_fetch_body,
 )
-from chat.application.web_fetch.models import FetchedDocument
+from chat.application.tools.services.web_fetch.models import FetchedDocument
 
 pytestmark = pytest.mark.asyncio
 

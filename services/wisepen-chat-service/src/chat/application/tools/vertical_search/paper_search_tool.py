@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from chat.application.paper_search import PaperSearchRequest, PaperSearchService
-from chat.application.paper_search.config import PAPER_SEARCH_TOOL_RESULT_MAX_CHARS
-from chat.application.paper_search.formatting import (
+from chat.application.tools.services.paper_search import PaperSearchRequest, PaperSearchService
+from chat.application.tools.services.paper_search.config import PAPER_SEARCH_TOOL_RESULT_MAX_CHARS
+from chat.application.tools.services.paper_search.formatting import (
     format_paper_search_response,
     truncate_result,
 )

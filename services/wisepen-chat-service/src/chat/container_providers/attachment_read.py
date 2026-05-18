@@ -1,8 +1,9 @@
 from typing import Any
 
-from chat.application.attachment_read import AttachmentReadService, StubAttachmentResolver
-from chat.application.content_detection import ContentDetector
-from chat.application.file_handoff import (
+from chat.application.tools.services.attachment_read import AttachmentReadService
+from chat.application.tools.services.attachment_read.resolver import StubAttachmentResolver
+from chat.application.tools.common.content_detection import ContentDetector
+from chat.application.tools.common.file_handoff import (
     DEFAULT_HANDOFF_ROOT,
     DEFAULT_HANDOFF_TTL_SECONDS,
     TemporaryFileHandoffStore,

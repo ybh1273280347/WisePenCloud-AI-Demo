@@ -1,12 +1,12 @@
 from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, List, Optional
 
-from chat.application.attachment_read import (
+from chat.application.tools.services.attachment_read import (
     AttachmentReadError,
     AttachmentReadRequest,
     AttachmentReadService,
 )
-from chat.application.attachment_read.formatting import format_attachment_read_result
+from chat.application.tools.services.attachment_read.formatting import format_attachment_read_result
 from chat.domain.interfaces.tool import BaseTool
 
 _TOOL_DESCRIPTION = (

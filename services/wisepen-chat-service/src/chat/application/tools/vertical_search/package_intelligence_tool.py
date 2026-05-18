@@ -2,26 +2,26 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from chat.application.code_search.common.errors import VerticalSearchHttpError
-from chat.application.code_search.common.formatting import (
+from chat.application.tools.services.code_search.common.errors import VerticalSearchHttpError
+from chat.application.tools.services.code_search.common.formatting import (
     append_key_values,
     format_scalar,
     truncate_result,
 )
-from chat.application.code_search.package_intelligence import (
+from chat.application.tools.services.code_search.package_intelligence import (
     PackageIntelligenceResult,
     PackageIntelligenceService,
     PackageVersionSummary,
     RegistryMetadata,
     ScorecardSummary,
 )
-from chat.application.code_search.package_intelligence.config import (
+from chat.application.tools.services.code_search.package_intelligence.config import (
     PACKAGE_INTELLIGENCE_TOOL_RESULT_MAX_CHARS,
 )
-from chat.application.code_search.package_intelligence.models import (
+from chat.application.tools.services.code_search.package_intelligence.models import (
     DependencyGraphSummary,
 )
-from chat.application.code_search.package_intelligence.service import (
+from chat.application.tools.services.code_search.package_intelligence.service import (
     CannotDeterminePackageVersion,
 )
 from chat.domain.interfaces.tool import BaseTool

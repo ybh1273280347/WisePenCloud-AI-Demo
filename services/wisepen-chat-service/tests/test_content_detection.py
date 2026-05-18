@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from chat.application.content_detection import (
+from chat.application.tools.common.content_detection import (
     ContentDetection,
     ContentDetector,
     ContentKind,
@@ -14,8 +14,8 @@ from chat.application.content_detection import (
     drop_dangerous_inner_suffix,
     sanitize_download_filename,
 )
-from chat.application.content_detection.magika_detector import MagikaDetector
-from chat.application.content_detection.puremagic_detector import PureMagicDetector
+from chat.application.tools.common.content_detection.magika_detector import MagikaDetector
+from chat.application.tools.common.content_detection.puremagic_detector import PureMagicDetector
 
 
 pytestmark = pytest.mark.asyncio

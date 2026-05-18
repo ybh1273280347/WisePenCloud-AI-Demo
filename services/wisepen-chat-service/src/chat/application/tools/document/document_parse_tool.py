@@ -1,11 +1,17 @@
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from chat.application.document_parse import DocumentParseService
-from chat.application.document_parse.document_parse_service import (
+from chat.application.tools.services.document_parse import DocumentParseService
+from chat.application.tools.services.document_parse.document_parse_service import (
     DocumentParseResultItem,
 )
-from chat.application.document_parse.file_resolver import LocalDocumentFileResolver
-from chat.application.tool_content_store import cache_and_format
+from chat.application.tools.services.document_file import (
+    DocumentTempFileResolver,
+    InvalidDocumentRefError,
+    UnreadableDocumentRefError,
+    document_processing_scope,
+)
+from chat.application.tools.common.tool_content_store import cache_and_format
 from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_event, log_fail, log_ok
@@ -55,10 +61,10 @@ class DocumentParseTool(BaseTool):
         self,
         *,
         parse_service: DocumentParseService,
-        file_resolver: LocalDocumentFileResolver,
+        temp_file_resolver: DocumentTempFileResolver,
     ):
         self.parse_service = parse_service
-        self.file_resolver = file_resolver
+        self.temp_file_resolver = temp_file_resolver
 
     @property
     def name(self) -> str:
@@ -76,6 +82,9 @@ class DocumentParseTool(BaseTool):
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
+        user_id: Optional[str] = context.get("user_id")
+        if not user_id:
+            return "[Tool Error] Missing user_id in execution context."
 
         file_refs: List[str] = kwargs.get("file_refs", [])
         if not file_refs:
@@ -88,9 +97,13 @@ class DocumentParseTool(BaseTool):
         resolved_paths = []
         for file_ref in file_refs:
             try:
-                resolved = self.file_resolver.resolve(file_ref)
-                resolved_paths.append((file_ref, resolved.local_path))
-            except FileNotFoundError as e:
+                resolved = self.temp_file_resolver.resolve(
+                    file_ref=file_ref,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                resolved_paths.append((file_ref, resolved.path))
+            except (InvalidDocumentRefError, UnreadableDocumentRefError) as e:
                 resolved_paths.append((file_ref, None))
                 log_fail(
                     "document_parse file_ref",
@@ -105,11 +118,18 @@ class DocumentParseTool(BaseTool):
 
         results: List[DocumentParseResultItem] = []
         if valid_paths:
-            results = await self.parse_service.parse_many(
-                valid_paths, file_refs=valid_refs
-            )
+            with document_processing_scope(
+                self.temp_file_resolver.session_root(
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+            ):
+                results = await self.parse_service.parse_many(
+                    valid_paths, file_refs=valid_refs
+                )
 
         self._log_batch_result(
+            user_id=user_id,
             session_id=session_id,
             results=results,
             failed_resolutions=failed_resolutions,
@@ -138,9 +158,10 @@ class DocumentParseTool(BaseTool):
         )
 
         for ref, _ in failed_resolutions:
+            display_name = _display_file_ref(ref)
             lines.append("")
-            lines.append(f"--- File: {ref} ---")
-            lines.append(f"[Parse Error] Document file not found: {ref}")
+            lines.append(f"--- File: {display_name} ---")
+            lines.append("[Parse Error] Document file not found.")
 
         for item in results:
             if item.success and item.result is not None:
@@ -168,7 +189,7 @@ class DocumentParseTool(BaseTool):
                 )
 
                 lines.append("")
-                lines.append(f"--- File: {item.file_ref} ---")
+                lines.append(f"--- File: {_display_file_ref(item.file_ref)} ---")
                 cached = cache_and_format(
                     session_id=session_id,
                     tool_name=self.name,
@@ -181,7 +202,7 @@ class DocumentParseTool(BaseTool):
                 lines.append(cached)
             else:
                 lines.append("")
-                lines.append(f"--- File: {item.file_ref} ---")
+                lines.append(f"--- File: {_display_file_ref(item.file_ref)} ---")
                 lines.append(f"[Parse Error] {item.error}")
 
         return "\n".join(lines)
@@ -189,6 +210,7 @@ class DocumentParseTool(BaseTool):
     def _log_batch_result(
         self,
         *,
+        user_id: str,
         session_id: str,
         results: List[DocumentParseResultItem],
         failed_resolutions: List[tuple],
@@ -224,6 +246,7 @@ class DocumentParseTool(BaseTool):
         visible_parse_errors = parse_errors[:5]
 
         fields = {
+            "user_id": user_id,
             "session_id": session_id,
             "总数": total,
             "已完成": success_count,
@@ -257,3 +280,8 @@ def _invalid_file_ref_reason(file_refs: List[str]) -> Optional[str]:
         if not value:
             return "file_refs must contain non-empty file_ref values."
     return None
+
+
+def _display_file_ref(file_ref: str) -> str:
+    name = Path(file_ref).name
+    return name or "document"

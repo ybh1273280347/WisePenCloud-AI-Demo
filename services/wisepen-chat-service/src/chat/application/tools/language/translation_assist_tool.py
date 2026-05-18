@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from chat.application.translation import (
+from chat.application.tools.services.translation import (
     TranslationAssistError,
     TranslationAssistService,
 )
-from chat.application.translation.formatting import (
+from chat.application.tools.services.translation.formatting import (
     format_translation_error,
     format_translation_result,
 )

@@ -1,28 +1,27 @@
 import inspect
-import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from chat.application.algorithms.url import canonicalize_url
-from chat.application.tool_content_store import (
+from chat.application.tools.common.tool_content_store import (
     cache_and_format,
 )
 from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
-from chat.application.web_search.errors import (
+from chat.application.runtime_context import get_runtime_context
+from chat.application.web_search import (
     CustomSearchProviderUnavailableError,
     EmptySearchResultError,
-)
-from chat.application.web_search.models.common import (
     ImageResult,
+    SearchCoordinator,
+    SearchManyRequest,
     SearchResponse,
     SearchResult,
+    WikipediaGroundingResult,
 )
-from chat.application.web_search.planning import WikipediaGroundingResult
-from chat.application.web_search.search_coordinator import SearchCoordinator
 from chat.application.web_search.provider_policy import (
     parse_custom_provider_credentials,
 )
-from chat.application.web_search.search_coordinator import SearchManyRequest
+from chat.application.web_search.search_provider_config.constants import MODE_CUSTOM
 from chat.application.web_search.utils.domains import (
     count_unique_domains,
     extract_domain,
@@ -34,7 +33,6 @@ from common.logger import log_event, log_fail, log_ok
 
 _SEARCH_QUERY_MIN_COUNT = 2
 _SEARCH_QUERY_LIMIT = 4
-_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 _FAST_CANDIDATE_PAGE_LIMIT = 0
 _NORMAL_CANDIDATE_PAGE_LIMIT = 5
@@ -50,11 +48,13 @@ _TOOL_DESCRIPTION = (
     "It does not fetch or read page bodies.\n\n"
     "Query rules: issue at most one web_search call per user request. Put all search variants "
     "into that single call's queries array. Always pass 2-4 short search-engine-style queries. "
-    "Every call MUST include at least one pure English query. A pure English query contains no "
-    "Chinese characters and preserves key technical terms in English. Do not call web_search "
-    "with only one query, do not pass more than four queries, and do not rely only on mixed "
-    "Chinese-English queries. queries[0] is primary; queries[1] is secondary; queries[2] is "
-    "extra.\n\n"
+    "Every call MUST include at least one pure English query. A pure English query is written "
+    "with ASCII English words, numbers, and punctuation only, and preserves key technical "
+    "terms in English. Do not call web_search "
+    "with only one query and do not pass more than four queries. The other queries may use "
+    "the user's language, English, or any language directly useful for the task; do not force "
+    "a specific companion-query language unless it is relevant. queries[0] is primary; queries[1] is "
+    "secondary; queries[2] is extra.\n\n"
     "Mode rules: choose the most specific mode; do not use normal as the default.\n"
     "- fast: quick facts, definitions, official sites, images/photos, lightweight overviews, "
     "or questions answerable from snippets/images. NEVER call web_fetch after fast.\n"
@@ -63,8 +63,11 @@ _TOOL_DESCRIPTION = (
     "- deep: technical research, engineering decisions, academic/paper research, community best "
     "practices, official documentation comparison, multi-source verification, recent rules/prices/"
     "laws/news, medical/legal/financial accuracy, or broad bilingual recall.\n\n"
-    "Answer rule: after using this tool, the final answer to the user must be in Chinese. "
-    "English queries or English sources do not change the final answer language.\n\n"
+    "Answer language rule: after using this tool, follow the conversation language policy: "
+    "use the user's explicit language request first, otherwise prefer the language of the "
+    "user's current message, and use the user's preferred locale only when the message language "
+    "is ambiguous. Search query language and source language do not by themselves determine "
+    "the final answer language.\n\n"
     "Result-use rule: synthesize the results into an answer; do not return the raw evidence pack, "
     "candidate list, snippets, or source list as the final answer. When image results are relevant, "
     "include image URLs and source page URLs when available.\n\n"
@@ -93,9 +96,11 @@ _TOOL_SCHEMA = {
             "description": (
                 "Two to four focused search-engine-style queries. "
                 "Every web_search call MUST include at least one pure English query. "
-                "A pure English query contains no Chinese characters and preserves key technical terms in English. "
+                "A pure English query is written with ASCII English words, numbers, and punctuation only, "
+                "and preserves key technical terms in English. "
                 "queries[0] is primary; queries[1] is secondary; queries[2] is extra. "
-                "Use bilingual or complementary query variants when useful."
+                "Use the user's language, English, or any relevant locale-specific query variants when useful; "
+                "do not force a specific companion-query language unless it is relevant."
             ),
         },
         "wikipedia_keywords": {
@@ -175,13 +180,21 @@ def _is_pure_english_query(query: str) -> bool:
     normalized = query.strip()
     if not normalized:
         return False
-    if _CJK_RE.search(normalized):
+    if any(not char.isascii() for char in normalized):
         return False
-    return any(char.isalpha() and char.isascii() for char in normalized)
+    return any(char.isalpha() for char in normalized)
 
 
 def _has_pure_english_query(queries: List[str]) -> bool:
     return any(_is_pure_english_query(query) for query in queries)
+
+
+def _search_language_hint(locale: str) -> Optional[str]:
+    if locale in {"zh-CN", "zh-TW", "zh-HK"}:
+        return "zh"
+    if locale in {"en-US", "en-GB"}:
+        return "en"
+    return None
 
 
 class WebSearchTool(BaseTool):
@@ -244,33 +257,39 @@ class WebSearchTool(BaseTool):
         if not _has_pure_english_query(queries):
             return (
                 "[Tool Error] web_search requires at least one pure English query. "
-                "A pure English query must contain no Chinese characters and should preserve key technical terms in English. "
-                "If your original queries contained Chinese, keep at least one Chinese query and add one pure English query. "
-                "Do not replace all Chinese queries with English. "
+                "A pure English query must be written with ASCII English words, numbers, and punctuation only, "
+                "and should preserve key technical terms in English. "
+                "Keep any non-English query only when it is useful for the user's request, and add one pure English query. "
                 "You MUST call web_search again immediately. Do not proceed without searching."
             )
 
         mode = kwargs.get("mode", "normal")
         output = _get_output_budget(mode)
         with_images = kwargs.get("with_images", False)
+        runtime_context = get_runtime_context(context)
         language = kwargs.get("language")
+        if language is None and runtime_context is not None:
+            language = _search_language_hint(runtime_context.locale)
         wikipedia_keywords = kwargs.get("wikipedia_keywords")
-        provider_mode = context.get("web_search_provider_mode", "default")
+        search_config = runtime_context.search_config if runtime_context else None
+        provider_mode = search_config.mode if search_config is not None else "default"
         custom_provider_credentials = parse_custom_provider_credentials(
-            context.get("web_search_custom_providers")
+            search_config.custom_providers if search_config is not None else None
         )
-        custom_provider_error = context.get("web_search_custom_provider_error")
-        if provider_mode == "custom" and custom_provider_error:
-            status = custom_provider_error.get("status") or "provider_error"
+        if (
+            provider_mode == MODE_CUSTOM
+            and search_config is not None
+            and search_config.error_public_code
+        ):
+            status = search_config.error_status or "provider_error"
             last_error_code = (
-                custom_provider_error.get("last_error_code") or "provider_error"
+                search_config.error_last_error_code or "provider_error"
             )
             await _record_custom_provider_failure(context, status, last_error_code)
             return _format_custom_provider_error(
-                public_code=custom_provider_error.get("public_code")
-                or "CUSTOM_PROVIDER_ERROR",
+                public_code=search_config.error_public_code,
                 last_error_code=last_error_code,
-                message=custom_provider_error.get("message"),
+                message=search_config.error_message,
             )
 
         search_override: Optional[Dict[str, Any]] = context.get("search_override")
@@ -425,7 +444,10 @@ def _format_response(
         "Result order: reranked order after multi-query/provider fusion and deduplication."
     )
     lines.append(
-        "Assistant instructions: final answer must be in Chinese. Do not return this evidence pack, "
+        "Assistant instructions: follow the conversation language policy for the final answer. "
+        "Use the user's explicit language request first, otherwise prefer the language of the "
+        "current user message, and use the user's preferred locale only when the message language "
+        "is ambiguous. Do not return this evidence pack, "
         "titles, URLs, snippets, or candidate list as the user-facing answer. Synthesize a concise "
         "answer with analysis from the evidence. In fast mode, answer from snippets only and do not "
         "call web_fetch. In normal/deep mode, snippets are search-engine previews, not page content. "
@@ -482,7 +504,7 @@ def _format_response(
         lines.append(
             "Evidence only. Source markers [1], [2], ... and citation metadata use this reranked order, "
             "not the original search-provider order. Do not copy this source list to the user; "
-            "use it to synthesize a Chinese answer."
+            "use it to synthesize the final answer in the appropriate response language."
         )
 
     for index, result in enumerate(display_results, 1):
@@ -653,7 +675,7 @@ async def _record_custom_provider_failure(
     status: str,
     last_error_code: str,
 ) -> None:
-    handler = context.get("web_search_custom_provider_failure_handler")
+    handler = context.get("search_provider_failure_handler")
     if not callable(handler):
         return
 

@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from chat.application.code_search.common.errors import VerticalSearchHttpError
-from chat.application.code_search.common.formatting import (
+from chat.application.tools.services.code_search.common.errors import VerticalSearchHttpError
+from chat.application.tools.services.code_search.common.formatting import (
     append_key_values,
     format_scalar,
     truncate_result,
 )
-from chat.application.code_search.github_search import (
+from chat.application.tools.services.code_search.github_search import (
     GitHubIssueResult,
     GitHubReleaseResult,
     GitHubRepositoryResult,
     GitHubSearchService,
 )
-from chat.application.code_search.github_search.config import (
+from chat.application.tools.services.code_search.github_search.config import (
     GITHUB_SEARCH_DEFAULT_LIMIT,
     GITHUB_SEARCH_TOOL_RESULT_MAX_CHARS,
 )

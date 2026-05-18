@@ -1,8 +1,10 @@
 from typing import Any, Dict, Optional
 
-from chat.application.document_export.errors import DocumentExportError
-from chat.application.document_export.models import GeneratedDocumentFile
-from chat.application.document_export.service import DocumentExportService
+from chat.application.document_export import (
+    DocumentExportError,
+    DocumentExportService,
+    GeneratedDocumentFile,
+)
 from chat.application.tools.document.formatting import format_generated_document_result
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_fail, log_ok
@@ -69,6 +71,9 @@ class DocumentExportTool(BaseTool):
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
+        user_id: Optional[str] = context.get("user_id")
+        if not user_id:
+            return "[Tool Error] Missing user_id in execution context."
 
         target_format: str = kwargs["target_format"]
         source_format: str = kwargs.get("source_format", "markdown")
@@ -92,6 +97,7 @@ class DocumentExportTool(BaseTool):
                 return "[Tool Error] Missing content or content_ref."
 
             generated: GeneratedDocumentFile = await self.export_service.export_content(
+                user_id=user_id,
                 session_id=session_id,
                 content=markdown,
                 target_format=target_format,
@@ -107,7 +113,9 @@ class DocumentExportTool(BaseTool):
             )
 
             return format_generated_document_result(
-                session_id=session_id, generated=generated
+                user_id=user_id,
+                session_id=session_id,
+                generated=generated,
             )
 
         except DocumentExportError as e:

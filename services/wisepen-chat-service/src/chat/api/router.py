@@ -1,4 +1,12 @@
-from chat.api.endpoints import chat, chat_file, memory, model, search_provider, session
+from chat.api.endpoints import (
+    chat,
+    chat_file,
+    memory,
+    model,
+    search_provider,
+    session,
+    user_preferences,
+)
 from fastapi import APIRouter
 
 api_router = APIRouter()
@@ -12,4 +20,9 @@ api_router.include_router(
     search_provider.router,
     prefix="/searchProvider",
     tags=["searchProvider"],
+)
+api_router.include_router(
+    user_preferences.router,
+    prefix="/user",
+    tags=["userPreferences"],
 )

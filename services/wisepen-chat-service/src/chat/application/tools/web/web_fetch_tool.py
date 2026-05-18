@@ -1,16 +1,16 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from chat.application.file_handoff import TemporaryFileHandoffStore
-from chat.application.security.references import reject_non_url_reference
-from chat.application.tool_content_store import cache_and_format
+from chat.application.tools.common.file_handoff import TemporaryFileHandoffStore
+from chat.application.tools.common.security.references import reject_non_url_reference
+from chat.application.tools.common.tool_content_store import cache_and_format
 from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
-from chat.application.web_fetch import (
+from chat.application.tools.services.web_fetch import (
     FetchCoordinator,
     FetchedDocument,
     FetchResultItem,
 )
-from chat.application.web_fetch.utils.url_batching import (
+from chat.application.tools.services.web_fetch.utils.url_batching import (
     UrlBatchInputError,
     normalize_urls,
 )
@@ -87,6 +87,9 @@ class WebFetchTool(BaseTool):
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
+        user_id: Optional[str] = context.get("user_id")
+        if not user_id:
+            return "[Tool Error] Missing user_id in execution context."
 
         try:
             urls = normalize_urls(kwargs.get("urls", []))
@@ -119,6 +122,7 @@ class WebFetchTool(BaseTool):
         results: List[FetchResultItem] = await self._fetcher.fetch_many(urls)
 
         return self._format_batch_result(
+            user_id=user_id,
             session_id=session_id,
             results=results,
         )
@@ -126,6 +130,7 @@ class WebFetchTool(BaseTool):
     def _format_batch_result(
         self,
         *,
+        user_id: str,
         session_id: str,
         results: List[FetchResultItem],
     ) -> str:
@@ -143,6 +148,7 @@ class WebFetchTool(BaseTool):
                     lines.append("")
                     lines.extend(
                         self._format_document_handoff_lines(
+                            user_id=user_id,
                             session_id=session_id,
                             document=item.document,
                         )
@@ -170,14 +176,17 @@ class WebFetchTool(BaseTool):
     def _format_document_handoff_lines(
         self,
         *,
+        user_id: str,
         session_id: str,
         document: FetchedDocument,
     ) -> List[str]:
         handoff = self._file_handoff_store.write_bytes(
+            user_id=user_id,
             session_id=session_id,
             filename=document.filename,
             content=document.content,
             canonical_suffix=Path(document.filename).suffix,
+            content_type=document.media_type,
         )
         file_ref = handoff.file_ref
 

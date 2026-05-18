@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from chat.application.tools.config import DEFAULT_TOOL_TIMEZONE
-from chat.application.weather import OpenMeteoClient, WeatherApiError, WeatherResult
-from chat.application.weather.weather_code import describe_weather_code
+from chat.application.tools.services.weather import OpenMeteoClient, WeatherApiError, WeatherResult
+from chat.application.tools.services.weather.weather_code import describe_weather_code
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_error, log_event
 

@@ -1,10 +1,10 @@
-from .atomic_writer import AtomicExportWriter
 from .constants import (
     CONTENT_TYPES,
     FILE_EXTENSIONS,
     SOURCE_FORMATS,
     SUPPORTED_EXPORT_FORMATS,
 )
+from .config import document_export_output_path
 from .download_reference import build_download_ref, build_download_url
 from .download_resolver import DocumentDownloadResolver, ResolvedDownloadFile
 from .errors import (
@@ -18,35 +18,41 @@ from .errors import (
     InvalidSourceFormatError,
     UnsupportedExportFormatError,
 )
+from .mime import guess_export_content_type
 from .models import ExportOptions, ExportRequest, GeneratedDocumentFile
-from .normalizer import ContentNormalizer
-from .path_safety import is_path_within_root, sanitize_path_segment
-from .service import DocumentExportService
 
 __all__ = [
-    "AtomicExportWriter",
-    "ContentNormalizer",
+    "ExportOptions",
+    "ExportRequest",
+    "GeneratedDocumentFile",
+    "DocumentExportService",
     "DocumentExportError",
     "DuplicateRendererFormatError",
     "EmptyExportContentError",
     "ExportDependencyMissingError",
-    "ExportOptions",
     "ExportOutputError",
     "ExportRenderError",
-    "ExportRequest",
     "ExportTimeoutError",
-    "GeneratedDocumentFile",
     "InvalidSourceFormatError",
     "UnsupportedExportFormatError",
-    "DocumentExportService",
     "DocumentDownloadResolver",
+    "ResolvedDownloadFile",
     "SUPPORTED_EXPORT_FORMATS",
     "SOURCE_FORMATS",
     "CONTENT_TYPES",
     "FILE_EXTENSIONS",
     "build_download_ref",
     "build_download_url",
-    "ResolvedDownloadFile",
-    "is_path_within_root",
-    "sanitize_path_segment",
+    "document_export_output_path",
+    "guess_export_content_type",
 ]
+
+
+def __getattr__(name: str):
+    if name == "DocumentExportService":
+        from .service import DocumentExportService
+
+        globals()[name] = DocumentExportService
+        return DocumentExportService
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
