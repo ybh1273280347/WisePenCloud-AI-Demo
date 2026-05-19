@@ -18,6 +18,7 @@ from chat.application.tools import (
     PaperSearchTool,
     ResolveTimeTool,
     SearchHistoricalMessagesTool,
+    ToolContentBatchReadTool,
     ToolContentReadTool,
     ToolRegistry,
     TranslationAssistTool,
@@ -159,6 +160,10 @@ def register_tool_providers(container_cls: Any) -> None:
     tool(
         "tool_content_read_tool",
         ToolContentReadTool,
+    )
+    tool(
+        "tool_content_batch_read_tool",
+        ToolContentBatchReadTool,
     )
     tool(
         "evidence_rank_tool",

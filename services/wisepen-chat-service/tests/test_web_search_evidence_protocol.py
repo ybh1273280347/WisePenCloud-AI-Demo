@@ -9,13 +9,18 @@ from chat.application.tools.common.tool_content_store import (
 )
 from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
 from chat.application.tools.knowledge.evidence_rank_tool import EvidenceRankTool
+from chat.application.tools.knowledge.tool_content_batch_read_tool import (
+    ToolContentBatchReadTool,
+)
 from chat.application.tools.knowledge.tool_content_read_tool import ToolContentReadTool
 from chat.application.tools.services.evidence_ranking import (
     format_evidence_result,
     rank_evidence,
 )
 from chat.application.tools.services.evidence_ranking.models import (
+    EvidenceFieldHitStat,
     EvidenceRankResult,
+    EvidenceTermHitStat,
     RankedEvidence,
 )
 from chat.application.tools.web.web_search_tool import WebSearchTool
@@ -76,6 +81,24 @@ def _content_id_from_receipt(receipt: str) -> str:
     match = re.search(r"^content_id: (cnt_[a-f0-9]+)$", receipt, re.MULTILINE)
     assert match is not None
     return match.group(1)
+
+
+def test_evidence_rank_models_term_hit_stats_defaults() -> None:
+    field_stat = EvidenceFieldHitStat(field="body", count=2)
+    term_stat = EvidenceTermHitStat(term="苹果", total_count=2)
+    evidence = RankedEvidence(
+        content_id="cnt_a",
+        chunk_index=0,
+        score=1.0,
+        rank=0,
+    )
+
+    assert field_stat.field == "body"
+    assert field_stat.count == 2
+    assert term_stat.term == "苹果"
+    assert term_stat.total_count == 2
+    assert term_stat.field_stats == ()
+    assert evidence.term_hit_stats == ()
 
 
 def test_cache_artifact_and_format_receipt_omits_content() -> None:
@@ -323,6 +346,53 @@ def test_rank_evidence_ranks_web_search_artifact_results() -> None:
     assert "source_id:" in formatted
     assert "Evidence type: web_search_result" in formatted
     assert "These ranked items are search-result snippets" in formatted
+    assert "Term hit stats:" in formatted
+    assert "Matched reason: Matched BM25 query terms in" in formatted
+
+
+def test_rank_evidence_web_search_term_hit_stats_cover_fields() -> None:
+    receipt = cache_artifact_and_format_receipt(
+        session_id="session-rank-web-fields",
+        tool_name="web_search",
+        source="artifact rank",
+        text=json.dumps(
+            {
+                "content_kind": "web_search_evidence_pack",
+                "results": [
+                    {
+                        "source_id": "1",
+                        "title": "苹果 保存",
+                        "url": "https://保存.example/docs",
+                        "domain": "保存.example",
+                        "snippet": "苹果 需要 保存",
+                    }
+                ],
+            }
+        ),
+        metadata={"content_kind": "web_search_evidence_pack"},
+    )
+    content_id = _content_id_from_receipt(receipt)
+
+    result = rank_evidence(
+        query="苹果 保存",
+        content_ids=[content_id],
+        session_id="session-rank-web-fields",
+        max_evidence=1,
+    )
+
+    assert result.evidence
+    stats = {stat.term: stat for stat in result.evidence[0].term_hit_stats}
+    assert stats["苹果"].total_count == 2
+    assert {item.field: item.count for item in stats["苹果"].field_stats} == {
+        "title": 1,
+        "snippet": 1,
+    }
+    assert stats["保存"].total_count == 3
+    assert {item.field: item.count for item in stats["保存"].field_stats} == {
+        "title": 1,
+        "domain": 1,
+        "snippet": 1,
+    }
 
 
 def test_rank_evidence_handles_invalid_web_search_json_note() -> None:
@@ -398,6 +468,106 @@ def test_rank_evidence_keeps_generic_chunk_ranking() -> None:
     assert result.evidence
     assert result.evidence[0].evidence_type == "chunk"
     assert result.evidence[0].chunk_index >= 0
+    assert result.evidence[0].matched_reason.startswith(
+        "Matched BM25 query terms in"
+    )
+
+
+def test_rank_evidence_generic_term_hit_stats_cover_title_heading_body() -> None:
+    content_id = tool_content_store.put(
+        session_id="session-rank-term-stats",
+        tool_name="document_parse",
+        source="sample.md",
+        text="苹果需要低温保存。苹果成熟后也可以做成果酱。",
+        metadata={
+            "title": "苹果保存指南",
+            "heading_path": ["保存"],
+        },
+    )
+    assert content_id is not None
+
+    result = rank_evidence(
+        query="苹果 保存",
+        content_ids=[content_id],
+        session_id="session-rank-term-stats",
+        max_evidence=1,
+    )
+    formatted = format_evidence_result(result)
+
+    assert result.evidence
+    evidence = result.evidence[0]
+    stats = {stat.term: stat for stat in evidence.term_hit_stats}
+    assert stats["苹果"].total_count == 3
+    assert {item.field: item.count for item in stats["苹果"].field_stats} == {
+        "title": 1,
+        "body": 2,
+    }
+    assert stats["保存"].total_count == 3
+    assert {item.field: item.count for item in stats["保存"].field_stats} == {
+        "title": 1,
+        "heading": 1,
+        "body": 1,
+    }
+    assert "Term hit stats:" in formatted
+    assert "- 苹果: total=3; title=1, body=2" in formatted
+    assert "- 保存: total=3; title=1, heading=1, body=1" in formatted
+
+
+def test_rank_evidence_fielded_bm25_title_weight_beats_body_repetition() -> None:
+    title_content_id = tool_content_store.put(
+        session_id="session-rank-fielded-title",
+        tool_name="document_parse",
+        source="title.md",
+        text="普通正文",
+        metadata={"title": "苹果种植指南"},
+    )
+    body_content_id = tool_content_store.put(
+        session_id="session-rank-fielded-title",
+        tool_name="document_parse",
+        source="body.md",
+        text="苹果 苹果 苹果",
+        metadata={"title": "水果说明"},
+    )
+    assert title_content_id is not None
+    assert body_content_id is not None
+
+    result = rank_evidence(
+        query="苹果",
+        content_ids=[title_content_id, body_content_id],
+        session_id="session-rank-fielded-title",
+        max_evidence=2,
+    )
+
+    assert len(result.evidence) == 2
+    assert result.evidence[0].content_id == title_content_id
+
+
+def test_rank_evidence_fielded_bm25_keeps_original_order_on_equal_scores() -> None:
+    first_id = tool_content_store.put(
+        session_id="session-rank-stable",
+        tool_name="document_parse",
+        source="first.md",
+        text="第一段内容",
+        metadata={"title": "相同"},
+    )
+    second_id = tool_content_store.put(
+        session_id="session-rank-stable",
+        tool_name="document_parse",
+        source="second.md",
+        text="第二段内容",
+        metadata={"title": "相同"},
+    )
+    assert first_id is not None
+    assert second_id is not None
+
+    result = rank_evidence(
+        query="zzzz-no-match",
+        content_ids=[first_id, second_id],
+        session_id="session-rank-stable",
+        max_evidence=2,
+    )
+
+    assert [item.content_id for item in result.evidence] == [first_id, second_id]
 
 
 def test_rank_evidence_chunk_excerpt_uses_raw_chunk_text_and_display_title() -> None:
@@ -460,6 +630,225 @@ def test_tool_content_read_supports_chunk_index_context_window() -> None:
     assert "AAAAAAAAAAAAAAAAAAAA" in result
     assert "TARGETCHUNK" in result
     assert "AFTERCHUNK" in result
+
+
+def test_format_evidence_result_outputs_batch_read_example_for_multiple_chunks() -> None:
+    result = EvidenceRankResult(
+        query="q",
+        evidence=(
+            RankedEvidence(
+                content_id="cnt_a",
+                chunk_index=1,
+                score=2.0,
+                rank=0,
+                title="A",
+            ),
+            RankedEvidence(
+                content_id="cnt_b",
+                chunk_index=2,
+                score=1.0,
+                rank=1,
+                title="B",
+            ),
+        ),
+        total_chunks_scanned=2,
+        content_ids_found=("cnt_a", "cnt_b"),
+    )
+
+    formatted = format_evidence_result(result)
+
+    assert "tool_content_read" in formatted
+    assert "tool_content_batch_read" in formatted
+    assert "thematically related" in formatted
+
+
+def test_tool_content_batch_read_single_and_multiple_items() -> None:
+    first_id = tool_content_store.put(
+        session_id="session-batch-read",
+        tool_name="document_parse",
+        source="first",
+        text=("A" * 4000) + "FIRST_TARGET" + ("B" * 4000),
+        metadata={"title": "first"},
+    )
+    second_id = tool_content_store.put(
+        session_id="session-batch-read",
+        tool_name="document_parse",
+        source="second",
+        text=("C" * 4000) + "SECOND_TARGET" + ("D" * 4000),
+        metadata={"title": "second"},
+    )
+    assert first_id is not None
+    assert second_id is not None
+
+    tool = ToolContentBatchReadTool()
+    single = asyncio.run(
+        tool.execute(
+            {"session_id": "session-batch-read"},
+            items=[{"content_id": first_id, "chunk_index": 1}],
+        )
+    )
+    multiple = asyncio.run(
+        tool.execute(
+            {"session_id": "session-batch-read"},
+            items=[
+                {
+                    "content_id": first_id,
+                    "chunk_index": 1,
+                    "before_chunks": 0,
+                    "after_chunks": 0,
+                },
+                {
+                    "content_id": second_id,
+                    "chunk_index": 1,
+                    "before_chunks": 0,
+                    "after_chunks": 0,
+                },
+            ],
+        )
+    )
+
+    assert "Requested: 1 item(s)" in single
+    assert "Returned: 1 window(s)" in single
+    assert "FIRST_TARGET" in single
+    assert "Requested: 2 item(s)" in multiple
+    assert "Returned: 2 window(s)" in multiple
+    assert "FIRST_TARGET" in multiple
+    assert "SECOND_TARGET" in multiple
+
+
+def test_tool_content_batch_read_handles_missing_and_window_boundary_limit() -> None:
+    content_id = tool_content_store.put(
+        session_id="session-batch-limit",
+        tool_name="document_parse",
+        source="large",
+        text=("A" * 4000) + "TARGET" + ("B" * 4000),
+        metadata={"title": "large"},
+    )
+    assert content_id is not None
+
+    tool = ToolContentBatchReadTool()
+    missing = asyncio.run(
+        tool.execute(
+            {"session_id": "session-batch-limit"},
+            items=[
+                {"content_id": content_id, "chunk_index": 1},
+                {"content_id": "cnt_missing", "chunk_index": 1},
+            ],
+        )
+    )
+    limited = asyncio.run(
+        tool.execute(
+            {"session_id": "session-batch-limit"},
+            items=[
+                {"content_id": content_id, "chunk_index": 1},
+                {"content_id": "cnt_missing", "chunk_index": 1},
+            ],
+            max_total_chars=1000,
+        )
+    )
+
+    assert "Returned: 2 window(s)" in missing
+    assert "error: cached tool content not found" in missing
+    assert "Returned: 0 window(s)" in limited
+    assert "Skipped: 2 item(s)" in limited
+    assert "TARGET" not in limited
+
+
+def test_tool_content_batch_read_strict_validation() -> None:
+    tool = ToolContentBatchReadTool()
+    context = {"session_id": "session-batch-validation"}
+
+    assert "items must be a list" in asyncio.run(tool.execute(context, items="x"))
+    assert "items must contain at least one item" in asyncio.run(
+        tool.execute(context, items=[])
+    )
+    assert "items must contain at most 8 items" in asyncio.run(
+        tool.execute(
+            context,
+            items=[
+                {"content_id": f"cnt_{index}", "chunk_index": index}
+                for index in range(9)
+            ],
+        )
+    )
+    assert "items[1] must be an object" in asyncio.run(tool.execute(context, items=[1]))
+    assert "content_id must be a string" in asyncio.run(
+        tool.execute(context, items=[{"content_id": 1, "chunk_index": 0}])
+    )
+    assert "content_id must be a non-empty string" in asyncio.run(
+        tool.execute(context, items=[{"content_id": "", "chunk_index": 0}])
+    )
+    assert "content_id must not contain leading" in asyncio.run(
+        tool.execute(context, items=[{"content_id": " cnt_a", "chunk_index": 0}])
+    )
+    assert "content_id must be a cnt_* value" in asyncio.run(
+        tool.execute(context, items=[{"content_id": "file_ref_1", "chunk_index": 0}])
+    )
+    assert "chunk_index must be an integer" in asyncio.run(
+        tool.execute(context, items=[{"content_id": "cnt_a", "chunk_index": True}])
+    )
+    assert "chunk_index must be greater than or equal to 0" in asyncio.run(
+        tool.execute(context, items=[{"content_id": "cnt_a", "chunk_index": -1}])
+    )
+    assert "before_chunks must be an integer" in asyncio.run(
+        tool.execute(
+            context,
+            items=[
+                {
+                    "content_id": "cnt_a",
+                    "chunk_index": 0,
+                    "before_chunks": True,
+                }
+            ],
+        )
+    )
+    assert "before_chunks must be between 0 and 3" in asyncio.run(
+        tool.execute(
+            context,
+            items=[{"content_id": "cnt_a", "chunk_index": 0, "before_chunks": 4}],
+        )
+    )
+    assert "after_chunks must be an integer" in asyncio.run(
+        tool.execute(
+            context,
+            items=[
+                {
+                    "content_id": "cnt_a",
+                    "chunk_index": 0,
+                    "after_chunks": True,
+                }
+            ],
+        )
+    )
+    assert "after_chunks must be between 0 and 3" in asyncio.run(
+        tool.execute(
+            context,
+            items=[{"content_id": "cnt_a", "chunk_index": 0, "after_chunks": 4}],
+        )
+    )
+    assert "max_total_chars must be an integer" in asyncio.run(
+        tool.execute(
+            context,
+            items=[{"content_id": "cnt_a", "chunk_index": 0}],
+            max_total_chars=True,
+        )
+    )
+    assert "max_total_chars must be between 1000 and 30000" in asyncio.run(
+        tool.execute(
+            context,
+            items=[{"content_id": "cnt_a", "chunk_index": 0}],
+            max_total_chars=999,
+        )
+    )
+    assert "duplicate content_id + chunk_index" in asyncio.run(
+        tool.execute(
+            context,
+            items=[
+                {"content_id": "cnt_a", "chunk_index": 0},
+                {"content_id": "cnt_a", "chunk_index": 0},
+            ],
+        )
+    )
 
 
 def test_evidence_rank_tool_strict_validation() -> None:

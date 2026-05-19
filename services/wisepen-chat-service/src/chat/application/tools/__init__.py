@@ -5,6 +5,7 @@ from .external_state import AirQualityTool, CnCalendarTool, ResolveTimeTool, Wea
 from .knowledge import (
     EvidenceRankTool,
     SearchHistoricalMessagesTool,
+    ToolContentBatchReadTool,
     ToolContentReadTool,
 )
 from .language import TranslationAssistTool
@@ -30,6 +31,7 @@ __all__ = [
     "WeatherTool",
     "AirQualityTool",
     "CnCalendarTool",
+    "ToolContentBatchReadTool",
     "ToolContentReadTool",
     "DocumentParseTool",
     "DocumentExportTool",

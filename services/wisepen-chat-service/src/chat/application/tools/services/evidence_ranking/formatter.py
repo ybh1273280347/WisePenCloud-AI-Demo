@@ -47,10 +47,26 @@ def format_evidence_result(result: EvidenceRankResult) -> str:
         if ev.evidence_type:
             lines.append(f"   Evidence type: {ev.evidence_type}")
         lines.append(f"   Score: {ev.score:.4f}")
+        if ev.term_hit_stats:
+            lines.append("   Term hit stats:")
+            for term_stat in ev.term_hit_stats:
+                field_parts = [
+                    f"{field_stat.field}={field_stat.count}"
+                    for field_stat in term_stat.field_stats
+                ]
+                field_text = ", ".join(field_parts)
+                if field_text:
+                    lines.append(
+                        f"      - {term_stat.term}: total={term_stat.total_count}; {field_text}"
+                    )
+                else:
+                    lines.append(
+                        f"      - {term_stat.term}: total={term_stat.total_count}"
+                    )
         if ev.matched_reason:
             lines.append(f"   Matched reason: {ev.matched_reason}")
         if ev.excerpt:
-            lines.append(f"   Excerpt:")
+            lines.append("   Excerpt:")
             for excerpt_line in ev.excerpt.split("\n"):
                 lines.append(f"      {excerpt_line}")
 
@@ -66,12 +82,13 @@ def format_evidence_result(result: EvidenceRankResult) -> str:
             "call web_fetch with the selected URLs in one batch."
         )
     if has_chunk_evidence:
+        chunk_evidence = [ev for ev in result.evidence if ev.chunk_index >= 0]
         lines.append(
             "To inspect surrounding content for chunk evidence, call "
             "tool_content_read with content_id, chunk_index, before_chunks=1, "
             "and after_chunks=1. Example:"
         )
-        first_chunk = next(ev for ev in result.evidence if ev.chunk_index >= 0)
+        first_chunk = chunk_evidence[0]
         lines.append(
             'tool_content_read({"content_id": "'
             f"{first_chunk.content_id}"
@@ -79,6 +96,24 @@ def format_evidence_result(result: EvidenceRankResult) -> str:
             f"{first_chunk.chunk_index}"
             ', "before_chunks": 1, "after_chunks": 1})'
         )
+        if len(chunk_evidence) >= 2:
+            examples = chunk_evidence[: min(3, len(chunk_evidence))]
+            lines.append(
+                "Batch expand example for related chunk evidence. Use this only when these "
+                "chunk evidence items are thematically related and need to be inspected together:"
+            )
+            lines.append('tool_content_batch_read({"items": [')
+            for index, ev in enumerate(examples):
+                suffix = "," if index < len(examples) - 1 else ""
+                lines.append(
+                    '  {"content_id": "'
+                    f"{ev.content_id}"
+                    '", "chunk_index": '
+                    f"{ev.chunk_index}"
+                    ', "before_chunks": 1, "after_chunks": 1}'
+                    f"{suffix}"
+                )
+            lines.append('], "max_total_chars": 12000})')
     if not has_web_search_result and not has_chunk_evidence:
         lines.append(
             "To inspect surrounding content, call tool_content_read with "
