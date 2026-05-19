@@ -1,200 +1,171 @@
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import List, Optional
+from collections import defaultdict
+from dataclasses import replace
+from datetime import date
+from typing import Dict, Iterable, List
 
-from chat.application.algorithms.ranking import (
-    FieldedDocument,
-    RankedList,
-    rank_fielded_bm25,
-    weighted_rrf,
-)
-from chat.application.algorithms.text import normalize_title_key
-from chat.application.algorithms.url import stable_hash
+from chat.application.algorithms.ranking import FieldedDocument, score_fielded_bm25
 
-from .models import PaperSearchResult
+from .config import MAX_ADJUSTMENT_RATIO, RRF_K
+from .models import PaperEntity, PaperSearchFreshness
+from .recency import compute_recency_score
 
+DOMINANT_SIGNAL_WEIGHTS = {
+    "query_relevance": 1.0,
+    "rewrite_rrf": 0.3,
+}
+
+RECENCY_WEIGHTS = {
+    PaperSearchFreshness.LATEST: 0.4,
+    PaperSearchFreshness.BALANCED: 0.15,
+    PaperSearchFreshness.STABLE: 0.05,
+}
+
+ADJUSTMENT_SIGNAL_WEIGHTS = {
+    "metadata_confidence": 0.1,
+    "source_confidence": 0.05,
+    "evidence_diversity": 0.05,
+}
 
 _FIELD_WEIGHTS = {
     "title": 4.0,
-    "abstract": 2.0,
-    "venue": 0.8,
-    "authors": 0.5,
-    "subject": 1.0,
+    "abstract": 1.7,
+    "authors": 0.4,
+    "venue": 0.6,
 }
 
-_RECENT_QUERY = re.compile(
-    r"\b(latest|recent|new|newest|current|preprint|202[0-9]|203[0-9])\b|最新|近期|近年|预印本",
-    re.IGNORECASE,
-)
 
-
-@dataclass(frozen=True, slots=True)
-class PaperRankingCandidate:
-    id: str
-    paper: PaperSearchResult
-    title: str
-    abstract: str
-    authors: str
-    year: Optional[int]
-    venue: str
-    doi: Optional[str]
-    arxiv_id: Optional[str]
-    source: str
-    source_rank: int
-    is_preprint: bool
-    has_open_access_url: bool
-    url: Optional[str]
-
-
-def normalize_paper_candidates(
-    results: List[PaperSearchResult],
-) -> List[PaperRankingCandidate]:
-    return [_normalize_candidate(result, source_rank=index) for index, result in enumerate(results)]
-
-
-def rank_papers(
-    results: List[PaperSearchResult],
+def compute_rewrite_rrf_scores(
+    per_rewrite_rankings: Dict[str, List[str]],
     *,
-    query: str = "",
-) -> List[PaperSearchResult]:
-    return rank_paper_candidates(
-        query=query,
-        candidates=normalize_paper_candidates(results),
+    k: int = RRF_K,
+) -> Dict[str, float]:
+    scores: Dict[str, float] = defaultdict(float)
+
+    for ranked_ids in per_rewrite_rankings.values():
+        for rank, canonical_id in enumerate(ranked_ids):
+            scores[canonical_id] += 1.0 / (k + rank + 1)
+
+    max_score = max(scores.values(), default=0.0)
+    if max_score <= 0.0:
+        return {}
+
+    return {canonical_id: score / max_score for canonical_id, score in scores.items()}
+
+
+def evidence_diversity_score(entity: PaperEntity) -> float:
+    source_count = len(set(entity.evidence_sources))
+
+    if source_count >= 3:
+        return 1.0
+    if source_count == 2:
+        return 0.6
+    if source_count == 1:
+        return 0.2
+    return 0.0
+
+
+def rank_entity(
+    entity: PaperEntity,
+    *,
+    query_relevance: float,
+    rewrite_rrf: float,
+    freshness: PaperSearchFreshness,
+    reference_date: date,
+) -> float:
+    dominant = (
+        DOMINANT_SIGNAL_WEIGHTS["query_relevance"] * query_relevance
+        + DOMINANT_SIGNAL_WEIGHTS["rewrite_rrf"] * rewrite_rrf
     )
 
+    recency = RECENCY_WEIGHTS[freshness] * compute_recency_score(
+        entity,
+        freshness=freshness,
+        reference_date=reference_date,
+    )
 
-def rank_paper_candidates(
+    raw_adjustment = (
+        ADJUSTMENT_SIGNAL_WEIGHTS["metadata_confidence"] * entity.metadata_confidence
+        + ADJUSTMENT_SIGNAL_WEIGHTS["source_confidence"] * entity.source_confidence
+        + ADJUSTMENT_SIGNAL_WEIGHTS["evidence_diversity"]
+        * evidence_diversity_score(entity)
+    )
+
+    max_adjustment = MAX_ADJUSTMENT_RATIO * max(query_relevance, 0.01)
+    adjustment = min(raw_adjustment, max_adjustment)
+
+    return dominant + recency + adjustment
+
+
+def rank_entities(
     *,
     query: str,
-    candidates: List[PaperRankingCandidate],
-) -> List[PaperSearchResult]:
-    if len(candidates) < 2:
-        return [candidate.paper for candidate in candidates]
+    entities: List[PaperEntity],
+    per_rewrite_rankings: Dict[str, List[str]],
+    freshness: PaperSearchFreshness,
+    reference_date: date,
+) -> List[PaperEntity]:
+    if not entities:
+        return []
 
-    fielded_docs = [
-        FieldedDocument(
-            id=candidate.id,
-            fields={
-                "title": candidate.title,
-                "abstract": candidate.abstract,
-                "venue": candidate.venue,
-                "authors": candidate.authors,
-                "subject": " ".join(
-                    part
-                    for part in [
-                        candidate.paper.result_type or "",
-                        " ".join(candidate.paper.source_names),
-                    ]
-                    if part
+    relevance = compute_query_relevance_scores(query, entities)
+    rrf = compute_rewrite_rrf_scores(per_rewrite_rankings)
+    scored: List[tuple[int, float, PaperEntity]] = []
+
+    for index, entity in enumerate(entities):
+        query_relevance = relevance.get(entity.canonical_id, 0.0)
+        recency_score = compute_recency_score(entity, freshness, reference_date)
+        score = rank_entity(
+            entity,
+            query_relevance=query_relevance,
+            rewrite_rrf=rrf.get(entity.canonical_id, 0.0),
+            freshness=freshness,
+            reference_date=reference_date,
+        )
+        scored.append(
+            (
+                index,
+                score,
+                replace(
+                    entity,
+                    relevance_score=score,
+                    recency_score=recency_score,
                 ),
+            )
+        )
+
+    scored.sort(key=lambda item: (-item[1], item[0]))
+    return [entity for _, _, entity in scored]
+
+
+def compute_query_relevance_scores(
+    query: str,
+    entities: Iterable[PaperEntity],
+) -> Dict[str, float]:
+    entity_list = list(entities)
+    docs = [
+        FieldedDocument(
+            id=entity.canonical_id,
+            fields={
+                "title": entity.title or "",
+                "abstract": entity.abstract or "",
+                "authors": " ".join(entity.authors),
+                "venue": entity.venue or "",
             },
         )
-        for candidate in candidates
+        for entity in entity_list
     ]
+    raw_scores = score_fielded_bm25(query, docs, _FIELD_WEIGHTS)
+    max_score = max(raw_scores.values(), default=0.0)
 
-    recency_weight = 1.2 if _RECENT_QUERY.search(query or "") else 0.55
-    fused = weighted_rrf(
-        [
-            RankedList(
-                name="source_original_rank",
-                ids=[candidate.id for candidate in sorted(candidates, key=lambda item: item.source_rank)],
-                weight=0.5,
-            ),
-            RankedList(
-                name="fielded_bm25_rank",
-                ids=rank_fielded_bm25(query, fielded_docs, _FIELD_WEIGHTS),
-                weight=1.5,
-            ),
-            RankedList(
-                name="recency_rank",
-                ids=_rank_candidates_by_score(candidates, _recency_score),
-                weight=recency_weight,
-            ),
-            RankedList(
-                name="open_access_rank",
-                ids=_rank_candidates_by_score(candidates, lambda item: 1.0 if item.has_open_access_url else 0.0),
-                weight=0.45,
-            ),
-            RankedList(
-                name="publication_quality_rank",
-                ids=_rank_candidates_by_score(candidates, _publication_quality_score),
-                weight=3.5,
-            ),
-        ]
-    )
+    if max_score <= 0.0:
+        return {
+            entity.canonical_id: max(0.0, min(1.0, entity.discovery_score))
+            for entity in entity_list
+        }
 
-    by_id = {candidate.id: candidate for candidate in candidates}
-    return [by_id[item.id].paper for item in fused if item.id in by_id]
-
-
-def _normalize_candidate(
-    result: PaperSearchResult,
-    *,
-    source_rank: int,
-) -> PaperRankingCandidate:
-    source = result.source_names[0] if result.source_names else ""
-    doi = result.doi.lower() if result.doi else None
-    arxiv_id = result.arxiv_id.lower() if result.arxiv_id else None
-    is_preprint = _is_preprint(result)
-    has_open_access_url = bool(result.is_open_access or result.pdf_url)
-    key = doi or arxiv_id or normalize_title_key(result.title) or result.url or str(source_rank)
-
-    return PaperRankingCandidate(
-        id=f"paper:{stable_hash(key)}:{source_rank}",
-        paper=result,
-        title=result.title or "",
-        abstract=result.abstract or "",
-        authors=" ".join(result.authors),
-        year=result.year,
-        venue=result.venue or "",
-        doi=doi,
-        arxiv_id=arxiv_id,
-        source=source,
-        source_rank=source_rank,
-        is_preprint=is_preprint,
-        has_open_access_url=has_open_access_url,
-        url=result.url,
-    )
-
-
-def _rank_candidates_by_score(candidates: List[PaperRankingCandidate], scorer) -> List[str]:
-    scored = [
-        (index, candidate.id, float(scorer(candidate)))
-        for index, candidate in enumerate(candidates)
-    ]
-    scored.sort(key=lambda item: (-item[2], item[0]))
-    return [candidate_id for _, candidate_id, _ in scored]
-
-
-def _publication_quality_score(candidate: PaperRankingCandidate) -> float:
-    score = 0.0
-    if candidate.doi and not candidate.is_preprint:
-        score += 3.0
-    elif candidate.doi:
-        score += 2.0
-    elif candidate.arxiv_id:
-        score += 1.0
-    if candidate.venue:
-        score += 0.25
-    score += min(len(candidate.paper.source_names), 3) * 0.2
-    return score
-
-
-def _recency_score(candidate: PaperRankingCandidate) -> float:
-    if not candidate.year:
-        return 0.0
-    current_year = datetime.now(timezone.utc).year
-    age = max(0, current_year - candidate.year)
-    return max(0.0, 1.0 - age * 0.12)
-
-
-def _is_preprint(result: PaperSearchResult) -> bool:
-    result_type = (result.result_type or "").lower()
-    if "preprint" in result_type:
-        return True
-    if "arxiv" in {source.lower() for source in result.source_names} and not result.doi:
-        return True
-    return False
+    return {
+        entity.canonical_id: max(raw_scores.get(entity.canonical_id, 0.0) / max_score, min(entity.discovery_score, 1.0))
+        for entity in entity_list
+    }

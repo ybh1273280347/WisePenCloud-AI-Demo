@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from common.logger import log_event
 
 from .chunking import create_content_chunks, find_chunk_by_offset
-from .models import ContentWindow, StoredContent
+from .models import ContentReceipt, ContentWindow, StoredContent
 from .repository import TTLContentRepository
 
 
@@ -90,6 +90,45 @@ class ContentStore:
             return None
 
         return item
+
+    def put_content_receipt(
+        self,
+        *,
+        scope_id: str,
+        producer: str,
+        source: str,
+        text: str,
+        content_type: str = "application/json",
+        metadata: Optional[Dict[str, Any]] = None,
+        chunk_size: Optional[int] = None,
+    ) -> Optional[ContentReceipt]:
+        content_id = self.put_content(
+            scope_id=scope_id,
+            producer=producer,
+            source=source,
+            text=text,
+            content_type=content_type,
+            metadata=metadata,
+            chunk_size=chunk_size,
+        )
+
+        if content_id is None:
+            return None
+
+        stored = self.get_content(content_id=content_id, scope_id=scope_id)
+        if stored is None:
+            return None
+
+        return ContentReceipt(
+            content_id=stored.content_id,
+            producer=stored.producer,
+            source=stored.source,
+            content_type=stored.content_type,
+            original_length=len(stored.text),
+            chunk_count=len(stored.chunks),
+            cached=True,
+            metadata=dict(stored.metadata),
+        )
 
     def read_window(
         self,

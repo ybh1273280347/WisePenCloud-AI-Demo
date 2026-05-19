@@ -2,7 +2,7 @@ import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from chat.application.tools.services.evidence_ranking import (
     format_evidence_result,
@@ -89,20 +89,36 @@ class EvidenceRankTool(BaseTool):
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
 
-        query = kwargs.get("query", "").strip()
+        query = kwargs.get("query")
+        if type(query) is not str:
+            return "[Tool Error] query must be a string."
         if not query:
-            return "[Tool Error] Missing required query parameter."
+            return "[Tool Error] query must be a non-empty string."
+        if query.strip() != query:
+            return (
+                "[Tool Error] query must not contain leading or trailing whitespace."
+            )
 
-        content_ids: List[str] = kwargs.get("content_ids", [])
+        content_ids = kwargs.get("content_ids")
+        if not isinstance(content_ids, list):
+            return "[Tool Error] content_ids must be a list of strings."
         if not content_ids:
-            return "[Tool Error] Missing required content_ids parameter."
-
-        content_ids = [cid.strip() for cid in content_ids if cid.strip()]
-        if not content_ids:
-            return "[Tool Error] content_ids must contain at least one non-empty value."
+            return "[Tool Error] content_ids must contain at least one item."
+        for cid in content_ids:
+            if type(cid) is not str:
+                return "[Tool Error] content_ids items must be strings."
+            if not cid:
+                return "[Tool Error] content_ids items must be non-empty strings."
+            if cid.strip() != cid:
+                return (
+                    "[Tool Error] content_ids items must not contain leading or "
+                    "trailing whitespace."
+                )
+            if cid.startswith("file_ref"):
+                return "[Tool Error] content_ids must be cnt_* values, not file_ref values."
 
         max_evidence = kwargs.get("max_evidence", 8)
-        if not isinstance(max_evidence, int):
+        if type(max_evidence) is not int:
             return "[Tool Error] max_evidence must be an integer."
         if max_evidence < 1 or max_evidence > 20:
             return "[Tool Error] max_evidence must be between 1 and 20."

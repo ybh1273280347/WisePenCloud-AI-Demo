@@ -122,6 +122,7 @@ class ChatTurnCoordinator:
             messages_compress_candidates,
             needs_compression,
         ) = await self._context_assembler.build_context_window(recent_messages)
+        windowed_messages = messages_compress_candidates + messages_keep
 
         runtime_context = await self._build_runtime_context(user_id=user_id)
         tool_context: Dict[str, Any] = self._build_tool_context(
@@ -154,7 +155,7 @@ class ChatTurnCoordinator:
         messages_for_llm = self._context_assembler.assemble_prompt(
             session_id,
             user_query,
-            messages_keep + messages_compress_candidates,
+            windowed_messages,
             relevant_facts,
             session_summary,
             states=states,

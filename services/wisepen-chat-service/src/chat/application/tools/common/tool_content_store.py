@@ -2,11 +2,15 @@ from typing import Any, Dict, Optional
 
 from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
 from chat.core.content_store import (
+    ContentReceipt,
     ContentStore,
     ContentWindow,
     TTLContentRepository,
 )
-from chat.core.content_store.formatters import format_tool_content_window
+from chat.core.content_store.formatters import (
+    format_tool_content_receipt,
+    format_tool_content_window,
+)
 from chat.core.content_store.models import (
     StoredContent,
 )
@@ -66,6 +70,25 @@ class ToolContentStore:
         return self._store.get_content(
             content_id=content_id,
             scope_id=session_id,
+        )
+
+    def put_receipt(
+        self,
+        *,
+        session_id: str,
+        tool_name: str,
+        source: str,
+        text: str,
+        content_type: str = "application/json",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[ContentReceipt]:
+        return self._store.put_content_receipt(
+            scope_id=session_id,
+            producer=tool_name,
+            source=source,
+            text=text,
+            content_type=content_type,
+            metadata=metadata,
         )
 
     def read_window(
@@ -174,6 +197,30 @@ def cache_and_format(
     return format_tool_content_window(window)
 
 
+def cache_artifact_and_format_receipt(
+    *,
+    session_id: str,
+    tool_name: str,
+    source: str,
+    text: str,
+    content_type: str = "application/json",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> str:
+    receipt = tool_content_store.put_receipt(
+        session_id=session_id,
+        tool_name=tool_name,
+        source=source,
+        text=text,
+        content_type=content_type,
+        metadata=metadata,
+    )
+
+    if receipt is None:
+        return "[Tool Error] Failed to cache tool artifact."
+
+    return format_tool_content_receipt(receipt)
+
+
 def read_tool_content_window(
     *,
     session_id: str,
@@ -183,9 +230,6 @@ def read_tool_content_window(
 ) -> str:
     if limit is None:
         limit = TOOL_RESULT_MAX_CHARS
-
-    offset = max(0, offset)
-    limit = min(max(1, limit), TOOL_RESULT_MAX_CHARS)
 
     log_event(
         "分段读取请求",
@@ -199,6 +243,36 @@ def read_tool_content_window(
         session_id=session_id,
         offset=offset,
         limit=limit,
+    )
+
+    if window is None:
+        return "[Tool Result] Cached tool content not found, expired, or inaccessible."
+
+    return format_tool_content_window(window)
+
+
+def read_tool_content_chunk_window(
+    *,
+    session_id: str,
+    content_id: str,
+    chunk_index: int,
+    before_chunks: int = 1,
+    after_chunks: int = 1,
+) -> str:
+    log_event(
+        "分块上下文读取请求",
+        content_id=content_id,
+        chunk_index=chunk_index,
+        before_chunks=before_chunks,
+        after_chunks=after_chunks,
+    )
+
+    window = tool_content_store.read_chunk_window(
+        content_id=content_id,
+        session_id=session_id,
+        chunk_index=chunk_index,
+        before_chunks=before_chunks,
+        after_chunks=after_chunks,
     )
 
     if window is None:

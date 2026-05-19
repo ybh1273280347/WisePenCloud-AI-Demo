@@ -1,12 +1,12 @@
 import inspect
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from chat.application.algorithms.url import canonicalize_url
 from chat.application.tools.common.tool_content_store import (
-    cache_and_format,
+    cache_artifact_and_format_receipt,
 )
-from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
 from chat.application.runtime_context import get_runtime_context
 from chat.application.web_search import (
     CustomSearchProviderUnavailableError,
@@ -63,6 +63,12 @@ _TOOL_DESCRIPTION = (
     "- deep: technical research, engineering decisions, academic/paper research, community best "
     "practices, official documentation comparison, multi-source verification, recent rules/prices/"
     "laws/news, medical/legal/financial accuracy, or broad bilingual recall.\n\n"
+    "Return protocol: fast mode returns lightweight visible snippets/images that can be used "
+    "directly when sufficient. normal and deep mode return only a ToolContent Receipt for a "
+    "cached JSON evidence artifact. The receipt contains content_id and required_next_tool. "
+    "After normal/deep web_search, you MUST call evidence_rank with the user's question and "
+    "that content_id before answering. The search snippets and source list are intentionally "
+    "omitted from the visible tool result in normal/deep mode.\n\n"
     "Answer language rule: after using this tool, follow the conversation language policy: "
     "use the user's explicit language request first, otherwise prefer the language of the "
     "user's current message, and use the user's preferred locale only when the message language "
@@ -76,13 +82,11 @@ _TOOL_DESCRIPTION = (
     "requires primary-source verification, direct quotes, technical details, conflict resolution, "
     "or high-confidence citations. If web_fetch is needed, call it once with all selected URLs: "
     "urls=[url1, url2, ...]. Do not call web_fetch once per URL.\n\n"
-    "Long evidence packs may be returned as ToolContent windows with content_id. "
-    "The full content is split into many chunks; the first window may not contain the key evidence. "
-    "After web_search returns cached content_ids, you MUST call evidence_rank with the user's "
-    "question and the content_ids to score all chunks by relevance and find the most relevant "
-    "passages before answering. Do not answer directly from the first truncated window alone. "
-    "If you need more context around a ranked passage, use tool_content_read with content_id "
-    "and offset. Use source markers like [1], [2] when citing evidence."
+    "Evidence ranking rule: evidence_rank reads the complete cached JSON artifact and ranks "
+    "all web search results by relevance. Its web_search_result entries are still search "
+    "snippets, not fetched page bodies. For technical details, direct quotes, conflict "
+    "resolution, or high-confidence evidence, call web_fetch once with the selected top URLs. "
+    "Use source markers like [1], [2] when citing evidence."
 )
 
 _TOOL_SCHEMA = {
@@ -170,10 +174,13 @@ def _get_output_budget(mode: str) -> _OutputBudget:
             source_display_limit=_DEEP_SOURCE_DISPLAY_LIMIT,
         )
 
-    return _OutputBudget(
-        candidate_page_limit=_NORMAL_CANDIDATE_PAGE_LIMIT,
-        source_display_limit=_NORMAL_SOURCE_DISPLAY_LIMIT,
-    )
+    if mode == "normal":
+        return _OutputBudget(
+            candidate_page_limit=_NORMAL_CANDIDATE_PAGE_LIMIT,
+            source_display_limit=_NORMAL_SOURCE_DISPLAY_LIMIT,
+        )
+
+    raise ValueError(f"Unsupported web_search mode: {mode}")
 
 
 def _is_pure_english_query(query: str) -> bool:
@@ -220,38 +227,37 @@ class WebSearchTool(BaseTool):
 
         notes: List[str] = []
 
-        raw_queries = kwargs.get("queries", [])
+        raw_queries = kwargs.get("queries")
 
         if not isinstance(raw_queries, list):
             return "[Tool Error] queries must be a list of strings."
 
-        if len(raw_queries) < _SEARCH_QUERY_MIN_COUNT:
-            return (
-                "[Tool Error] web_search requires 2-4 search queries. "
-                "You MUST call web_search again immediately with at least two queries, "
-                "including one pure English query. Do not proceed without searching."
-            )
+        if (
+            len(raw_queries) < _SEARCH_QUERY_MIN_COUNT
+            or len(raw_queries) > _SEARCH_QUERY_LIMIT
+        ):
+            return "[Tool Error] web_search requires 2-4 search queries."
 
-        if len(raw_queries) > _SEARCH_QUERY_LIMIT:
-            return (
-                "[Tool Error] web_search accepts at most 4 search queries. "
-                "You MUST call web_search again immediately with 2-4 focused queries. "
-                "Do not proceed without searching."
-            )
+        for query in raw_queries:
+            if type(query) is not str:
+                return "[Tool Error] queries items must be strings."
+            if not query:
+                return "[Tool Error] queries items must be non-empty strings."
+            if query.strip() != query:
+                return (
+                    "[Tool Error] queries items must not contain leading or trailing "
+                    "whitespace."
+                )
 
         queries, _ = normalize_queries(
             raw_queries,
             limit=_SEARCH_QUERY_LIMIT,
             notes=notes,
         )
-        if not queries:
-            return "[Tool Error] Missing required queries parameter."
-
-        if len(queries) < _SEARCH_QUERY_MIN_COUNT:
+        if len(queries) != len(raw_queries):
             return (
-                "[Tool Error] web_search requires at least two distinct search queries after normalization. "
-                "You MUST call web_search again immediately with different queries. "
-                "Do not proceed without searching."
+                "[Tool Error] queries must be distinct after normalization; do not "
+                "pass duplicate or equivalent queries."
             )
 
         if not _has_pure_english_query(queries):
@@ -263,14 +269,43 @@ class WebSearchTool(BaseTool):
                 "You MUST call web_search again immediately. Do not proceed without searching."
             )
 
-        mode = kwargs.get("mode", "normal")
+        mode = kwargs.get("mode")
+        if type(mode) is not str:
+            return (
+                "[Tool Error] mode is required and must be one of: fast, normal, "
+                "deep."
+            )
+        if mode not in {"fast", "normal", "deep"}:
+            return "[Tool Error] mode must be one of: fast, normal, deep."
+
         output = _get_output_budget(mode)
         with_images = kwargs.get("with_images", False)
+        if type(with_images) is not bool:
+            return "[Tool Error] with_images must be a boolean."
+
         runtime_context = get_runtime_context(context)
         language = kwargs.get("language")
+        if language is not None and language not in {"en", "zh-CN"}:
+            return "[Tool Error] language must be one of: en, zh-CN."
         if language is None and runtime_context is not None:
             language = _search_language_hint(runtime_context.locale)
         wikipedia_keywords = kwargs.get("wikipedia_keywords")
+        if wikipedia_keywords is not None:
+            if not isinstance(wikipedia_keywords, list):
+                return "[Tool Error] wikipedia_keywords must be a list of strings."
+            if len(wikipedia_keywords) > 3:
+                return "[Tool Error] wikipedia_keywords accepts at most 3 items."
+            for item in wikipedia_keywords:
+                if type(item) is not str or not item:
+                    return (
+                        "[Tool Error] wikipedia_keywords items must be non-empty "
+                        "strings."
+                    )
+                if item.strip() != item:
+                    return (
+                        "[Tool Error] wikipedia_keywords items must not contain "
+                        "leading or trailing whitespace."
+                    )
         search_config = runtime_context.search_config if runtime_context else None
         provider_mode = search_config.mode if search_config is not None else "default"
         custom_provider_credentials = parse_custom_provider_credentials(
@@ -381,21 +416,47 @@ class WebSearchTool(BaseTool):
             language=language,
         )
 
-        formatted = _format_response(
-            response,
+        if mode == "fast":
+            return _format_response(
+                response,
+                mode=mode,
+                queries=queries,
+                notes=notes,
+                candidate_pages=candidate_pages,
+                source_display_limit=output.source_display_limit,
+                grounding=grounding,
+            )
+
+        citations = _build_citations(response)
+        artifact_text = _build_web_search_artifact_json(
+            response=response,
             mode=mode,
             queries=queries,
             notes=notes,
             candidate_pages=candidate_pages,
-            source_display_limit=output.source_display_limit,
             grounding=grounding,
         )
-        return _window_long_response(
+
+        metadata: Dict[str, Any] = {
+            "content_kind": "web_search_evidence_pack",
+            "mode": mode,
+            "queries": queries,
+            "source_order": "reranked",
+            "required_next_tool": "evidence_rank",
+            "blocking_final_answer": True,
+            "result_count": len(response.results),
+            "candidate_page_count": len(candidate_pages),
+            "unique_domain_count": count_unique_domains(tuple(response.results)),
+            "citations": citations,
+        }
+
+        return cache_artifact_and_format_receipt(
             session_id=session_id,
-            mode=mode,
-            queries=queries,
-            text=formatted,
-            citations=_build_citations(response),
+            tool_name="web_search",
+            source="; ".join(queries),
+            text=artifact_text,
+            content_type="application/json",
+            metadata=metadata,
         )
 
     async def close(self) -> None:
@@ -602,6 +663,87 @@ def _build_citations(response: SearchResponse) -> List[Dict[str, str]]:
     return citations
 
 
+def _build_web_search_artifact_json(
+    *,
+    response: SearchResponse,
+    mode: str,
+    queries: List[str],
+    notes: List[str],
+    candidate_pages: List[Tuple[int, SearchResult]],
+    grounding: Tuple[WikipediaGroundingResult, ...],
+) -> str:
+    candidate_source_ids = {str(index) for index, _ in candidate_pages}
+
+    payload: Dict[str, Any] = {
+        "content_kind": "web_search_evidence_pack",
+        "mode": mode,
+        "queries": queries,
+        "source_order": "reranked",
+        "summary": {
+            "result_count": len(response.results),
+            "query_image_count": len(response.images),
+            "unique_domain_count": count_unique_domains(tuple(response.results)),
+            "candidate_page_count": len(candidate_pages),
+            "source": response.source,
+        },
+        "results": [],
+        "candidate_pages": [],
+        "grounding": [],
+        "notes": _deduplicate_notes(notes),
+        "citations": _build_citations(response),
+    }
+
+    for index, result in enumerate(response.results, 1):
+        url = result.url.strip()
+        title = result.title.strip() or url or "(no title)"
+        domain = extract_domain(url)
+
+        payload["results"].append(
+            {
+                "source_id": str(index),
+                "title": title,
+                "url": url,
+                "domain": domain,
+                "snippet": result.snippet.strip(),
+                "is_candidate_page": str(index) in candidate_source_ids,
+                "images": [
+                    {
+                        "url": image.url.strip(),
+                        "desc": image.desc.strip() if image.desc else "",
+                        "resolution": image.resolution,
+                        "source_url": image.source_url,
+                    }
+                    for image in result.images
+                    if image.url.strip()
+                ],
+            }
+        )
+
+    for index, result in candidate_pages:
+        url = result.url.strip()
+        payload["candidate_pages"].append(
+            {
+                "source_id": str(index),
+                "title": result.title.strip() or url or "(no title)",
+                "url": url,
+                "domain": extract_domain(url),
+            }
+        )
+
+    for item in grounding:
+        payload["grounding"].append(
+            {
+                "keyword": item.keyword.text,
+                "title": item.title,
+                "language": item.language,
+                "extract": item.extract,
+                "url": item.url,
+            }
+        )
+
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def _format_image_line(image: ImageResult, *, indent: str) -> str:
     url = image.url.strip()
     desc = image.desc.strip() if image.desc else ""
@@ -633,41 +775,6 @@ def _deduplicate_notes(notes: List[str]) -> List[str]:
         deduped.append(normalized)
 
     return deduped
-
-
-def _window_long_response(
-    *,
-    session_id: str,
-    mode: str,
-    queries: List[str],
-    text: str,
-    citations: Optional[List[Dict[str, str]]] = None,
-) -> str:
-    result = text.strip()
-
-    max_chars = TOOL_RESULT_MAX_CHARS
-
-    if len(result) <= max_chars:
-        return result
-
-    metadata: Dict[str, Any] = {
-        "content_kind": "web_search_evidence_pack",
-        "mode": mode,
-        "queries": queries,
-        "source_order": "reranked",
-    }
-    if citations:
-        metadata["citations"] = citations
-
-    return cache_and_format(
-        session_id=session_id,
-        tool_name="web_search",
-        source="; ".join(queries),
-        text=result,
-        content_type="text/plain",
-        metadata=metadata,
-        limit=max_chars,
-    )
 
 
 async def _record_custom_provider_failure(

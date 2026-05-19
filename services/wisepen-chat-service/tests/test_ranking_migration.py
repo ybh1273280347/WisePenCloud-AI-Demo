@@ -1,17 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from dataclasses import replace
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import List
-
-import pytest
-
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT / "src"))
-sys.path.insert(0, str(_ROOT.parent / "wisepen-common" / "src"))
 
 from chat.application.algorithms.ranking import (
     FieldedDocument,
@@ -34,9 +24,6 @@ from chat.application.tools.services.code_search.github_search.ranking import (
     rank_repositories,
 )
 from chat.application.tools.services.code_search.github_search.service import GitHubSearchService
-from chat.application.tools.services.paper_search.dedup import deduplicate_papers
-from chat.application.tools.services.paper_search.models import PaperSearchResponse, PaperSearchResult
-from chat.application.tools.services.paper_search.ranking import rank_papers
 from chat.application.web_search.internal.ranking.models import SearchUrlCandidate
 from chat.application.web_search.internal.ranking.url_ranker import (
     deduplicate_by_canonical_url,
@@ -170,8 +157,11 @@ def test_issue_ranking_relevance_comments_and_updated_at() -> None:
     assert ranked[0].title == "async timeout bug"
 
 
-@pytest.mark.asyncio
-async def test_search_operations_call_ranking() -> None:
+def test_search_operations_call_ranking() -> None:
+    asyncio.run(_test_search_operations_call_ranking())
+
+
+async def _test_search_operations_call_ranking() -> None:
     service = GitHubSearchService(_FakeGitHubClient())
     original_repo_ranker = github_service_module.ranking.rank_repositories
     original_issue_ranker = github_service_module.ranking.rank_issues
@@ -210,8 +200,11 @@ async def test_search_operations_call_ranking() -> None:
         github_service_module.ranking.rank_issues = original_issue_ranker
 
 
-@pytest.mark.asyncio
-async def test_get_operations_do_not_call_ranking() -> None:
+def test_get_operations_do_not_call_ranking() -> None:
+    asyncio.run(_test_get_operations_do_not_call_ranking())
+
+
+async def _test_get_operations_do_not_call_ranking() -> None:
     service = GitHubSearchService(_FakeGitHubClient())
     original_repo_ranker = github_service_module.ranking.rank_repositories
     original_issue_ranker = github_service_module.ranking.rank_issues
@@ -236,80 +229,6 @@ async def test_get_operations_do_not_call_ranking() -> None:
     finally:
         github_service_module.ranking.rank_repositories = original_repo_ranker
         github_service_module.ranking.rank_issues = original_issue_ranker
-
-
-def test_paper_dedup_doi_arxiv_and_title() -> None:
-    doi_left = _paper("Neural Search", doi="10.1000/abc", source_names=["crossref"])
-    doi_right = _paper("Neural Search Extended", doi="10.1000/ABC", source_names=["datacite"])
-    arxiv_left = _paper("Graph Retrieval", arxiv_id="2401.12345v1", source_names=["arxiv"])
-    arxiv_right = _paper("Graph Retrieval", arxiv_id="2401.12345v1", source_names=["arxiv"])
-    title_left = _paper("Sparse Ranking for Search", year=2024)
-    title_right = _paper("Sparse Ranking for Search", year=2025)
-
-    deduped = deduplicate_papers([doi_left, doi_right, arxiv_left, arxiv_right, title_left, title_right])
-    assert len(deduped) == 3
-    assert any(item.doi == "10.1000/abc" for item in deduped)
-
-
-def test_paper_dedup_fuzzy_title_and_published_metadata_priority() -> None:
-    preprint = _paper(
-        "Neural ranking for web search",
-        arxiv_id="2401.00001",
-        source_names=["arxiv"],
-        result_type="preprint",
-        pdf_url="https://arxiv.org/pdf/2401.00001",
-    )
-    published = _paper(
-        "Neural ranking in web search",
-        doi="10.1000/search",
-        source_names=["crossref"],
-        result_type="publisher_metadata",
-        venue="JIR",
-    )
-
-    deduped = deduplicate_papers([preprint, published])
-    assert len(deduped) == 1
-    assert deduped[0].doi == "10.1000/search"
-    assert deduped[0].arxiv_id == "2401.00001"
-    assert deduped[0].pdf_url == "https://arxiv.org/pdf/2401.00001"
-
-
-def test_paper_ranking_relevance_recency_oa_and_publication_quality() -> None:
-    current_year = datetime.now(timezone.utc).year
-    old_preprint = _paper(
-        "Transformer retrieval",
-        year=current_year - 8,
-        arxiv_id="1701.00001",
-        source_names=["arxiv"],
-        result_type="preprint",
-        pdf_url="https://arxiv.org/pdf/1701.00001",
-    )
-    recent_publication = _paper(
-        "Transformer retrieval",
-        year=current_year,
-        doi="10.1000/recent",
-        source_names=["crossref"],
-        result_type="publisher_metadata",
-        venue="SIGIR",
-        is_open_access=True,
-    )
-    unrelated = _paper("Quantum chemistry", year=current_year, doi="10.1000/q")
-
-    ranked = rank_papers([old_preprint, unrelated, recent_publication], query="latest transformer retrieval")
-    assert ranked[0].doi == "10.1000/recent"
-
-
-def test_paper_response_preserves_failed_sources_and_warnings() -> None:
-    response = PaperSearchResponse(
-        query="ranking",
-        results=[],
-        searched_sources=["crossref", "arxiv"],
-        skipped_sources=[],
-        failed_sources=["arxiv"],
-        warnings=["arxiv failed"],
-    )
-    assert response.failed_sources == ["arxiv"]
-    assert response.warnings == ["arxiv failed"]
 
 
 def _web_candidate(item_id: str, url: str, *, original_rank: int) -> SearchUrlCandidate:
@@ -367,37 +286,6 @@ def _issue(
         updated_at=updated_at,
         is_pull_request=False,
         body_preview=body,
-    )
-
-
-def _paper(
-    title: str,
-    *,
-    authors: List[str] | None = None,
-    year: int | None = 2024,
-    abstract: str | None = "ranking retrieval search",
-    venue: str | None = None,
-    doi: str | None = None,
-    arxiv_id: str | None = None,
-    source_names: List[str] | None = None,
-    result_type: str | None = None,
-    pdf_url: str | None = None,
-    is_open_access: bool | None = None,
-) -> PaperSearchResult:
-    return PaperSearchResult(
-        title=title,
-        authors=authors or ["Ada Lovelace"],
-        year=year,
-        abstract=abstract,
-        venue=venue,
-        doi=doi,
-        arxiv_id=arxiv_id,
-        url=f"https://example.com/{stable_hash(title)}",
-        pdf_url=pdf_url,
-        source_urls=[],
-        source_names=source_names or ["crossref"],
-        result_type=result_type,
-        is_open_access=is_open_access,
     )
 
 
@@ -478,8 +366,8 @@ def _issue_payload(title: str) -> dict:
 
 
 async def _run_async_tests() -> None:
-    await test_search_operations_call_ranking()
-    await test_get_operations_do_not_call_ranking()
+    await _test_search_operations_call_ranking()
+    await _test_get_operations_do_not_call_ranking()
 
 
 def main() -> None:
@@ -492,10 +380,6 @@ def main() -> None:
     test_repository_ranking_relevance_archived_and_recency()
     test_issue_ranking_relevance_comments_and_updated_at()
     asyncio.run(_run_async_tests())
-    test_paper_dedup_doi_arxiv_and_title()
-    test_paper_dedup_fuzzy_title_and_published_metadata_priority()
-    test_paper_ranking_relevance_recency_oa_and_publication_quality()
-    test_paper_response_preserves_failed_sources_and_warnings()
     print("ranking migration tests passed")
 
 

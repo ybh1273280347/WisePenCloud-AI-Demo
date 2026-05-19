@@ -186,7 +186,7 @@ class ChatContextAssembler:
             )
 
         # 经过滑动窗口裁剪后的近期对话明细
-        # 修复可能存在的孤立 TOOL 消息（前置 ASSISTANT(tool_calls) 被裁剪或丢失的情况）
+        # 修复可能存在的不完整 ASSISTANT(tool_calls) / TOOL 消息组。
         safe_messages = _ensure_tool_message_pairing(windowed_messages)
         messages.extend(safe_messages)
 
@@ -216,22 +216,52 @@ class ChatContextAssembler:
 
 def _ensure_tool_message_pairing(messages: List[ChatMessage]) -> List[ChatMessage]:
     """
-    确保消息序列中每个 role=tool 的消息都有对应的 role=assistant 且含 tool_calls 的前置消息。
-    如果发现孤立的 TOOL 消息（前置 ASSISTANT 的 tool_calls 被裁剪/丢失），则一并移除。
+    确保消息序列符合 OpenAI tool calling 协议:
+    - 每个 ASSISTANT(tool_calls) 后必须紧跟覆盖全部 tool_call_id 的 TOOL 消息。
+    - 每个 TOOL 消息必须属于前一个 ASSISTANT(tool_calls) 消息组。
+
+    如果 Redis LTRIM、Token 窗口裁剪或脏历史切断了消息组，则丢弃整组不完整
+    ASSISTANT(tool_calls) + TOOL 片段，防止供应商协议校验失败。
     这是一道防线，防止历史脏数据触发 OpenAI 协议校验错误。
     """
-    valid_tool_call_ids: Set[str] = set()
     result: List[ChatMessage] = []
-    for msg in messages:
-        if msg.role == Role.ASSISTANT and msg.tool_calls:
-            for tc in msg.tool_calls:
-                tc_id = tc.get("id") if isinstance(tc, dict) else None
-                if tc_id:
-                    valid_tool_call_ids.add(tc_id)
-            result.append(msg)
-        elif msg.role == Role.TOOL:
-            if msg.tool_call_id and msg.tool_call_id in valid_tool_call_ids:
+    index = 0
+    while index < len(messages):
+        msg = messages[index]
+        if msg.role != Role.ASSISTANT or not msg.tool_calls:
+            if msg.role != Role.TOOL:
                 result.append(msg)
-        else:
+            index += 1
+            continue
+
+        expected_ids = _tool_call_ids(msg.tool_calls)
+        if not expected_ids:
+            index += 1
+            continue
+
+        tool_messages: List[ChatMessage] = []
+        seen_ids: Set[str] = set()
+        next_index = index + 1
+        while next_index < len(messages) and messages[next_index].role == Role.TOOL:
+            tool_msg = messages[next_index]
+            tool_call_id = tool_msg.tool_call_id
+            if tool_call_id in expected_ids and tool_call_id not in seen_ids:
+                tool_messages.append(tool_msg)
+                seen_ids.add(tool_call_id)
+            next_index += 1
+
+        if seen_ids == expected_ids:
             result.append(msg)
+            result.extend(tool_messages)
+
+        index = next_index
     return result
+
+
+def _tool_call_ids(tool_calls: List[Dict[str, Any]]) -> Set[str]:
+    ids: Set[str] = set()
+    for tool_call in tool_calls:
+        tc_id = tool_call.get("id") if isinstance(tool_call, dict) else None
+        if tc_id:
+            ids.add(tc_id)
+    return ids

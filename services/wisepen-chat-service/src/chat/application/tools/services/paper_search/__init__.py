@@ -1,15 +1,31 @@
 from .models import (
+    DOIMetadataRecord,
+    HydrationStatus,
+    PaperEntity,
+    PaperPointer,
+    PaperResultType,
+    PaperSearchDepth,
+    PaperSearchFreshness,
     PaperSearchRequest,
     PaperSearchResponse,
-    PaperSearchResult,
-    PaperSourceResponse,
+    ScholarlyResourceType,
+    WorkVersionRef,
+    WorkVersionType,
 )
 from .service import PaperSearchService
 
 __all__ = [
+    "DOIMetadataRecord",
+    "HydrationStatus",
+    "PaperEntity",
+    "PaperPointer",
+    "PaperResultType",
+    "PaperSearchDepth",
+    "PaperSearchFreshness",
     "PaperSearchRequest",
     "PaperSearchResponse",
-    "PaperSearchResult",
-    "PaperSourceResponse",
     "PaperSearchService",
+    "ScholarlyResourceType",
+    "WorkVersionRef",
+    "WorkVersionType",
 ]

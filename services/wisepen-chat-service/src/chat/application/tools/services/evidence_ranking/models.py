@@ -14,6 +14,12 @@ class RankedEvidence:
     source: str = ""
     url: str = ""
     excerpt: str = ""
+    start_offset: int = 0
+    end_offset: int = 0
+    source_id: str = ""
+    domain: str = ""
+    evidence_type: str = "chunk"
+    matched_reason: str = ""
 
     @property
     def display_title(self) -> str:

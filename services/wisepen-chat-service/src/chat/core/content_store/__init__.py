@@ -1,5 +1,6 @@
 from .models import (
     ContentChunk,
+    ContentReceipt,
     ContentWindow,
     StoredContent,
     StoredToolContent,
@@ -10,6 +11,7 @@ from .service import ContentStore
 
 __all__ = [
     "ContentChunk",
+    "ContentReceipt",
     "ContentWindow",
     "StoredContent",
     "StoredToolContent",

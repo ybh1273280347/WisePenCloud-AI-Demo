@@ -4,7 +4,7 @@
 docs/docker-cheatsheet.md
 ```
 
----
+***
 
 # Docker 常用命令速查
 
@@ -31,7 +31,7 @@ Dockerfile
 No services to build
 ```
 
----
+***
 
 # 1. Compose 构建与启动
 
@@ -91,7 +91,7 @@ docker compose `
   down --remove-orphans
 ```
 
----
+***
 
 # 2. 查看服务状态
 
@@ -122,7 +122,7 @@ docker ps -a
 docker inspect wisepen-chat-service --format "Status={{.State.Status}} RestartCount={{.RestartCount}} ExitCode={{.State.ExitCode}}"
 ```
 
----
+***
 
 # 3. 查看日志
 
@@ -175,7 +175,7 @@ docker compose `
 Ctrl + C
 ```
 
----
+***
 
 # 4. 进入容器
 
@@ -203,7 +203,7 @@ docker exec wisepen-chat-service sh -lc 'env | sort'
 docker exec wisepen-chat-service sh -lc 'echo PROFILE=$PROFILE; echo NACOS_SERVER_ADDR=$NACOS_SERVER_ADDR; echo NACOS_USERNAME=$NACOS_USERNAME; echo NACOS_PASSWORD_LEN=${#NACOS_PASSWORD}'
 ```
 
----
+***
 
 # 5. 网络排查
 
@@ -268,7 +268,7 @@ Test-NetConnection 10.176.44.11 -Port 6333
 Test-NetConnection 10.176.44.11 -Port 9094
 ```
 
----
+***
 
 # 6. 镜像管理
 
@@ -301,7 +301,7 @@ docker rmi local/wisepencloud-chat:dev
 
 如果镜像被容器占用，需要先停止并删除容器。
 
----
+***
 
 # 7. 容器管理
 
@@ -344,7 +344,7 @@ docker compose `
   rm -sf chat-service
 ```
 
----
+***
 
 # 8. 文件复制与热修
 
@@ -378,7 +378,7 @@ docker logs -f --tail=200 wisepen-chat-service
 
 注意：热修只影响当前容器，重新 build 后会丢。最终仍然要把代码修回仓库。
 
----
+***
 
 # 9. Python / 依赖检查
 
@@ -413,7 +413,7 @@ docker exec wisepen-chat-service sh -lc "/app/.venv/bin/python -m pip install ht
 
 注意：临时安装在容器内，重建镜像后会丢。要长期生效，应写入 Dockerfile 或依赖配置。
 
----
+***
 
 # 10. Nacos 排查
 
@@ -435,7 +435,7 @@ docker exec wisepen-chat-service sh -lc 'curl -sS -w "\nHTTP=%{http_code}\n" -X 
 docker exec wisepen-chat-service sh -lc 'curl -sS -w "\nHTTP=%{http_code}\n" -X POST "http://10.176.44.11:8848/nacos/v1/auth/users/login" -d "username=nacos&password=你的密码"'
 ```
 
----
+***
 
 # 11. 清理磁盘空间
 
@@ -495,7 +495,7 @@ docker system prune -a --volumes
 
 这会删除 volume，可能删掉数据库、日志、缓存等持久化数据。
 
----
+***
 
 # 12. Windows / Docker Desktop 常用处理
 
@@ -526,7 +526,7 @@ docker pull python:3.11-slim-bookworm
 
 仍失败时，检查 Docker Desktop 代理设置或重启 Docker Desktop。
 
----
+***
 
 # 13. 构建策略建议
 
@@ -577,7 +577,7 @@ docker compose --progress=plain `
   build chat-service --no-cache
 ```
 
----
+***
 
 # 14. 当前项目最常用命令组合
 
@@ -628,3 +628,4 @@ docker builder prune -a -f
 ```powershell
 docker system df
 ```
+

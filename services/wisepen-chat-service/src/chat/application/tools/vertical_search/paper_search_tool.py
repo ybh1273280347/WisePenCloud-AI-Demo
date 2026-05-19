@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from chat.application.tools.services.paper_search import PaperSearchRequest, PaperSearchService
-from chat.application.tools.services.paper_search.config import PAPER_SEARCH_TOOL_RESULT_MAX_CHARS
+from chat.application.tools.services.paper_search import (
+    PaperSearchDepth,
+    PaperSearchFreshness,
+    PaperSearchRequest,
+    PaperSearchService,
+)
+from chat.application.tools.services.paper_search.config import (
+    PAPER_SEARCH_TOOL_RESULT_MAX_CHARS,
+)
 from chat.application.tools.services.paper_search.formatting import (
     format_paper_search_response,
     truncate_result,
@@ -12,14 +19,11 @@ from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_error, log_event
 
 _TOOL_DESCRIPTION = (
-    "Searches free and open scholarly sources for academic papers using Crossref, arXiv, DataCite, "
-    "and optionally Unpaywall. Use this tool for paper discovery, DOI-backed publication metadata, "
-    "preprints, datasets, research objects, and open-access paper links.\n\n"
-    "This tool intentionally avoids paid commercial databases and freemium quota-based APIs. "
-    "It does not use OpenAlex API or Semantic Scholar API by default. "
-    "Do not rely on arXiv alone. arXiv is a preprint source and has strict request limits. "
-    "For non-English user queries, use concise English academic keywords when calling this tool. "
-    "The tool may return partial results with source warnings if one source is rate-limited or unavailable."
+    "Searches scholarly papers through Paper Search v1.5. This is an Agent Tool: "
+    "it only follows explicit freshness, depth, and query_variants parameters and does not infer "
+    "latest/stable/deep intent from query text. Exa is the discovery layer; arXiv and DOI metadata "
+    "are used for structured hydration when enabled. For non-English user queries, pass concise "
+    "English academic keywords and optional explicit variants."
 )
 
 _TOOL_SCHEMA = {
@@ -28,16 +32,36 @@ _TOOL_SCHEMA = {
         "query": {
             "type": "string",
             "description": (
-                "Concise English academic search keywords. "
-                "For non-English user requests, translate the concept into English before calling. "
-                'Example: use "deep learning" instead of "深度学习".'
+                "Concise academic search keywords. For non-English user requests, translate the "
+                "concept into English before calling."
             ),
         },
         "max_results": {
             "type": "integer",
             "default": 8,
             "minimum": 1,
-            "maximum": 10,
+            "maximum": 8,
+        },
+        "freshness": {
+            "type": "string",
+            "enum": ["latest", "balanced", "stable"],
+            "default": "balanced",
+            "description": (
+                "Explicit freshness mode. latest enables arXiv Delta Index and Exa date filtering; "
+                "balanced and stable do not infer recency from query text."
+            ),
+        },
+        "depth": {
+            "type": "string",
+            "enum": ["fast", "deep"],
+            "default": "deep",
+            "description": "Explicit search depth. deep enables one-hop findSimilar expansion.",
+        },
+        "query_variants": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "Optional Agent-provided query rewrites. The tool does not generate rewrites.",
         },
     },
     "required": ["query"],
@@ -68,11 +92,34 @@ class PaperSearchTool(BaseTool):
 
         max_results = _coerce_max_results(kwargs.get("max_results", 8))
         if max_results is None:
-            return "[Tool Error] max_results must be an integer between 1 and 10."
+            return "[Tool Error] max_results must be an integer between 1 and 8."
+
+        freshness = _coerce_enum(
+            kwargs.get("freshness", "balanced"),
+            PaperSearchFreshness,
+        )
+        if freshness is None:
+            return "[Tool Error] freshness must be one of: latest, balanced, stable."
+
+        depth = _coerce_enum(kwargs.get("depth", "deep"), PaperSearchDepth)
+        if depth is None:
+            return "[Tool Error] depth must be one of: fast, deep."
+
+        query_variants = kwargs.get("query_variants", [])
+        if not isinstance(query_variants, list) or not all(
+            isinstance(item, str) for item in query_variants
+        ):
+            return "[Tool Error] query_variants must be an array of strings."
 
         try:
             response = await self._service.search(
-                PaperSearchRequest(query=query.strip(), max_results=max_results)
+                PaperSearchRequest(
+                    query=query.strip(),
+                    max_results=max_results,
+                    freshness=freshness,
+                    depth=depth,
+                    query_variants=query_variants,
+                )
             )
         except Exception as e:
             log_error("paper_search", e, query=query)
@@ -101,6 +148,17 @@ def _coerce_max_results(value: Any) -> Optional[int]:
         parsed = int(value)
     except (TypeError, ValueError):
         return None
-    if parsed < 1 or parsed > 10:
+    if parsed < 1 or parsed > 8:
         return None
     return parsed
+
+
+def _coerce_enum(value: Any, enum_type: type) -> Any:
+    if isinstance(value, enum_type):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return enum_type(value)
+    except ValueError:
+        return None

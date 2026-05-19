@@ -60,5 +60,28 @@ class ContentWindow:
         return self.cached
 
 
+@dataclass(slots=True)
+class ContentReceipt:
+    content_id: str
+    producer: str
+    source: str
+    content_type: str
+    original_length: int
+    chunk_count: int
+    cached: bool = True
+    cache_error: Optional[str] = None
+    error: Optional[str] = None
+    warning: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def tool_name(self) -> str:
+        return self.producer
+
+    @property
+    def content_cached(self) -> bool:
+        return self.cached
+
+
 StoredToolContent = StoredContent
 WindowedContent = ContentWindow

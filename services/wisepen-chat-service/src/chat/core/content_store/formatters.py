@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from .models import ContentWindow
+from .models import ContentReceipt, ContentWindow
 
 
 def format_tool_content_window(window: ContentWindow) -> str:
@@ -47,6 +47,54 @@ def format_tool_content_window(window: ContentWindow) -> str:
         )
 
     return "\n".join(metadata_lines) + "\n\n[Content]\n" + window.text
+
+
+def format_tool_content_receipt(receipt: ContentReceipt) -> str:
+    metadata = dict(receipt.metadata)
+
+    lines = [
+        "[ToolContent Receipt]",
+        f"content_id: {receipt.content_id}",
+        f"content_cached: {str(receipt.cached).lower()}",
+        f"tool_name: {receipt.producer}",
+        f"source: {receipt.source}",
+        f"content_type: {receipt.content_type}",
+        f"original_length: {receipt.original_length}",
+        f"chunk_count: {receipt.chunk_count}",
+    ]
+
+    if receipt.cache_error:
+        lines.append(f"cache_error: {receipt.cache_error}")
+
+    if receipt.error:
+        lines.append(f"error: {receipt.error}")
+
+    if receipt.warning:
+        lines.append(f"warning: {receipt.warning}")
+
+    for key in (
+        "content_kind",
+        "mode",
+        "source_order",
+        "required_next_tool",
+        "blocking_final_answer",
+    ):
+        if key in metadata:
+            value = metadata[key]
+            if isinstance(value, bool):
+                value = str(value).lower()
+            lines.append(f"{key}: {value}")
+
+    lines.extend(
+        [
+            "",
+            "[Content]",
+            "omitted: true",
+            "reason: This artifact must be consumed by the required next tool before final answer.",
+        ]
+    )
+
+    return "\n".join(lines)
 
 
 def content_window_to_dict(window: ContentWindow) -> Dict[str, Any]:

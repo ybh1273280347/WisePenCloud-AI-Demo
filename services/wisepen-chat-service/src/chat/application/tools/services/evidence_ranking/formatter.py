@@ -29,24 +29,61 @@ def format_evidence_result(result: EvidenceRankResult) -> str:
 
     lines.append(f"\nRanked Evidence ({len(result.evidence)} snippet(s)):")
 
-    for ev in result.evidence:
-        lines.append(f"\n[{ev.rank + 1}]")
+    for display_index, ev in enumerate(result.evidence, 1):
+        lines.append(f"\n[{display_index}]")
+        lines.append(f"   Raw rank: {ev.rank + 1}")
         lines.append(f"   Title: {ev.display_title}")
+        if ev.source_id:
+            lines.append(f"   source_id: {ev.source_id}")
+        if ev.domain:
+            lines.append(f"   Domain: {ev.domain}")
         if ev.url:
             lines.append(f"   URL: {ev.url}")
         lines.append(f"   content_id: {ev.content_id}")
-        lines.append(f"   chunk_index: {ev.chunk_index}")
+        if ev.chunk_index >= 0:
+            lines.append(f"   chunk_index: {ev.chunk_index}")
+            lines.append(f"   start_offset: {ev.start_offset}")
+            lines.append(f"   end_offset: {ev.end_offset}")
+        if ev.evidence_type:
+            lines.append(f"   Evidence type: {ev.evidence_type}")
         lines.append(f"   Score: {ev.score:.4f}")
+        if ev.matched_reason:
+            lines.append(f"   Matched reason: {ev.matched_reason}")
         if ev.excerpt:
             lines.append(f"   Excerpt:")
             for excerpt_line in ev.excerpt.split("\n"):
                 lines.append(f"      {excerpt_line}")
 
     lines.append("")
-    lines.append(
-        "To inspect surrounding content, call tool_content_read with "
-        "content_id and offset."
+    has_web_search_result = any(
+        ev.evidence_type == "web_search_result" for ev in result.evidence
     )
+    has_chunk_evidence = any(ev.chunk_index >= 0 for ev in result.evidence)
+    if has_web_search_result:
+        lines.append(
+            "These ranked items are search-result snippets, not fetched page bodies. "
+            "For technical details, direct quotes, conflict resolution, or high-confidence evidence, "
+            "call web_fetch with the selected URLs in one batch."
+        )
+    if has_chunk_evidence:
+        lines.append(
+            "To inspect surrounding content for chunk evidence, call "
+            "tool_content_read with content_id, chunk_index, before_chunks=1, "
+            "and after_chunks=1. Example:"
+        )
+        first_chunk = next(ev for ev in result.evidence if ev.chunk_index >= 0)
+        lines.append(
+            'tool_content_read({"content_id": "'
+            f"{first_chunk.content_id}"
+            '", "chunk_index": '
+            f"{first_chunk.chunk_index}"
+            ', "before_chunks": 1, "after_chunks": 1})'
+        )
+    if not has_web_search_result and not has_chunk_evidence:
+        lines.append(
+            "To inspect surrounding content, call tool_content_read with "
+            "content_id and offset."
+        )
 
     if result.notes:
         lines.append("Notes:")

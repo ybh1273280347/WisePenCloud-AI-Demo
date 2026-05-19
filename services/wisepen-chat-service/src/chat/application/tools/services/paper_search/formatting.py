@@ -45,6 +45,8 @@ def format_paper_search_response(response: PaperSearchResponse) -> str:
         lines.append("- none")
 
     for index, result in enumerate(response.results, 1):
+        doi = result.external_ids.get("doi")
+        arxiv_id = result.external_ids.get("arxiv")
         lines.extend(
             [
                 f"[{index}]",
@@ -52,15 +54,23 @@ def format_paper_search_response(response: PaperSearchResponse) -> str:
                 f"- authors: {optional(result.authors[:8])}",
                 f"- year: {optional(result.year)}",
                 f"- venue: {optional(result.venue)}",
-                f"- doi: {optional(result.doi)}",
-                f"- arxiv_id: {optional(result.arxiv_id)}",
+                f"- publisher: {optional(result.publisher)}",
+                f"- doi: {optional(doi)}",
+                f"- arxiv_id: {optional(arxiv_id)}",
                 f"- url: {optional(result.url)}",
                 f"- pdf_url: {optional(result.pdf_url)}",
-                f"- source_names: {optional(result.source_names)}",
-                f"- source_urls: {optional(result.source_urls)}",
-                f"- result_type: {optional(result.result_type)}",
+                f"- result_type: {result.result_type.value}",
+                f"- resource_type: {result.resource_type.value}",
+                f"- hydration_status: {result.hydration_status.value}",
+                f"- preferred_version: {optional(result.preferred_version)}",
+                f"- authoritative_version: {optional(result.authoritative_version)}",
                 f"- publication_date: {optional(result.publication_date)}",
-                f"- is_open_access: {optional(result.is_open_access)}",
+                f"- evidence_sources: {optional(result.evidence_sources)}",
+                f"- source_urls: {optional(result.source_urls)}",
+                f"- metadata_confidence: {result.metadata_confidence:.2f}",
+                f"- source_confidence: {result.source_confidence:.2f}",
+                f"- relevance_score: {result.relevance_score:.3f}",
+                f"- abstract_source: {optional(result.abstract_source)}",
                 f"- abstract: {preview_text(result.abstract)}",
                 "",
             ]
@@ -69,14 +79,19 @@ def format_paper_search_response(response: PaperSearchResponse) -> str:
     lines.extend(
         [
             "Assistant instructions:",
-            "- Prefer DOI-backed and publisher-backed records from Crossref or DataCite when available.",
-            "- Treat arXiv results as preprints unless there is DOI or publisher metadata.",
-            "- If one source failed, was skipped, or was rate-limited, do not claim that no papers exist.",
-            "- Summarize source coverage and warnings.",
-            "- If the user asks for full text, prefer OA links from Unpaywall or arXiv PDF when available.",
-            "- If no result is found and the original user query was not English, retry once with concise English academic keywords.",
+            "- Report source coverage exactly, including skipped or failed sources.",
+            "- Treat exa_highlights as extracted evidence, not the original abstract.",
+            "- Use hydration_status to describe whether structured metadata was found.",
+            "- Avoid overstating source confidence or publication status.",
         ]
     )
+    if "exa" in response.failed_sources:
+        lines.extend(
+            [
+                "- Exa failed as the paper discovery source. Call web_search as a recall fallback before answering.",
+                "- Tell the user clearly that Exa discovery is unavailable and that web_search fallback results may have lower scholarly recall quality.",
+            ]
+        )
     return "\n".join(lines)
 
 

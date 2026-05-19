@@ -25,7 +25,6 @@ dependencies = [
     "zeroentropy",
     "wisepen-common",
     "httpx",
-    "arxiv",
     "steel-sdk",
     "trafilatura",
     "playwright",

@@ -1,13 +1,13 @@
 import asyncio
 import os
 import threading
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 import yaml
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from common.cloud.nacos_client import nacos_client_manager
 from common.logger import log_error, log_event
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class CoreSettings(BaseModel):
@@ -74,15 +74,32 @@ class SearchProviderCredentialSettings(BaseModel):
 
 
 class PaperSearchSettings(BaseModel):
-    TOOL_CONTACT_EMAIL: Optional[str] = None
+    TOOL_CONTACT_EMAIL: Optional[str] = "jzsun24@m.fudan.edu.cn"
     TOOL_USER_AGENT: str = "WisePenCloud-AI/1.0"
-    PAPER_SEARCH_ENABLE_CROSSREF: bool = True
-    PAPER_SEARCH_ENABLE_ARXIV: bool = True
-    PAPER_SEARCH_ENABLE_DATACITE: bool = True
-    PAPER_SEARCH_ENABLE_UNPAYWALL: bool = True
+
+    EXA_API_KEY: Optional[str] = "e4734bd6-3a94-458b-a90f-d5091aed436f"
+    ARXIV_API_BASE_URL: str = "https://export.arxiv.org/api/query"
+    ARXIV_RSS_BASE_URL: str = "https://rss.arxiv.org/atom"
     CROSSREF_BASE_URL: str = "https://api.crossref.org"
     DATACITE_BASE_URL: str = "https://api.datacite.org"
-    UNPAYWALL_BASE_URL: str = "https://api.unpaywall.org"
+    DOI_BASE_URL: str = "https://doi.org"
+
+    PAPER_SEARCH_ENABLE_EXA: bool = True
+    PAPER_SEARCH_ENABLE_ARXIV_MONITOR: bool = True
+    PAPER_SEARCH_ENABLE_ARXIV_HYDRATION: bool = True
+    PAPER_SEARCH_ENABLE_DOI_HYDRATION: bool = True
+    PAPER_SEARCH_ENABLE_EXA_FIND_SIMILAR: bool = True
+
+    ARXIV_WATCH_CATEGORIES: List[str] = Field(
+        default_factory=lambda: ["cs.CL", "cs.IR", "cs.LG", "cs.AI", "stat.ML"]
+    )
+
+    @field_validator("ARXIV_WATCH_CATEGORIES", mode="before")
+    @classmethod
+    def _parse_arxiv_watch_categories(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
 
 
 class WebFetchSettings(BaseModel):
@@ -218,3 +235,9 @@ def load_settings() -> AppSettings:
 
 
 settings = load_settings()
+
+
+def build_tool_user_agent() -> str:
+    if settings.TOOL_CONTACT_EMAIL:
+        return f"{settings.TOOL_USER_AGENT} (mailto:{settings.TOOL_CONTACT_EMAIL})"
+    return settings.TOOL_USER_AGENT
