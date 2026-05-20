@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr, model_validator
 
@@ -12,11 +12,9 @@ class RejectExplicitNullMixin:
     def reject_explicit_null(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-
         null_keys = sorted(key for key, value in data.items() if value is None)
         if null_keys:
             raise ValueError(f"arguments must not be null: {', '.join(null_keys)}")
-
         return data
 
 
@@ -25,47 +23,25 @@ class SageComputeRequest(RejectExplicitNullMixin, BaseModel):
 
     task: StrictStr
 
-    # Generic symbolic input
-    expression: Optional[StrictStr] = None
-    variable: Optional[StrictStr] = None
-    point: Optional[StrictStr] = None
-    order: Optional[StrictInt] = None
-    lower_bound: Optional[StrictStr] = None
-    upper_bound: Optional[StrictStr] = None
-    substitutions: Optional[Dict[StrictStr, StrictStr]] = None
-
-    # Equation solving
-    equation: Optional[StrictStr] = None
-    equations: Optional[List[StrictStr]] = None
-    variables: Optional[List[StrictStr]] = None
-
-    # Matrix / linear algebra
-    matrix: Optional[List[List[MatrixEntry]]] = None
-    vector: Optional[List[MatrixEntry]] = None
-    matrix_power: Optional[StrictInt] = None
-    row_index: Optional[StrictInt] = None
-    column_index: Optional[StrictInt] = None
-    ring: Optional[StrictStr] = None
-
-    # Number theory
     integer: Optional[StrictInt] = None
-    integers: Optional[List[StrictInt]] = None
+    integers: Optional[list[StrictInt]] = None
+
     base: Optional[StrictInt] = None
     exponent: Optional[StrictInt] = None
     modulus: Optional[StrictInt] = None
-    residues: Optional[List[StrictInt]] = None
-    moduli: Optional[List[StrictInt]] = None
-    n: Optional[StrictInt] = None
-    k: Optional[StrictInt] = None
 
-    # Polynomial / finite field
+    residues: Optional[list[StrictInt]] = None
+    moduli: Optional[list[StrictInt]] = None
+
     polynomial: Optional[StrictStr] = None
     polynomial_a: Optional[StrictStr] = None
     polynomial_b: Optional[StrictStr] = None
+    variable: Optional[StrictStr] = None
     field: Optional[StrictStr] = None
-    evaluate_at: Optional[StrictStr] = None
+    ring: Optional[StrictStr] = None
 
-    # Finite field operation
+    matrix: Optional[list[list[MatrixEntry]]] = None
+
     operation: Optional[StrictStr] = None
     element: Optional[StrictStr] = None
     element_a: Optional[StrictStr] = None
@@ -80,6 +56,7 @@ class SageComputeResponse(BaseModel):
     exact_result: Optional[StrictStr] = None
     numeric_result: Optional[StrictStr] = None
     latex_result: Optional[StrictStr] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    warnings: List[StrictStr] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[StrictStr] = Field(default_factory=list)
     error: Optional[StrictStr] = None
+

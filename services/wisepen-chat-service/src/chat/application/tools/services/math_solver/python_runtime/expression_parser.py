@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 
 import sympy as sp
 from sympy.parsing.sympy_parser import (
@@ -8,8 +8,8 @@ from sympy.parsing.sympy_parser import (
     standard_transformations,
 )
 
-from chat.application.tools.services.math_reasoning.config import MATH_REASONING_MAX_EXPRESSION_CHARS
 
+MAX_EXPRESSION_CHARS = 2000
 
 _TRANSFORMATIONS = standard_transformations + (
     implicit_multiplication_application,
@@ -51,21 +51,17 @@ class MathParseError(ValueError):
     pass
 
 
-def parse_math_expr(expression: str, variables: Optional[List[str]] = None) -> sp.Expr:
+def parse_math_expr(expression: str, variables: Optional[list[str]] = None) -> sp.Expr:
     if not isinstance(expression, str) or not expression.strip():
         raise MathParseError("expression must be a non-empty string.")
-
-    if len(expression) > MATH_REASONING_MAX_EXPRESSION_CHARS:
+    if len(expression) > MAX_EXPRESSION_CHARS:
         raise MathParseError("expression is too long.")
-
     if "__" in expression or "import" in expression or "lambda" in expression:
         raise MathParseError("unsafe expression.")
-
     if "'" in expression or '"' in expression:
         raise MathParseError("string literals are not valid math expressions.")
 
     local_dict = dict(_ALLOWED_FUNCTIONS)
-
     for name in variables or []:
         if not name.isidentifier():
             raise MathParseError(f"invalid variable name: {name}")
@@ -79,5 +75,6 @@ def parse_math_expr(expression: str, variables: Optional[List[str]] = None) -> s
             transformations=_TRANSFORMATIONS,
             evaluate=True,
         )
-    except Exception as e:
-        raise MathParseError(f"failed to parse expression: {e}") from e
+    except Exception as exc:
+        raise MathParseError(f"failed to parse expression: {exc}") from exc
+

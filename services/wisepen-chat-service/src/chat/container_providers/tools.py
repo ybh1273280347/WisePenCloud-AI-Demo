@@ -13,10 +13,11 @@ from chat.application.tools import (
     GitHubSearchTool,
     LoadSkillAssetTool,
     LoadSkillTool,
-    MathComputeTool,
     PackageIntelligenceTool,
     PaperSearchTool,
+    PythonMathSolverTool,
     ResolveTimeTool,
+    SageMathSolverTool,
     SearchHistoricalMessagesTool,
     ToolContentBatchReadTool,
     ToolContentReadTool,
@@ -146,8 +147,12 @@ def register_tool_providers(container_cls: Any) -> None:
         convert_service=container_cls.document_convert_service,
     )
     tool(
-        "math_compute_tool",
-        MathComputeTool,
+        "python_math_solver_tool",
+        PythonMathSolverTool,
+    )
+    tool(
+        "sage_math_solver_tool",
+        SageMathSolverTool,
     )
     tool(
         "translation_assist_tool",

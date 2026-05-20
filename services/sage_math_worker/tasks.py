@@ -119,7 +119,7 @@ _SUPPORTED_TASKS = {
     "factorial",
 }
 
-_FIELD_PATTERN = re.compile(r"^GF\((\d+)\)$", re.IGNORECASE)
+_FIELD_PATTERN = re.compile(r"^GF\((\d+)\)$")
 _SYMBOL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _EXPRESSION_ALLOWED_PATTERN = re.compile(r"^[A-Za-z0-9_+\-*/^().,=\s]+$")
 _POLYNOMIAL_ALLOWED_PATTERN = re.compile(r"^[A-Za-z0-9_+\-*/^().\s]+$")
@@ -281,15 +281,13 @@ def _parse_ring(ring_text: Optional[str] = None):
     if ring_text is None:
         return QQ
 
-    normalized = ring_text.strip().upper()
-
-    if normalized == "ZZ":
+    if ring_text == "ZZ":
         return ZZ
 
-    if normalized == "QQ":
+    if ring_text == "QQ":
         return QQ
 
-    field_match = _FIELD_PATTERN.match(normalized)
+    field_match = _FIELD_PATTERN.match(ring_text)
     if field_match:
         q = int(field_match.group(1))
         if q <= 1:
@@ -320,7 +318,7 @@ def _parse_matrix(rows: Optional[List[List[Any]]], ring_text: Optional[str] = No
     parsed_rows = []
 
     for row in rows:
-        parsed_rows.append([ring(_normalize_power_syntax(str(item))) for item in row])
+        parsed_rows.append([_parse_ring_entry(ring, item) for item in row])
 
     return matrix(ring, parsed_rows)
 
@@ -333,7 +331,19 @@ def _parse_vector(values: Optional[List[Any]], ring_text: Optional[str] = None):
         raise ValueError("vector must not be empty.")
 
     ring = _parse_ring(ring_text)
-    return vector(ring, [ring(_normalize_power_syntax(str(item))) for item in values])
+    return vector(ring, [_parse_ring_entry(ring, item) for item in values])
+
+
+def _parse_ring_entry(ring, value: Any):
+    if isinstance(value, bool):
+        raise ValueError("matrix entries must not be boolean values.")
+    if isinstance(value, int):
+        return ring(value)
+    if isinstance(value, float):
+        return ring(value)
+    if isinstance(value, str):
+        return ring(_normalize_power_syntax(value))
+    raise ValueError("matrix entries must be integers, floats, or expression strings.")
 
 
 def _parse_integers(values: Optional[List[int]]) -> List[Integer]:
@@ -379,6 +389,12 @@ def _parse_field_element(field, element_text: str):
     if not _ELEMENT_ALLOWED_PATTERN.match(element_text):
         raise ValueError("field element contains unsupported characters.")
     return field(_normalize_power_syntax(element_text))
+
+
+def _parse_integer_text(value: str):
+    if not re.fullmatch(r"[+-]?\d+", value):
+        raise ValueError("exponent must be an integer string.")
+    return Integer(value)
 
 
 # ---------------------------------------------------------------------
@@ -1071,19 +1087,25 @@ def _finite_field_operation(request: SageComputeRequest) -> SageComputeResponse:
     if request.element_a is None or request.element_b is None:
         return _error(request, "finite_field_operation requires element_a and element_b.")
 
-    element_a = _parse_field_element(field, request.element_a)
-    element_b = _parse_field_element(field, request.element_b)
-
     if operation == "add":
+        element_a = _parse_field_element(field, request.element_a)
+        element_b = _parse_field_element(field, request.element_b)
         result = element_a + element_b
     elif operation == "sub":
+        element_a = _parse_field_element(field, request.element_a)
+        element_b = _parse_field_element(field, request.element_b)
         result = element_a - element_b
     elif operation == "mul":
+        element_a = _parse_field_element(field, request.element_a)
+        element_b = _parse_field_element(field, request.element_b)
         result = element_a * element_b
     elif operation == "div":
+        element_a = _parse_field_element(field, request.element_a)
+        element_b = _parse_field_element(field, request.element_b)
         result = element_a / element_b
     elif operation == "pow":
-        result = element_a ** Integer(str(element_b))
+        element_a = _parse_field_element(field, request.element_a)
+        result = element_a ** _parse_integer_text(request.element_b)
     else:
         return _error(request, "operation must be add, sub, mul, div, pow, or neg.")
 

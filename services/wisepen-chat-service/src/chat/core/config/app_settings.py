@@ -145,8 +145,8 @@ class RpcSettings(BaseModel):
 
 
 class MathReasoningSettings(BaseModel):
-    MATH_SAGE_ENABLED: bool = False
-    MATH_SAGE_WORKER_URL: str = "http://sage-math-worker:8000"
+    SAGE_MATH_WORKER_URL: str = "http://sage-math-worker:8000"
+    SAGE_MATH_WORKER_TIMEOUT_SECONDS: int | float = 10
 
 
 class TranslationSettings(BaseModel):

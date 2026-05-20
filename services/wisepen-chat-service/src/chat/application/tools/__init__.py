@@ -9,7 +9,7 @@ from .knowledge import (
     ToolContentReadTool,
 )
 from .language import TranslationAssistTool
-from .reasoning import MathComputeTool
+from .math_solver import PythonMathSolverTool, SageMathSolverTool
 from .runtime import ToolRegistry, ToolScope
 from .skill import LoadSkillAssetTool, LoadSkillTool
 from .vertical_search import GitHubSearchTool, PackageIntelligenceTool, PaperSearchTool
@@ -38,7 +38,8 @@ __all__ = [
     "DocumentConvertTool",
     "AttachmentReadTool",
     "EvidenceRankTool",
-    "MathComputeTool",
+    "PythonMathSolverTool",
+    "SageMathSolverTool",
     "TranslationAssistTool",
     "BrowseInteractTool",
 ]
