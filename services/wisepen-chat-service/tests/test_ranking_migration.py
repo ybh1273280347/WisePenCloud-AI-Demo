@@ -13,17 +13,17 @@ from chat.application.algorithms.ranking import (
     weighted_rrf,
 )
 from chat.application.algorithms.url import canonicalize_url, stable_hash
-from chat.application.tools.services.code_search.github_search import service as github_service_module
-from chat.application.tools.services.code_search.github_search.models import (
+from chat.application.tools.services.software_ecosystem.open_source.github import service as github_service_module
+from chat.application.tools.services.software_ecosystem.open_source.github.models import (
     GitHubIssueResult,
     GitHubReleaseResult,
     GitHubRepositoryResult,
 )
-from chat.application.tools.services.code_search.github_search.ranking import (
+from chat.application.tools.services.software_ecosystem.open_source.github.ranking import (
     rank_issues,
     rank_repositories,
 )
-from chat.application.tools.services.code_search.github_search.service import GitHubSearchService
+from chat.application.tools.services.software_ecosystem.open_source.github.service import GitHubOpenSourceService
 from chat.application.web_search.internal.ranking.models import SearchUrlCandidate
 from chat.application.web_search.internal.ranking.url_ranker import (
     deduplicate_by_canonical_url,
@@ -162,7 +162,7 @@ def test_search_operations_call_ranking() -> None:
 
 
 async def _test_search_operations_call_ranking() -> None:
-    service = GitHubSearchService(_FakeGitHubClient())
+    service = GitHubOpenSourceService(_FakeGitHubClient())
     original_repo_ranker = github_service_module.ranking.rank_repositories
     original_issue_ranker = github_service_module.ranking.rank_issues
     calls = {"repos": 0, "issues": 0}
@@ -205,7 +205,7 @@ def test_get_operations_do_not_call_ranking() -> None:
 
 
 async def _test_get_operations_do_not_call_ranking() -> None:
-    service = GitHubSearchService(_FakeGitHubClient())
+    service = GitHubOpenSourceService(_FakeGitHubClient())
     original_repo_ranker = github_service_module.ranking.rank_repositories
     original_issue_ranker = github_service_module.ranking.rank_issues
 

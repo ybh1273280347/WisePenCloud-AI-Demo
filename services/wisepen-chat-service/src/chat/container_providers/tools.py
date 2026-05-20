@@ -10,15 +10,14 @@ from chat.application.tools import (
     DocumentExportTool,
     DocumentParseTool,
     EvidenceRankTool,
-    GitHubSearchTool,
     LoadSkillAssetTool,
     LoadSkillTool,
-    PackageIntelligenceTool,
     PaperSearchTool,
     PythonMathSolverTool,
     ResolveTimeTool,
     SageMathSolverTool,
     SearchHistoricalMessagesTool,
+    SoftwareEcosystemResearchTool,
     ToolContentBatchReadTool,
     ToolContentReadTool,
     ToolRegistry,
@@ -106,12 +105,8 @@ def register_tool_providers(container_cls: Any) -> None:
         PaperSearchTool,
     )
     tool(
-        "github_search_tool",
-        GitHubSearchTool,
-    )
-    tool(
-        "package_intelligence_tool",
-        PackageIntelligenceTool,
+        "software_ecosystem_research_tool",
+        SoftwareEcosystemResearchTool,
     )
     tool(
         "resolve_time_tool",

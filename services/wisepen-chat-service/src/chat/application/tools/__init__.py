@@ -12,7 +12,7 @@ from .language import TranslationAssistTool
 from .math_solver import PythonMathSolverTool, SageMathSolverTool
 from .runtime import ToolRegistry, ToolScope
 from .skill import LoadSkillAssetTool, LoadSkillTool
-from .vertical_search import GitHubSearchTool, PackageIntelligenceTool, PaperSearchTool
+from .vertical_search import PaperSearchTool, SoftwareEcosystemResearchTool
 from .web import WebCrawlTool, WebFetchTool, WebSearchTool
 
 __all__ = [
@@ -25,8 +25,7 @@ __all__ = [
     "WebFetchTool",
     "WebCrawlTool",
     "PaperSearchTool",
-    "GitHubSearchTool",
-    "PackageIntelligenceTool",
+    "SoftwareEcosystemResearchTool",
     "ResolveTimeTool",
     "WeatherTool",
     "AirQualityTool",
