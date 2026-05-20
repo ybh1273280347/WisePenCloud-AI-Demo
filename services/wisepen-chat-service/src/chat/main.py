@@ -12,7 +12,6 @@ from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
 from chat.api.endpoints import search_provider as search_provider_endpoints
 from chat.api.endpoints import session as session_endpoints
-from chat.api.endpoints import user_preferences as user_preferences_endpoints
 from chat.api.router import api_router
 from chat.container import (
     container,  # noqa: F401 — 触发 dependency_injector wiring，不可删除
@@ -26,7 +25,6 @@ from chat.domain.entities import (
     ModelProviderMapping,
     Provider,
     UserSearchProviderConfig,
-    UserPreferences,
     Skill,
 )
 from common.cloud.nacos_client import nacos_client_manager
@@ -51,7 +49,6 @@ DOCUMENT_MODELS = [
     ModelProviderMapping,
     Skill,
     UserSearchProviderConfig,
-    UserPreferences,
 ]
 
 SHUTDOWN_RESOURCES = (
@@ -153,7 +150,6 @@ container.wire(
         memory_endpoints,
         model_endpoints,
         search_provider_endpoints,
-        user_preferences_endpoints,
         document_export_endpoints,
         chat_file_endpoints,
     ]

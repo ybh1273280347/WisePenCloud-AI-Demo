@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 
 class TimeResolutionMode(StrEnum):
+    NO_CONSTRAINT = "no_constraint"
     EXACT = "exact"
     RANGE = "range"
     RECENCY = "recency"

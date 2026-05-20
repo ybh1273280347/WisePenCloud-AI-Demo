@@ -14,11 +14,11 @@ _TOOL_DESCRIPTION = (
     "Checks the Mainland China calendar status for a specific date. "
     "Use this tool when the user asks whether a date is a workday, weekend, public holiday, "
     "make-up workday, adjusted rest day, or whether a weekend needs work in China.\n\n"
-    "Use cn_calendar when the user asks: 今天是不是休息日, 某天是不是法定节假日, "
+    "Call cn_calendar when the user asks: 今天是不是休息日, 某天是不是法定节假日, "
     "某天是不是调休, 某个周末是否要上班, 中国节假日/工作日/调休日判断, "
     "or whether a task should be scheduled by China workday rules.\n\n"
     "If target_date is omitted, the tool checks today's date in the given timezone. "
-    "For China user scenarios, prefer timezone='Asia/Shanghai'."
+    "For Mainland China calendar checks, use timezone='Asia/Shanghai'."
 )
 
 _TOOL_SCHEMA = {
@@ -36,8 +36,7 @@ _TOOL_SCHEMA = {
             "type": "string",
             "default": "Asia/Shanghai",
             "description": (
-                "IANA timezone used when target_date is omitted. "
-                "For Mainland China calendar checks, use Asia/Shanghai."
+                "IANA timezone used only when target_date is omitted."
             ),
         },
     },

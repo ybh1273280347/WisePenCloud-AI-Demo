@@ -1,22 +1,23 @@
 from typing import Any, Dict, Optional
 
-from chat.application.runtime_context import get_runtime_context
 from chat.application.tools.services.temporal import (
     ResolvedTimeRange,
     TimeResolveError,
     resolve_time_text,
 )
-from chat.application.tools.config import DEFAULT_TOOL_TIMEZONE
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_event
 
 _TOOL_DESCRIPTION = (
-    "Resolves time intent in a user request. Default timezone is Beijing time, "
-    "Asia/Shanghai. If the user explicitly asks about another timezone or local time, "
-    "the model may pass a target IANA timezone such as America/New_York.\n\n"
-    "This tool accepts either a full user request or a short time expression. "
-    "It identifies date/time expressions with Microsoft Recognizers Text. "
-    "If recognition fails, it returns the current time anchor in the selected timezone."
+    "This tool resolves current clock time, timezone-specific current time, precise "
+    "time conversion, and structured natural-language temporal expressions.\n\n"
+    "The system prompt already provides the current date as a lightweight date anchor. "
+    "Use this tool when the user asks for the current clock time, cross-timezone current "
+    "time, precise time conversion, or a structured time expression.\n\n"
+    "timezone is optional and must be an IANA timezone.\n"
+    "Omit timezone when the user does not specify one; the backend default is Asia/Shanghai.\n"
+    "Provide timezone only when the user explicitly specifies an unambiguous timezone, city, or region.\n"
+    "Never pass non-IANA aliases such as \"北京时间\", \"Shanghai\", or \"PST\"."
 )
 
 _TOOL_SCHEMA = {
@@ -33,11 +34,8 @@ _TOOL_SCHEMA = {
         },
         "timezone": {
             "type": "string",
-            "default": "Asia/Shanghai",
             "description": (
-                "Optional IANA timezone, such as Asia/Shanghai or America/New_York. "
-                "Use it only when the user explicitly asks about another timezone or local time. "
-                "Defaults to Asia/Shanghai."
+                "Optional IANA timezone, such as Asia/Shanghai or America/New_York."
             ),
         },
         "recent_days": {
@@ -76,17 +74,15 @@ class ResolveTimeTool(BaseTool):
         if not isinstance(text, str) or not text.strip():
             return "[Tool Error] Missing required text parameter."
 
-        runtime_context = get_runtime_context(context)
         timezone_arg = kwargs.get("timezone")
+        timezone_name: Optional[str]
         if timezone_arg is None:
-            timezone_name = (
-                runtime_context.timezone
-                if runtime_context is not None
-                else DEFAULT_TOOL_TIMEZONE
-            )
-        else:
+            timezone_name = None
+        elif type(timezone_arg) is str:
             timezone_name = timezone_arg
-        locale = runtime_context.locale if runtime_context is not None else None
+        else:
+            return "[Tool Error] timezone must be a valid IANA timezone string."
+
         default_recent_days = kwargs.get("recent_days", 30)
         domain_sensitivity: Optional[str] = kwargs.get("domain_sensitivity")
 
@@ -94,7 +90,6 @@ class ResolveTimeTool(BaseTool):
             resolved = resolve_time_text(
                 text=text,
                 timezone_name=timezone_name,
-                locale=locale,
                 default_recent_days=default_recent_days,
                 domain_sensitivity=domain_sensitivity,
             )
@@ -119,8 +114,8 @@ class ResolveTimeTool(BaseTool):
 
 
 def _format_resolved_time_result(resolved: ResolvedTimeRange) -> str:
-    start = resolved.start if resolved.start is not None else "-∞"
-    end = resolved.end if resolved.end is not None else resolved.as_of
+    start = resolved.start if resolved.start is not None else "none"
+    end = resolved.end if resolved.end is not None else "none"
     limit = str(resolved.limit) if resolved.limit is not None else "none"
     detected_text = (
         resolved.detected_text if resolved.detected_text is not None else "none"

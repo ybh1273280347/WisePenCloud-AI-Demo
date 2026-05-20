@@ -9,9 +9,11 @@ from common.logger import log_fail, log_ok
 
 _TOOL_DESCRIPTION = (
     "Converts a server-side temporary document file_ref into a generated downloadable file. "
-    "The source must already be an ingested server temporary file_ref. Markdown/plain text/HTML "
-    "are read directly and exported; binary documents are parsed by the existing document_parse "
-    "strategy before export. Supports output formats: markdown, html, pdf, docx, and txt."
+    "Use this when the user wants an already-ingested document file converted into markdown, "
+    "html, pdf, docx, or txt.\n\n"
+    "The input MUST be a file_ref value, not a content_id.\n"
+    "Markdown, plain text, and HTML sources are read directly before export.\n"
+    "Binary documents are parsed by the document conversion service before export."
 )
 
 _TOOL_SCHEMA = {
@@ -20,7 +22,7 @@ _TOOL_SCHEMA = {
         "file_ref": {
             "type": "string",
             "minLength": 1,
-            "description": "Server-side temporary document file path issued by the system.",
+            "description": "file_ref value for a server-side temporary document. Do not pass content_id values.",
         },
         "target_format": {
             "type": "string",
@@ -29,7 +31,7 @@ _TOOL_SCHEMA = {
         },
         "file_name": {
             "type": "string",
-            "description": "Optional output file name. Name only, not a path.",
+            "description": "Optional output file name. Name only; not a path.",
         },
     },
     "required": ["file_ref", "target_format"],

@@ -21,18 +21,15 @@ TOOL_DESCRIPTION = (
     "Scores and ranks all chunks from cached tool content by relevance to the user's question "
     "using BM25 text matching, then returns the top-ranked evidence snippets.\n\n"
     "When a tool returns ToolContent Metadata with content_cached=true and content_id values, "
-    "the full content has been split into many chunks and stored. You cannot know which chunks "
-    "are relevant by reading them sequentially. evidence_rank solves this by scoring every chunk "
-    "against the user's question and returning only the most relevant ones, ranked by score.\n\n"
-    "You MUST call evidence_rank before answering when cached content_ids are available. "
-    "Do not answer directly from the first truncated window — it may not contain the key evidence. "
-    "Do not use tool_content_read to scan chunks one by one hoping to find relevant content — "
-    "use evidence_rank first to locate the best evidence, then use tool_content_read only when "
-    "you need more context around a specific ranked passage.\n\n"
+    "the full content may be split into many chunks. Use evidence_rank to find the chunks most "
+    "relevant to the current question instead of scanning sequentially.\n\n"
     "Do not use evidence_rank to discover URLs, fetch pages, parse file_ref values, or continue "
-    "reading from a known offset. Use tool_content_read for sequential continuation.\n\n"
-    "This tool returns ranked evidence snippets with excerpts, not a final answer. Use the "
-    "evidence snippets to answer the user with citations or source attribution."
+    "reading from a known offset.\n"
+    "Use tool_content_read for sequential continuation from next_offset.\n"
+    "Use tool_content_read or tool_content_batch_read when more context is needed around returned "
+    "content_id + chunk_index evidence.\n\n"
+    "This tool returns ranked evidence snippets with excerpts. It does not fetch page bodies, "
+    "parse files, or produce a final answer."
 )
 
 TOOL_SCHEMA = {
@@ -42,11 +39,7 @@ TOOL_SCHEMA = {
             "type": "string",
             "minLength": 1,
             "description": (
-                "The user's question or information need used to rank evidence snippets. "
-                "Use the user's current question as-is when possible. If you must rewrite it, "
-                "follow any explicit response-language request first, otherwise use the current "
-                "message language, and use the preferred locale only when the message language "
-                "is ambiguous."
+                "The user's current question or concise information need for ranking."
             ),
         },
         "content_ids": {
@@ -54,7 +47,7 @@ TOOL_SCHEMA = {
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
             "description": (
-                "content_id values from previous ToolContent Metadata, usually cnt_* identifiers. "
+                "cnt_* ToolContent identifiers from previous tool results. "
                 "Do not pass file_ref values."
             ),
         },

@@ -20,20 +20,18 @@ from common.logger import log_event
 _TOOL_DESCRIPTION = (
     "Fetches one or more web URLs concurrently. Use this tool when the user provides URL(s), "
     "or after web_search returns candidate URLs that need page-body evidence.\n\n"
-    "Batching rule: always pass URLs as one urls array. Each array item must be exactly one "
-    "http:// or https:// URL. If there are multiple URLs, put all of them in the same urls list. "
-    "Do not call web_fetch once per URL, and do not put multiple URLs into one string item. "
-    "The backend fetches all URLs in the array concurrently.\n\n"
+    "Always pass all selected URLs in one urls array.\n"
+    "Each array item MUST be exactly one http:// or https:// URL.\n"
+    "Never call web_fetch once per URL.\n"
+    "Never put multiple URLs into one string item.\n\n"
     "HTML pages return readable Markdown content. Long content may be returned as ToolContent "
-    "windows with content_id=cnt_* and next_offset. The full content is split into many chunks; "
-    "the first window may not contain the key evidence. After web_fetch returns cached content_ids, "
-    "you MUST call evidence_rank with the user's question and the content_ids to score all chunks "
-    "by relevance and find the most relevant passages before answering. Do not answer directly "
-    "from the first truncated window alone. content_id is not file_ref: use content_id only with "
-    "tool_content_read for continuation, or with evidence_rank for relevance-based evidence ranking.\n\n"
+    "windows with content_id=cnt_* and next_offset.\n"
+    "When web_fetch returns cached content_ids, use evidence_rank to locate relevant passages "
+    "or tool_content_read to continue a known window.\n"
+    "content_id is not file_ref.\n\n"
     "Direct document links such as PDF, DOCX, PPTX, EPUB, XLSX, XLSM, XLS, or ODS are downloaded "
-    "and returned as file_ref handoffs instead of being parsed. After web_fetch returns file_ref "
-    "values, pass all file_refs together to document_parse in one call."
+    "and returned as file_ref handoffs instead of being parsed.\n"
+    "After web_fetch returns file_ref values, pass all file_refs together to document_parse in one call."
 )
 
 _TOOL_SCHEMA = {
@@ -49,9 +47,7 @@ _TOOL_SCHEMA = {
             "maxItems": 20,
             "uniqueItems": True,
             "description": (
-                "One array of URLs to fetch concurrently. Each item must be exactly one "
-                "http:// or https:// URL. Put multiple URLs as separate items in this same array; "
-                "do not put newline-separated URLs into one string, and do not make one call per URL."
+                "One array of http:// or https:// URLs. Each item is one URL."
             ),
         },
     },

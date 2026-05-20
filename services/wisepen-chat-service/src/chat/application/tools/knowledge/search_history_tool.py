@@ -28,9 +28,8 @@ class SearchHistoricalMessagesTool(BaseTool):
             "Use this when you need to recall specific facts, events, or details "
             "from earlier in the conversation that may not be in the current context window. "
             "Choose keyword language from the content you are trying to recall: start with "
-            "the user's current message language, use the user's preferred locale when the "
-            "current message is ambiguous, and try another likely conversation language if "
-            "no results are found. "
+            "the language of the user's current question, and try another likely conversation "
+            "language if no results are found. "
             "Long results are returned as ToolContent windows; continue with tool_content_read "
             "using content_id and next_offset when truncated=true."
         )
@@ -46,8 +45,7 @@ class SearchHistoricalMessagesTool(BaseTool):
                     "description": (
                         "The keyword or phrase to search for in message history. "
                         "Use the language likely used in the historical message; start "
-                        "with the current message language, and use the preferred locale "
-                        "only when the current message is ambiguous."
+                        "with the language of the user's current question."
                     ),
                 },
                 "start_time": {

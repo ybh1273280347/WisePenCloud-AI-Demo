@@ -22,8 +22,8 @@ class LoadSkillTool(BaseTool):
     def description(self) -> str:
         return (
             "Lazy-load the full SKILL.md content and assets manifest for a given skill. "
-            "Only call this when the user's request is DIRECTLY covered by one of the Available Skills listed in the system context. "
-            "Do NOT call speculatively. After loading, strictly follow the instructions in SKILL.md; "
+            "Only call this when the user's request is directly covered by one of the Available Skills listed in the system context. "
+            "Never call speculatively. After loading, follow the instructions in SKILL.md; "
             "call load_skill_asset to open a specific reference/template only if SKILL.md says you need it."
         )
 
@@ -34,7 +34,7 @@ class LoadSkillTool(BaseTool):
             "properties": {
                 "skill_id": {
                     "type": "string",
-                    "description": "The slug id of the skill to load (e.g. 'paper-translation'). Must match one of the Available Skills.",
+                    "description": "Skill slug id exactly as listed in Available Skills.",
                 },
             },
             "required": ["skill_id"],

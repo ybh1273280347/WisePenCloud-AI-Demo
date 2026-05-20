@@ -5,7 +5,6 @@ from chat.api.endpoints import (
     model,
     search_provider,
     session,
-    user_preferences,
 )
 from fastapi import APIRouter
 
@@ -20,9 +19,4 @@ api_router.include_router(
     search_provider.router,
     prefix="/searchProvider",
     tags=["searchProvider"],
-)
-api_router.include_router(
-    user_preferences.router,
-    prefix="/user",
-    tags=["userPreferences"],
 )

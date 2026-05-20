@@ -27,13 +27,11 @@ _TOOL_DESCRIPTION = (
     "implementation references, issues, discussions, releases, and community practices.\n\n"
     "Use this tool when the user asks about coding implementation, library usage, framework conventions, "
     "repository examples, official examples, or community best practices.\n\n"
-    "For coding questions involving third-party libraries, unfamiliar APIs, framework behavior, or community best "
-    "practices, prefer using this tool before giving implementation advice.\n\n"
-    "Prioritize official repositories, well-maintained projects, recent examples, and source-backed patterns. "
+    "Use this tool before implementation advice that depends on third-party libraries, unfamiliar APIs, "
+    "framework behavior, or community best practices.\n"
+    "Prioritize official repositories, well-maintained projects, recent examples, and source-backed patterns.\n"
     "Do not treat random code snippets as authoritative without considering repository quality, recency, and "
-    "maintenance status.\n\n"
-    "This tool is for discovery and evidence gathering. The assistant should synthesize the result into "
-    "project-specific guidance instead of copying code blindly."
+    "maintenance status."
 )
 
 _TOOL_SCHEMA = {

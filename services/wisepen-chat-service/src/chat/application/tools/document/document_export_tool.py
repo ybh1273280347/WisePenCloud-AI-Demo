@@ -12,12 +12,11 @@ from common.logger import log_fail, log_ok
 _TOOL_DESCRIPTION = (
     "Exports Markdown-like text or cached tool content into a generated file. "
     "Supports markdown, html, pdf, docx, and txt. "
-    "Use this when the user asks to save, export, or convert content into a downloadable file. "
-    "For uploaded binary documents, call document_parse first, then document_export. "
-    "Does not parse binary files directly. "
-    "Does not fetch URLs. "
-    "source_format: markdown means content is interpreted as Markdown; "
-    "plain_text means content is treated as plain text (V1: preserved as-is, may still render Markdown syntax)."
+    "Use this when the user asks to save or export known text/content into a downloadable file.\n\n"
+    "This tool does not parse binary files.\n"
+    "This tool does not fetch URLs.\n"
+    "For uploaded binary documents, use document_parse first and then pass known text or content_ref here.\n"
+    "source_format controls whether input is interpreted as Markdown or plain text."
 )
 
 _TOOL_SCHEMA = {
@@ -31,19 +30,19 @@ _TOOL_SCHEMA = {
         "source_format": {
             "type": "string",
             "enum": ["markdown", "plain_text"],
-            "description": "Format of the input content. markdown: content is interpreted as Markdown. plain_text: content is treated as plain text.",
+            "description": "Input interpretation: markdown or plain_text.",
         },
         "content": {
             "type": "string",
-            "description": "Markdown-like content to export. Use for direct short content.",
+            "description": "Direct content to export.",
         },
         "content_ref": {
             "type": "string",
-            "description": "Reference to cached content returned by another tool.",
+            "description": "cnt_* cached ToolContent identifier. Do not pass file_ref values.",
         },
         "file_name": {
             "type": "string",
-            "description": "Optional output file name. Name only, not a path.",
+            "description": "Optional output file name. Name only; not a path.",
         },
     },
     "required": ["target_format"],

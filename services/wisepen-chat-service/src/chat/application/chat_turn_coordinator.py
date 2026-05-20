@@ -13,11 +13,6 @@ from chat.application.query_loop_runtime import (
 from chat.application.runtime_context import RUNTIME_CONTEXT_KEY, RuntimeContext
 from chat.application.skill_matcher import SkillMatcher
 from chat.application.tools.runtime.tool_registry import ToolRegistry
-from chat.application.user_preferences import (
-    DEFAULT_LOCALE,
-    DEFAULT_TIMEZONE,
-    UserPreferencesService,
-)
 from chat.application.web_search.search_provider_config import (
     MODE_DEFAULT,
     RuntimeSearchProviderContext,
@@ -60,7 +55,6 @@ class ChatTurnCoordinator:
         kafka_producer: KafkaProducerClient,
         skill_matcher: SkillMatcher,
         search_provider_config_service: Optional[SearchProviderConfigService] = None,
-        user_preferences_service: Optional[UserPreferencesService] = None,
     ):
         self._memory = memory
         self._model_resolver = model_resolver
@@ -81,7 +75,6 @@ class ChatTurnCoordinator:
         )
         self._skill_matcher = skill_matcher
         self._search_provider_config_service = search_provider_config_service
-        self._user_preferences_service = user_preferences_service
 
     # -------------------------------------------------------------------------
     # 公共入口
@@ -160,7 +153,6 @@ class ChatTurnCoordinator:
             session_summary,
             states=states,
             candidate_skills=candidate_skills or None,
-            locale=runtime_context.locale,
         )
 
         # 记录进入 Agent 循环前的列表长度
@@ -250,20 +242,8 @@ class ChatTurnCoordinator:
                 require_custom=False,
             )
 
-        if self._user_preferences_service is None:
-            timezone = DEFAULT_TIMEZONE
-            locale = DEFAULT_LOCALE
-        else:
-            preferences = await self._user_preferences_service.get_preferences(
-                user_id=user_id
-            )
-            timezone = preferences.timezone
-            locale = preferences.locale
-
         return RuntimeContext(
             user_id=user_id,
-            timezone=timezone,
-            locale=locale,
             search_config=search_config,
         )
 

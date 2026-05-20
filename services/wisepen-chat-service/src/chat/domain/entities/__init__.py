@@ -6,7 +6,6 @@ from .provider import Provider
 from .search_provider_config import UserSearchProviderConfig
 from .session import ChatSession
 from .skill import Skill, SkillAssetMeta, SkillMeta
-from .user_preferences import UserPreferences
 
 __all__ = [
     "ChatMessage",
@@ -16,7 +15,6 @@ __all__ = [
     "Model",
     "Provider",
     "UserSearchProviderConfig",
-    "UserPreferences",
     "ModelProviderMapping",
     "Skill",
     "SkillMeta",

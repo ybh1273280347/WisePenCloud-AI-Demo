@@ -16,6 +16,7 @@ from .models import (
     TimeResolveError,
 )
 
+DEFAULT_TIMEZONE_NAME = "Asia/Shanghai"
 
 _TYPE_PRIORITY = {
     "datetimeV2.daterange": 100,
@@ -36,7 +37,7 @@ _TYPE_PRIORITY = {
 def resolve_time_text(
     *,
     text: str,
-    timezone_name: str,
+    timezone_name: Optional[str] = None,
     locale: Optional[str] = None,
     default_recent_days: int = 30,
     domain_sensitivity: Optional[str] = None,
@@ -44,20 +45,17 @@ def resolve_time_text(
     del default_recent_days, domain_sensitivity
 
     input_text = _validate_text(text)
+    resolved_timezone_name = _resolve_timezone_name(timezone_name)
 
-    tz = _load_timezone(timezone_name)
+    tz = _load_timezone(resolved_timezone_name)
     now_local = datetime.now(tz)
 
     mentions = _extract_mentions(input_text, locale)
     if not mentions:
-        return _build_current_time_anchor(
+        return _build_no_constraint_result(
             input_text=input_text,
-            timezone_name=timezone_name,
+            timezone_name=resolved_timezone_name,
             now_local=now_local,
-            reason=(
-                "No explicit temporal expression was detected. Returned the server "
-                "current time as the authoritative time anchor."
-            ),
         )
 
     primary = _choose_primary_mention(mentions)
@@ -67,13 +65,13 @@ def resolve_time_text(
             input_text=input_text,
             mention=primary,
             all_mentions=mentions,
-            timezone_name=timezone_name,
+            timezone_name=resolved_timezone_name,
             now_local=now_local,
         )
     except TimeResolveError:
         return _build_current_time_anchor(
             input_text=input_text,
-            timezone_name=timezone_name,
+            timezone_name=resolved_timezone_name,
             now_local=now_local,
             reason=(
                 "A temporal mention was detected, but its recognizer resolution could not be "
@@ -91,8 +89,16 @@ def _validate_text(text: str) -> str:
     return text.strip()
 
 
+def _resolve_timezone_name(timezone_name: Optional[str]) -> str:
+    if timezone_name is None:
+        return DEFAULT_TIMEZONE_NAME
+    if type(timezone_name) is not str:
+        raise TimeResolveError("timezone_name must be a non-empty IANA timezone.")
+    return timezone_name
+
+
 def _load_timezone(timezone_name: str) -> ZoneInfo:
-    if not isinstance(timezone_name, str) or not timezone_name:
+    if type(timezone_name) is not str or not timezone_name:
         raise TimeResolveError("timezone_name must be a non-empty IANA timezone.")
     if timezone_name != timezone_name.strip():
         raise TimeResolveError("timezone_name must be a valid IANA timezone.")
@@ -293,6 +299,33 @@ def _infer_freshness_policy(mode: TimeResolutionMode) -> FreshnessPolicy:
     if mode == TimeResolutionMode.RANGE:
         return FreshnessPolicy.MUST_BE_RECENT
     return FreshnessPolicy.ANY
+
+
+def _build_no_constraint_result(
+    *,
+    input_text: str,
+    timezone_name: str,
+    now_local: datetime,
+) -> ResolvedTimeRange:
+    return ResolvedTimeRange(
+        input_text=input_text,
+        detected_text=None,
+        mention_source=None,
+        mode=TimeResolutionMode.NO_CONSTRAINT,
+        freshness_policy=FreshnessPolicy.ANY,
+        timezone=timezone_name,
+        as_of=_format_dt(now_local),
+        start=None,
+        end=None,
+        confidence=0.0,
+        explanation=(
+            "No temporal expression was detected; no time filter should be applied."
+        ),
+        order_by_time_desc=False,
+        limit=None,
+        ambiguities=[],
+        alternatives=[],
+    )
 
 
 def _build_current_time_anchor(

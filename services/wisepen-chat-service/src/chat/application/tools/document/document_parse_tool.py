@@ -19,22 +19,17 @@ from common.logger import log_event, log_fail, log_ok
 _TOOL_DESCRIPTION = (
     "Parses local or cached binary document files referenced by file_ref into Markdown text "
     "and structured tables. Only values explicitly labeled file_ref are valid inputs.\n\n"
-    "Batching rule: always pass file_refs as one populated list. If multiple file_refs belong "
-    "to the same task, parse them together in a single document_parse call. Do not call "
-    "document_parse once per file_ref, and do not issue parallel document_parse calls for the "
-    "same task.\n\n"
-    "Do not pass ToolContent content_id values such as cnt_* to document_parse. content_id is "
-    "for tool_content_read and evidence_rank only. document_parse does not fetch URLs.\n\n"
+    "Always pass all selected file_refs in one populated file_refs array.\n"
+    "Never call document_parse once per file_ref for the same task.\n"
+    "Never issue parallel document_parse calls for the same task.\n"
+    "Never pass ToolContent content_id values such as cnt_* to document_parse.\n"
+    "Never pass URLs to document_parse.\n\n"
     "Supported formats: PDF, DOCX, DOCM, PPTX, PPTM, EPUB, XLSX, XLS, XLSM, and ODS. "
     "Unsupported: HTML, TXT, MD, CSV, JSON, XML, images, audio, and video.\n\n"
-    "When document_parse returns content_id, the full content is split into many chunks; "
-    "the first window may not contain the key evidence. You MUST call evidence_rank with the "
-    "user's question and the content_ids to score all chunks by relevance and find the most "
-    "relevant passages before answering. Do not answer directly from the first truncated window. "
-    "Do not pass file_ref to evidence_rank."
-    "Long parsed documents may be returned as ToolContent windows; if truncated=true, "
-    "continue reading with tool_content_read using content_id and next_offset until "
-    "truncated=false."
+    "When document_parse returns content_id, the parsed document is available as cached "
+    "ToolContent. Use evidence_rank to locate relevant passages, or tool_content_read to "
+    "continue a known window by next_offset.\n"
+    "Do not pass file_ref values to evidence_rank or tool_content_read."
 )
 
 _TOOL_SCHEMA = {
@@ -45,9 +40,7 @@ _TOOL_SCHEMA = {
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
             "description": (
-                "One list of file_ref values to parse. Use only values explicitly labeled file_ref. "
-                "Do not use content_id/cnt_* values. If multiple file_refs are available for the "
-                "same task, put all of them in this same file_refs array and make one document_parse call."
+                "One array of file_ref values. Do not pass content_id/cnt_* values."
             ),
         },
     },

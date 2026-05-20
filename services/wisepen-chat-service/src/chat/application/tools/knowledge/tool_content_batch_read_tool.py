@@ -8,8 +8,10 @@ from chat.domain.interfaces.tool import BaseTool
 TOOL_DESCRIPTION = (
     "Reads multiple cached tool-content chunk windows in one call. "
     "Use this after evidence_rank when multiple ranked chunk evidence items are thematically related "
-    "but located in different chunks. "
-    "Each item must provide content_id and chunk_index, with optional before_chunks and after_chunks. "
+    "but located in different chunks.\n\n"
+    "Always pass all selected ranked chunks in one items array.\n"
+    "Each item MUST provide content_id and chunk_index.\n"
+    "Use before_chunks and after_chunks only to expand context around the target chunk.\n"
     "Do not use this tool for sequential scanning, blind exploration, or as a replacement for evidence_rank."
 )
 
@@ -26,7 +28,7 @@ TOOL_SCHEMA = {
                     "content_id": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "cnt_* content_id returned by evidence_rank.",
+                        "description": "cnt_* ToolContent identifier. Do not pass file_ref values.",
                     },
                     "chunk_index": {
                         "type": "integer",
@@ -72,6 +74,21 @@ class _BatchReadItem:
 
 
 @dataclass(frozen=True, slots=True)
+class _SkippedBatchItem:
+    index: int
+    content_id: str
+    chunk_index: int
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class _TargetChunkStructure:
+    heading_path: Tuple[str, ...] = ()
+    page_number: Optional[int] = None
+    section_type: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class _ValidationResult:
     items: Tuple[_BatchReadItem, ...] = ()
     error: str = ""
@@ -106,8 +123,8 @@ class ToolContentBatchReadTool(BaseTool):
             return "[Tool Error] max_total_chars must be between 1000 and 30000."
 
         blocks: List[str] = []
+        skipped_items: List[_SkippedBatchItem] = []
         total_chars = 0
-        skipped = 0
 
         for index, item in enumerate(validation.items, 1):
             window = tool_content_store.read_chunk_window(
@@ -120,10 +137,31 @@ class ToolContentBatchReadTool(BaseTool):
             if window is None:
                 block = _format_missing_window(index=index, item=item)
             else:
-                block = _format_batch_window(index=index, item=item, window=window)
+                structure = _extract_target_chunk_structure(
+                    session_id=session_id,
+                    content_id=item.content_id,
+                    chunk_index=item.chunk_index,
+                )
+                block = _format_batch_window(
+                    index=index,
+                    item=item,
+                    window=window,
+                    structure=structure,
+                )
 
             if total_chars + len(block) > max_total_chars:
-                skipped = len(validation.items) - index + 1
+                for skipped_index, skipped_item in enumerate(
+                    validation.items[index - 1 :],
+                    start=index,
+                ):
+                    skipped_items.append(
+                        _SkippedBatchItem(
+                            index=skipped_index,
+                            content_id=skipped_item.content_id,
+                            chunk_index=skipped_item.chunk_index,
+                            reason="max_total_chars_exceeded",
+                        )
+                    )
                 break
 
             blocks.append(block)
@@ -133,10 +171,13 @@ class ToolContentBatchReadTool(BaseTool):
             "[Tool Result] Batch Tool Content Windows",
             f"Requested: {len(validation.items)} item(s)",
             f"Returned: {len(blocks)} window(s)",
-            f"Skipped: {skipped} item(s)",
-            "",
+            f"Skipped: {len(skipped_items)} item(s)",
         ]
+        if skipped_items:
+            lines.append("Skip reason: max_total_chars_exceeded")
+        lines.append("")
         lines.extend(blocks)
+        lines.extend(_format_skipped_items(skipped_items))
         return "\n".join(lines).rstrip()
 
 
@@ -233,16 +274,83 @@ def _validate_items(raw_items: Any) -> _ValidationResult:
     return _ValidationResult(items=tuple(validated))
 
 
+def _extract_target_chunk_structure(
+    *,
+    session_id: str,
+    content_id: str,
+    chunk_index: int,
+) -> _TargetChunkStructure:
+    stored = tool_content_store.get(
+        content_id=content_id,
+        session_id=session_id,
+    )
+    if stored is None:
+        return _TargetChunkStructure()
+
+    if chunk_index < 0 or chunk_index >= len(stored.chunks):
+        return _TargetChunkStructure()
+
+    metadata = stored.chunks[chunk_index].metadata
+    if not isinstance(metadata, dict):
+        return _TargetChunkStructure()
+
+    return _TargetChunkStructure(
+        heading_path=_read_heading_path(metadata.get("heading_path")),
+        page_number=_read_page_number(metadata.get("page_number")),
+        section_type=_read_section_type(metadata.get("section_type")),
+    )
+
+
+def _read_heading_path(value: object) -> Tuple[str, ...]:
+    if value is None:
+        return ()
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+
+    headings: List[str] = []
+    for item in value:
+        if type(item) is not str:
+            return ()
+        if item:
+            headings.append(item)
+
+    return tuple(headings)
+
+
+def _read_page_number(value: object) -> Optional[int]:
+    if value is None:
+        return None
+
+    if type(value) is not int:
+        return None
+
+    return value
+
+
+def _read_section_type(value: object) -> str:
+    if value is None:
+        return ""
+
+    if type(value) is not str:
+        return ""
+
+    if not value:
+        return ""
+
+    if value.strip() != value:
+        return ""
+
+    return value
+
+
 def _format_missing_window(*, index: int, item: _BatchReadItem) -> str:
     return "\n".join(
         [
             f"[{index}]",
             f"content_id: {item.content_id}",
             f"chunk_index: {item.chunk_index}",
-            f"before_chunks: {item.before_chunks}",
-            f"after_chunks: {item.after_chunks}",
-            "error: cached tool content not found, expired, or inaccessible",
-            "",
+            "error: cached tool content not found, expired, or inaccessible.",
         ]
     )
 
@@ -252,19 +360,53 @@ def _format_batch_window(
     index: int,
     item: _BatchReadItem,
     window: ContentWindow,
+    structure: _TargetChunkStructure,
 ) -> str:
-    return "\n".join(
+    lines = [
+        f"[{index}]",
+        f"content_id: {item.content_id}",
+        f"chunk_index: {item.chunk_index}",
+        f"before_chunks: {item.before_chunks}",
+        f"after_chunks: {item.after_chunks}",
+    ]
+
+    if structure.heading_path:
+        lines.append("target_heading_path: " + " > ".join(structure.heading_path))
+
+    if structure.page_number is not None:
+        lines.append(f"target_page_number: {structure.page_number}")
+
+    if structure.section_type:
+        lines.append(f"target_section_type: {structure.section_type}")
+
+    lines.extend(
         [
-            f"[{index}]",
-            f"content_id: {item.content_id}",
-            f"chunk_index: {item.chunk_index}",
-            f"before_chunks: {item.before_chunks}",
-            f"after_chunks: {item.after_chunks}",
             f"returned_length: {window.returned_length}",
             f"truncated: {str(window.truncated).lower()}",
-            "",
-            "[Content]",
-            window.text,
-            "",
         ]
     )
+
+    if window.error:
+        lines.append(f"error: {window.error}")
+
+    lines.append("")
+    lines.append("[Content]")
+    lines.append(window.text)
+    return "\n".join(lines)
+
+
+def _format_skipped_items(skipped_items: List[_SkippedBatchItem]) -> List[str]:
+    if not skipped_items:
+        return []
+
+    lines = ["", "Skipped items:"]
+    for item in skipped_items:
+        lines.extend(
+            [
+                f"[{item.index}]",
+                f"content_id: {item.content_id}",
+                f"chunk_index: {item.chunk_index}",
+                f"reason: {item.reason}",
+            ]
+        )
+    return lines

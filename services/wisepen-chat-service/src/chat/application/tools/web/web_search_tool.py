@@ -46,47 +46,35 @@ _TOOL_DESCRIPTION = (
     "Searches the web with concurrent multi-query recall and returns candidate evidence: "
     "titles, URLs, snippets, optional images, background grounding, and candidate pages. "
     "It does not fetch or read page bodies.\n\n"
-    "Query rules: issue at most one web_search call per user request. Put all search variants "
-    "into that single call's queries array. Always pass 2-4 short search-engine-style queries. "
-    "Every call MUST include at least one pure English query. A pure English query is written "
-    "with ASCII English words, numbers, and punctuation only, and preserves key technical "
-    "terms in English. Do not call web_search "
-    "with only one query and do not pass more than four queries. The other queries may use "
-    "the user's language, English, or any language directly useful for the task; do not force "
-    "a specific companion-query language unless it is relevant. queries[0] is primary; queries[1] is "
-    "secondary; queries[2] is extra.\n\n"
-    "Mode rules: choose the most specific mode; do not use normal as the default.\n"
+    "Use web_search when the user needs current or external web recall, source discovery, "
+    "official pages, images, broad comparison, or candidate URLs for later page-body fetches.\n\n"
+    "Always issue at most one web_search call per user request.\n"
+    "Always put all query variants into that single queries array.\n"
+    "Always pass 2-4 short search-engine-style queries.\n"
+    "Every call MUST include at least one pure English query. A pure English query uses only "
+    "ASCII English words, numbers, and punctuation, while preserving key technical terms in English.\n"
+    "Never call web_search with only one query.\n"
+    "Never pass more than four queries.\n"
+    "Other queries may use the user's language, English, or any language directly useful for the task.\n\n"
+    "Mode rules: choose the most specific mode.\n"
+    "Never use normal as the default.\n"
     "- fast: quick facts, definitions, official sites, images/photos, lightweight overviews, "
-    "or questions answerable from snippets/images. NEVER call web_fetch after fast.\n"
+    "or questions answerable from snippets/images.\n"
     "- normal: medium-complexity searches that need a small candidate URL list but do not meet "
     "fast or deep conditions.\n"
     "- deep: technical research, engineering decisions, academic/paper research, community best "
     "practices, official documentation comparison, multi-source verification, recent rules/prices/"
-    "laws/news, medical/legal/financial accuracy, or broad bilingual recall.\n\n"
+    "laws/news, medical/legal/financial accuracy, or broad bilingual recall.\n"
+    "Never call web_fetch after fast mode.\n\n"
     "Return protocol: fast mode returns lightweight visible snippets/images that can be used "
     "directly when sufficient. normal and deep mode return only a ToolContent Receipt for a "
     "cached JSON evidence artifact. The receipt contains content_id and required_next_tool. "
+    "The search snippets and source list are intentionally omitted from the visible tool result "
+    "in normal/deep mode.\n\n"
     "After normal/deep web_search, you MUST call evidence_rank with the user's question and "
-    "that content_id before answering. The search snippets and source list are intentionally "
-    "omitted from the visible tool result in normal/deep mode.\n\n"
-    "Answer language rule: after using this tool, follow the conversation language policy: "
-    "use the user's explicit language request first, otherwise prefer the language of the "
-    "user's current message, and use the user's preferred locale only when the message language "
-    "is ambiguous. Search query language and source language do not by themselves determine "
-    "the final answer language.\n\n"
-    "Result-use rule: synthesize the results into an answer; do not return the raw evidence pack, "
-    "candidate list, snippets, or source list as the final answer. When image results are relevant, "
-    "include image URLs and source page URLs when available.\n\n"
-    "web_fetch rule: web_search candidate pages have NOT been fetched. In normal/deep mode, call "
-    "web_fetch when snippets are insufficient, when page-body evidence is needed, or when the task "
-    "requires primary-source verification, direct quotes, technical details, conflict resolution, "
-    "or high-confidence citations. If web_fetch is needed, call it once with all selected URLs: "
-    "urls=[url1, url2, ...]. Do not call web_fetch once per URL.\n\n"
-    "Evidence ranking rule: evidence_rank reads the complete cached JSON artifact and ranks "
-    "all web search results by relevance. Its web_search_result entries are still search "
-    "snippets, not fetched page bodies. For technical details, direct quotes, conflict "
-    "resolution, or high-confidence evidence, call web_fetch once with the selected top URLs. "
-    "Use source markers like [1], [2] when citing evidence."
+    "the returned content_id before answering.\n\n"
+    "web_search candidate pages have NOT been fetched. If page-body evidence is needed after "
+    "ranking, use web_fetch on the selected URLs."
 )
 
 _TOOL_SCHEMA = {
@@ -98,13 +86,8 @@ _TOOL_SCHEMA = {
             "minItems": 2,
             "maxItems": 4,
             "description": (
-                "Two to four focused search-engine-style queries. "
-                "Every web_search call MUST include at least one pure English query. "
-                "A pure English query is written with ASCII English words, numbers, and punctuation only, "
-                "and preserves key technical terms in English. "
-                "queries[0] is primary; queries[1] is secondary; queries[2] is extra. "
-                "Use the user's language, English, or any relevant locale-specific query variants when useful; "
-                "do not force a specific companion-query language unless it is relevant."
+                "Two to four distinct query variants for the same user intent. "
+                "Include at least one pure English query."
             ),
         },
         "wikipedia_keywords": {
@@ -113,23 +96,14 @@ _TOOL_SCHEMA = {
             "maxItems": 3,
             "description": (
                 "Optional short entity/concept keywords for Wikipedia grounding. "
-                "Use entities, concepts, organizations, products, laws, or technical terms, not full questions. "
-                "Examples: SearXNG, Redis, Reciprocal rank fusion, Digital Markets Act. "
-                "fast mode ignores this field; normal uses at most 1; deep uses at most 3."
+                "Use entities, organizations, products, laws, or technical terms; not full questions."
             ),
         },
         "mode": {
             "type": "string",
             "enum": ["fast", "normal", "deep"],
             "description": (
-                "Search mode; set explicitly and do not use normal as the default. "
-                "Use fast for quick facts, simple lookup, definitions, official sites, images/photos, "
-                "or lightweight overview when snippets/images are enough and web_fetch must not follow. "
-                "Use deep for technical research, engineering decisions, academic/paper research, "
-                "community best practices, official documentation comparison, multi-source verification, "
-                "recent rules/prices/laws/news, medical/legal/financial accuracy, or broad bilingual recall. "
-                "Use normal only for medium-complexity searches that need a small candidate URL list "
-                "but do not meet fast or deep conditions."
+                "Explicit search depth: fast, normal, or deep. Follow the mode rules in the tool description."
             ),
         },
         "with_images": {
@@ -194,14 +168,6 @@ def _is_pure_english_query(query: str) -> bool:
 
 def _has_pure_english_query(queries: List[str]) -> bool:
     return any(_is_pure_english_query(query) for query in queries)
-
-
-def _search_language_hint(locale: str) -> Optional[str]:
-    if locale in {"zh-CN", "zh-TW", "zh-HK"}:
-        return "zh"
-    if locale in {"en-US", "en-GB"}:
-        return "en"
-    return None
 
 
 class WebSearchTool(BaseTool):
@@ -287,8 +253,6 @@ class WebSearchTool(BaseTool):
         language = kwargs.get("language")
         if language is not None and language not in {"en", "zh-CN"}:
             return "[Tool Error] language must be one of: en, zh-CN."
-        if language is None and runtime_context is not None:
-            language = _search_language_hint(runtime_context.locale)
         wikipedia_keywords = kwargs.get("wikipedia_keywords")
         if wikipedia_keywords is not None:
             if not isinstance(wikipedia_keywords, list):
@@ -505,20 +469,13 @@ def _format_response(
         "Result order: reranked order after multi-query/provider fusion and deduplication."
     )
     lines.append(
-        "Assistant instructions: follow the conversation language policy for the final answer. "
-        "Use the user's explicit language request first, otherwise prefer the language of the "
-        "current user message, and use the user's preferred locale only when the message language "
-        "is ambiguous. Do not return this evidence pack, "
-        "titles, URLs, snippets, or candidate list as the user-facing answer. Synthesize a concise "
-        "answer with analysis from the evidence. In fast mode, answer from snippets only and do not "
-        "call web_fetch. In normal/deep mode, snippets are search-engine previews, not page content. "
-        "You SHOULD call web_fetch with the most relevant candidate URLs to get actual page evidence, "
-        "unless the question is trivially answered by snippet text alone."
+        "Tool-use note: fast mode returns snippets/images only. Never call web_fetch after fast mode. "
+        "normal/deep mode returns candidate evidence, not fetched page bodies. "
+        "Use web_fetch on selected URLs only when page-body evidence is needed."
     )
     if response.images or any(result.images for result in response.results):
         lines.append(
-            "Image instruction: image results are available. Include the relevant image URL(s) "
-            "in the final answer. If an image has a source page URL, include that source URL too."
+            "Image note: image URLs and source page URLs are available in this result."
         )
 
     if output_notes:
@@ -547,13 +504,9 @@ def _format_response(
         lines.append("\nCandidate pages for web_fetch:")
         lines.append(
             "These pages have NOT been fetched. Snippets are search-engine previews, not page content. "
-            "In normal/deep mode, you SHOULD call web_fetch with the most relevant candidate URLs "
-            "to get actual page evidence before answering. "
-            "Only skip web_fetch when the question is trivially answered by snippet text alone. "
             f"{_candidate_fetch_requirement(mode)} "
-            "If you decide to call web_fetch, select only the necessary URLs and pass them in one call: "
-            "urls=[url1, url2, ...]. Do not call web_fetch once per URL. "
-            "See Sources below for full details; candidate pages are marked with [C]."
+            "If page-body evidence is needed, select only the necessary URLs and pass them to "
+            "web_fetch in one urls array. Candidate pages are marked with [C]."
         )
         for result_index, _ in candidate_pages:
             lines.append(f"  [C] [{result_index}]")
@@ -564,8 +517,7 @@ def _format_response(
         lines.append("\nSources (reranked order for citations):")
         lines.append(
             "Evidence only. Source markers [1], [2], ... and citation metadata use this reranked order, "
-            "not the original search-provider order. Do not copy this source list to the user; "
-            "use it to synthesize the final answer in the appropriate response language."
+            "not the original search-provider order."
         )
 
     for index, result in enumerate(display_results, 1):

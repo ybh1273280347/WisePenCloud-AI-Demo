@@ -14,8 +14,6 @@ RUNTIME_CONTEXT_KEY = "runtime_context"
 @dataclass(frozen=True, slots=True)
 class RuntimeContext:
     user_id: str
-    timezone: str
-    locale: str
     search_config: RuntimeSearchProviderContext = field(
         default_factory=lambda: RuntimeSearchProviderContext(mode=MODE_DEFAULT)
     )

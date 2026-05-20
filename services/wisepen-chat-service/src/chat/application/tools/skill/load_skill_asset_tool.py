@@ -31,8 +31,9 @@ class LoadSkillAssetTool(BaseTool):
         return (
             "Lazy-load the content of a specific asset (reference, template, example, etc.) "
             "belonging to a skill that has already been loaded via load_skill. "
-            "You must pass a path that appears in the skill's assets manifest; "
-            "do NOT invent paths. Only call when SKILL.md explicitly tells you to consult that asset."
+            "Only call when SKILL.md explicitly tells you to consult that asset.\n"
+            "The path MUST appear in the loaded skill's assets manifest.\n"
+            "Never invent asset paths."
         )
 
     @property
@@ -42,11 +43,11 @@ class LoadSkillAssetTool(BaseTool):
             "properties": {
                 "skill_id": {
                     "type": "string",
-                    "description": "The slug id of the skill; must match an Available Skill.",
+                    "description": "Skill slug id exactly as listed in Available Skills.",
                 },
                 "path": {
                     "type": "string",
-                    "description": "Relative POSIX path of the asset, exactly as listed in the skill's assets manifest (e.g. 'references/citation-styles.md').",
+                    "description": "Relative POSIX asset path exactly as listed in the skill assets manifest.",
                 },
             },
             "required": ["skill_id", "path"],

@@ -16,10 +16,8 @@ _TOOL_DESCRIPTION = (
     "Provides open-source Chinese-English translation assistance using OPUS-MT / MarianMT. "
     "Use this tool for Chinese-English machine-translation baseline, bilingual comparison, "
     "long-text segmentation, and terminology consistency checks.\n\n"
-    "This tool only supports zh <-> en in v1. "
-    "It provides translation support, not necessarily the final translation. "
-    "The assistant should produce the final translation with context, tone, formatting, and glossary constraints. "
-    "If this tool fails or the requested language pair is unsupported, the assistant should translate directly using its own language ability."
+    "This tool only supports zh <-> en in v1.\n"
+    "Use the result as translation assistance, bilingual segmentation, or terminology-check evidence."
 )
 
 _TOOL_SCHEMA = {

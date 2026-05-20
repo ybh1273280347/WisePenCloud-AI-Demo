@@ -11,16 +11,13 @@ from chat.domain.interfaces.tool import BaseTool
 
 _TOOL_DESCRIPTION = (
     "Read attachments uploaded by the user in the current conversation.\n\n"
-    "Rules:\n"
-    "- Input must be attachment_ref values from the current conversation.\n"
-    "- Do not pass file paths, file_ref values, or content_id values.\n"
-    "- Direct readable text files are cached and returned with ToolContent windows.\n"
-    "- Binary documents are not parsed by attachment_read. They are returned as file_ref handoffs for document_parse.\n"
-    "- Images are always OCR-processed first.\n"
-    "- OCR text is only extracted text from the image. It does not replace visual analysis by the model.\n"
-    "- OCR failure does not block the tool result. If image_ref is returned, the model should inspect the image directly when visual analysis is needed.\n"
-    "- Long text and OCR output may return content_id values; use tool_content_read to continue reading.\n"
-    "- Multiple attachments are processed concurrently."
+    "Input MUST be attachment_ref values from the current conversation.\n"
+    "Never pass file paths, file_ref values, or content_id values.\n"
+    "Multiple attachments are processed concurrently.\n\n"
+    "Direct readable text files are cached and returned with ToolContent windows. "
+    "Long text and OCR output may return content_id values for tool_content_read continuation.\n"
+    "Binary documents are returned as file_ref handoffs for document_parse; attachment_read does not parse them.\n"
+    "Images are OCR-processed first. OCR text is extracted text only; image_ref may still be needed for visual inspection."
 )
 
 _TOOL_SCHEMA = {
@@ -32,8 +29,7 @@ _TOOL_SCHEMA = {
             "minItems": 1,
             "maxItems": 10,
             "description": (
-                "Attachment references from the current conversation. "
-                "Do not pass file paths, file_ref values, or content_id values."
+                "attachment_ref values from the current conversation. Do not pass file_ref or content_id values."
             ),
         },
         "purpose": {

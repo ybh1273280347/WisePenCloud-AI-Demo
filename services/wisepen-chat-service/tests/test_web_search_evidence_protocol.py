@@ -749,16 +749,174 @@ def test_tool_content_batch_read_handles_missing_and_window_boundary_limit() -> 
 
     assert "Returned: 2 window(s)" in missing
     assert "error: cached tool content not found" in missing
+    assert "Skipped: 0 item(s)" in missing
+    assert "Skipped items:" not in missing
     assert "Returned: 0 window(s)" in limited
     assert "Skipped: 2 item(s)" in limited
+    assert "Skip reason: max_total_chars_exceeded" in limited
+    assert "Skipped items:" in limited
+    assert f"content_id: {content_id}" in limited
+    assert "content_id: cnt_missing" in limited
+    assert "reason: max_total_chars_exceeded" in limited
     assert "TARGET" not in limited
+
+
+def test_tool_content_batch_read_skips_remaining_items_at_window_boundary() -> None:
+    first_id = tool_content_store.put(
+        session_id="session-batch-boundary",
+        tool_name="document_parse",
+        source="first",
+        text="FIRST_SMALL",
+        metadata={"title": "first"},
+    )
+    second_id = tool_content_store.put(
+        session_id="session-batch-boundary",
+        tool_name="document_parse",
+        source="second",
+        text=("B" * 4000) + "SECOND_TARGET" + ("C" * 4000),
+        metadata={"title": "second"},
+    )
+    third_id = tool_content_store.put(
+        session_id="session-batch-boundary",
+        tool_name="document_parse",
+        source="third",
+        text="THIRD_SMALL",
+        metadata={"title": "third"},
+    )
+    assert first_id is not None
+    assert second_id is not None
+    assert third_id is not None
+
+    tool = ToolContentBatchReadTool()
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-batch-boundary"},
+            items=[
+                {"content_id": first_id, "chunk_index": 0},
+                {"content_id": second_id, "chunk_index": 1},
+                {"content_id": third_id, "chunk_index": 0},
+            ],
+            max_total_chars=1200,
+        )
+    )
+
+    assert "Returned: 1 window(s)" in result
+    assert "Skipped: 2 item(s)" in result
+    assert "FIRST_SMALL" in result
+    assert "SECOND_TARGET" not in result
+    assert "THIRD_SMALL" not in result
+    assert "Skipped items:" in result
+    assert "[2]" in result
+    assert f"content_id: {second_id}" in result
+    assert "[3]" in result
+    assert f"content_id: {third_id}" in result
+
+
+def test_tool_content_batch_read_outputs_target_chunk_structure() -> None:
+    content_id = tool_content_store.put(
+        session_id="session-batch-structure",
+        tool_name="document_parse",
+        source="structured",
+        text=("A" * 4000) + "STRUCTURED_TARGET" + ("B" * 4000),
+        metadata={"title": "structured"},
+    )
+    assert content_id is not None
+    stored = tool_content_store.get(
+        content_id=content_id,
+        session_id="session-batch-structure",
+    )
+    assert stored is not None
+    stored.chunks[1].metadata = {
+        "heading_path": ["3 Fruits", "3.2 Apple Storage"],
+        "page_number": 8,
+        "section_type": "method",
+    }
+
+    result = asyncio.run(
+        ToolContentBatchReadTool().execute(
+            {"session_id": "session-batch-structure"},
+            items=[
+                {
+                    "content_id": content_id,
+                    "chunk_index": 1,
+                    "before_chunks": 1,
+                    "after_chunks": 1,
+                }
+            ],
+        )
+    )
+
+    assert "target_heading_path: 3 Fruits > 3.2 Apple Storage" in result
+    assert "target_page_number: 8" in result
+    assert "target_section_type: method" in result
+    assert result.index("target_heading_path") < result.index("returned_length")
+
+
+def test_tool_content_batch_read_ignores_invalid_or_missing_structure_metadata() -> None:
+    invalid_id = tool_content_store.put(
+        session_id="session-batch-invalid-metadata",
+        tool_name="document_parse",
+        source="invalid",
+        text=("A" * 4000) + "INVALID_TARGET" + ("B" * 4000),
+        metadata={"title": "invalid"},
+    )
+    missing_id = tool_content_store.put(
+        session_id="session-batch-invalid-metadata",
+        tool_name="document_parse",
+        source="missing",
+        text=("C" * 4000) + "MISSING_TARGET" + ("D" * 4000),
+        metadata={"title": "missing"},
+    )
+    assert invalid_id is not None
+    assert missing_id is not None
+    stored = tool_content_store.get(
+        content_id=invalid_id,
+        session_id="session-batch-invalid-metadata",
+    )
+    assert stored is not None
+    stored.chunks[1].metadata = {
+        "heading_path": ["3 Fruits", 123],
+        "page_number": "8",
+        "section_type": " method ",
+    }
+
+    result = asyncio.run(
+        ToolContentBatchReadTool().execute(
+            {"session_id": "session-batch-invalid-metadata"},
+            items=[
+                {
+                    "content_id": invalid_id,
+                    "chunk_index": 1,
+                    "before_chunks": 0,
+                    "after_chunks": 0,
+                },
+                {
+                    "content_id": missing_id,
+                    "chunk_index": 1,
+                    "before_chunks": 0,
+                    "after_chunks": 0,
+                },
+            ],
+            max_total_chars=12000,
+        )
+    )
+
+    assert "[Tool Error]" not in result
+    assert "INVALID_TARGET" in result
+    assert "MISSING_TARGET" in result
+    assert "target_heading_path" not in result
+    assert "target_page_number" not in result
+    assert "target_section_type" not in result
 
 
 def test_tool_content_batch_read_strict_validation() -> None:
     tool = ToolContentBatchReadTool()
     context = {"session_id": "session-batch-validation"}
 
-    assert "items must be a list" in asyncio.run(tool.execute(context, items="x"))
+    invalid = asyncio.run(tool.execute(context, items="x"))
+    assert invalid.startswith("[Tool Error]")
+    assert "items must be a list" in invalid
+    assert "Skipped items:" not in invalid
     assert "items must contain at least one item" in asyncio.run(
         tool.execute(context, items=[])
     )

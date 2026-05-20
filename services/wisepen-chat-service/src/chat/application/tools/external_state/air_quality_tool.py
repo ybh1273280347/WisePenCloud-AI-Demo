@@ -17,7 +17,7 @@ _TOOL_DESCRIPTION = (
     "window opening, sensitive groups, pollen, UV, or whether it is suitable to stay outdoors.\n\n"
     "Forecast dates and times use Beijing time, Asia/Shanghai. "
     "Input can be a location name or latitude/longitude coordinates.\n\n"
-    "This tool provides real external air-quality state. Do not answer air-quality questions from model memory."
+    "Always use this tool for real current air-quality or forecast state."
 )
 
 _TOOL_SCHEMA = {
@@ -29,11 +29,11 @@ _TOOL_SCHEMA = {
         },
         "latitude": {
             "type": "number",
-            "description": "Latitude. Must be used with longitude.",
+            "description": "Latitude coordinate. Use with longitude.",
         },
         "longitude": {
             "type": "number",
-            "description": "Longitude. Must be used with latitude.",
+            "description": "Longitude coordinate. Use with latitude.",
         },
         "forecast_days": {
             "type": "integer",

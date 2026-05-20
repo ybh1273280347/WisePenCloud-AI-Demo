@@ -35,9 +35,8 @@ _TOOL_DESCRIPTION = (
     "Use this tool before recommending new dependencies, upgrading packages, comparing libraries, or assessing "
     "whether a package is suitable for production use.\n\n"
     "Prefer mature, actively maintained, permissively licensed packages with clear documentation and stable "
-    "release history.\n\n"
-    "This tool provides dependency evidence. The assistant should combine it with project constraints such as "
-    "license policy, deployment complexity, runtime cost, language ecosystem, and existing architecture."
+    "release history.\n"
+    "This tool provides dependency evidence only; project-specific constraints still come from the user and codebase."
 )
 
 _TOOL_SCHEMA = {

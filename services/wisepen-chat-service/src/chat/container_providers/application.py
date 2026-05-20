@@ -1,8 +1,6 @@
 from typing import Any
 
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
-from chat.application.user_preferences.repository import UserPreferencesRepository
-from chat.application.user_preferences.service import UserPreferencesService
 from chat.application.web_search.search_provider_config.encryption import (
     SearchProviderCredentialCipher,
 )
@@ -20,14 +18,6 @@ from dependency_injector import providers
 
 
 def register_application_providers(container_cls: Any) -> None:
-    container_cls.user_preferences_repository = providers.Singleton(
-        UserPreferencesRepository,
-    )
-    container_cls.user_preferences_service = providers.Singleton(
-        UserPreferencesService,
-        repository=container_cls.user_preferences_repository,
-    )
-
     container_cls.search_provider_config_repository = providers.Singleton(
         SearchProviderConfigRepository,
     )
@@ -60,5 +50,4 @@ def register_application_providers(container_cls: Any) -> None:
         kafka_producer=container_cls.kafka_producer,
         skill_matcher=container_cls.skill_matcher,
         search_provider_config_service=container_cls.search_provider_config_service,
-        user_preferences_service=container_cls.user_preferences_service,
     )

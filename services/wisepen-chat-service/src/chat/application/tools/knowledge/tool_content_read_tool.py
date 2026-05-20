@@ -10,15 +10,14 @@ from common.logger import log_event
 
 TOOL_DESCRIPTION = (
     "Reads a window of previously cached tool content by content_id. "
-    "Use this after calling evidence_rank, when you need more context around a specific "
-    "ranked passage. evidence_rank scores all chunks by relevance to find the best evidence; "
-    "tool_content_read then lets you read surrounding content for any ranked passage.\n\n"
-    "Call tool_content_read with content_id and offset=next_offset to continue reading "
-    "sequential windows until truncated=false. When evidence_rank returns content_id and "
-    "chunk_index, call tool_content_read with content_id, chunk_index, before_chunks, "
-    "and after_chunks to inspect the ranked passage with surrounding context.\n\n"
-    "content_id values usually look like cnt_* and are not document file_refs. Do not pass "
-    "content_id values to document_parse, and do not pass file_ref values to tool_content_read."
+    "Use this for one known ToolContent window, either by sequential offset or by a ranked chunk_index.\n\n"
+    "Use offset mode with content_id plus offset/limit to continue from next_offset.\n"
+    "Use chunk_index mode with content_id plus chunk_index/before_chunks/after_chunks to inspect "
+    "one ranked passage and its surrounding chunks.\n"
+    "Use either offset mode or chunk_index mode, never both.\n"
+    "Do not use tool_content_read for blind scanning when evidence_rank can rank the cached content.\n\n"
+    "content_id values usually look like cnt_* and are not document file_refs.\n"
+    "Never pass file_ref values to tool_content_read."
 )
 
 TOOL_SCHEMA = {
@@ -28,16 +27,14 @@ TOOL_SCHEMA = {
             "type": "string",
             "minLength": 1,
             "description": (
-                "The non-empty content_id returned in ToolContent Metadata, usually a cnt_* identifier. "
-                "Do not use file_ref values."
+                "cnt_* ToolContent identifier. Do not pass file_ref values."
             ),
         },
         "offset": {
             "type": "integer",
             "minimum": 0,
             "description": (
-                "Character offset to read from. Use next_offset from the previous ToolContent window "
-                "when continuing."
+                "Character offset for offset mode, usually next_offset from a previous window."
             ),
             "default": 0,
         },
@@ -45,15 +42,14 @@ TOOL_SCHEMA = {
             "type": "integer",
             "minimum": 1,
             "description": (
-                "Maximum number of characters to return. Defaults to TOOL_RESULT_MAX_CHARS and is "
-                "capped by TOOL_RESULT_MAX_CHARS."
+                "Maximum characters to return in offset mode."
             ),
         },
         "chunk_index": {
             "type": "integer",
             "minimum": 0,
             "description": (
-                "Chunk index returned by evidence_rank. Use this to read a ranked passage directly."
+                "Chunk index returned by evidence_rank for chunk_index mode."
             ),
         },
         "before_chunks": {

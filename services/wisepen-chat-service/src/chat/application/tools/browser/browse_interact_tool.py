@@ -9,22 +9,18 @@ from chat.domain.interfaces.tool import BaseTool
 TOOL_DESCRIPTION = (
     "Agent-safe browser interaction tool based on snapshot+ref. "
     "Operates a local persistent browser with dedicated automation profile. "
-    "If a fill_ref returns refs_invalidated=true, take a new snapshot before any ref action. "
-    "Refs do not exist until you call snapshot. "
-    "After snapshot, use only exact refs from snapshot output, such as e5. "
-    "Never use role names or labels as ref values, such as searchbox, button, link, textbox, Search, or Sign in. "
-    "Flow: 1) navigate, 2) snapshot, 3) use click_ref/fill_ref/select_ref/check_ref with exact ref ids. "
-    "snapshot_id is optional for ref actions and defaults to the current snapshot. "
-    "Always pass browser_session_id from the previous response. "
-    "Use fill_ref only on refs with flags=fillable. "
-    "Use click_ref for links and buttons. "
-    "After filling a searchbox or combobox, press Enter with key or take a fresh snapshot before clicking suggestions/buttons. "
-    "For finding a specific control on a complex page, prefer snapshot with mode='focused' and a goal such as 'search box' or 'sign in'. "
-    "For login pages, click the sign-in link first if the current page only shows a sign-in link. "
-    "On STALE_REF or SNAPSHOT_REQUIRED, take a new snapshot first. "
-    "On USER_INTERVENTION_REQUIRED, prompt the user to act in the browser window. "
-    "IMPORTANT: When you need to extract content from a page to answer the user's question, always call get_content first before answering. "
-    "Do not try to answer based on just snapshot tree - get_content provides the actual page content and context you need."
+    "Use this for interactive pages that require navigation, clicking, filling, screenshots, or page content extraction.\n\n"
+    "Refs do not exist until you call snapshot.\n"
+    "After snapshot, use only exact refs from snapshot output, such as e5.\n"
+    "Never use role names or labels as ref values, such as searchbox, button, link, textbox, Search, or Sign in.\n"
+    "Always pass browser_session_id from the previous response.\n"
+    "If a fill_ref returns refs_invalidated=true, take a new snapshot before any ref action.\n"
+    "On STALE_REF or SNAPSHOT_REQUIRED, take a new snapshot first.\n"
+    "On USER_INTERVENTION_REQUIRED, ask the user to act in the browser window.\n\n"
+    "Typical flow: navigate, snapshot, then click_ref/fill_ref/select_ref/check_ref with exact ref ids. "
+    "Use fill_ref only on refs with flags=fillable. Use click_ref for links and buttons. "
+    "Use snapshot mode='focused' with a goal when finding a specific control on a complex page.\n\n"
+    "When page text is needed, call get_content. Snapshot trees are for interaction targets, not page-body extraction."
 )
 
 TOOL_SCHEMA = {
@@ -93,8 +89,6 @@ TOOL_SCHEMA = {
                     "pattern": "^e[1-9][0-9]*$",
                     "description": (
                         "Exact ref id from the latest snapshot, e.g. e5. "
-                        "Must match ^e[1-9][0-9]*$. "
-                        "Never use role names or labels as ref, such as searchbox, button, link, textbox, Search, or Sign in. "
                         "Required for click_ref, fill_ref, select_ref, and check_ref."
                     ),
                 },
