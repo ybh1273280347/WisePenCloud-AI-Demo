@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from chat.application.web_search.internal.models.helpers import normalize_optional_str
 
@@ -32,12 +32,14 @@ class SearchResult:
     url: str
     snippet: str
     images: Tuple[ImageResult, ...] = field(default_factory=tuple)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "title", self.title.strip())
         object.__setattr__(self, "url", self.url.strip())
         object.__setattr__(self, "snippet", self.snippet.strip())
         object.__setattr__(self, "images", tuple(self.images))
+        object.__setattr__(self, "metadata", dict(self.metadata))
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +49,7 @@ class SearchResponse:
     query: str
     results: Tuple[SearchResult, ...] = field(default_factory=tuple)
     images: Tuple[ImageResult, ...] = field(default_factory=tuple)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     # searxng / tavily / wikipedia:{lang} / multi:{providers} / empty
     source: Optional[str] = None
@@ -55,6 +58,7 @@ class SearchResponse:
         object.__setattr__(self, "query", self.query.strip())
         object.__setattr__(self, "results", tuple(self.results))
         object.__setattr__(self, "images", tuple(self.images))
+        object.__setattr__(self, "metadata", dict(self.metadata))
         object.__setattr__(self, "source", normalize_optional_str(self.source))
 
     def with_source(self, source: str) -> "SearchResponse":
@@ -62,5 +66,6 @@ class SearchResponse:
             query=self.query,
             results=self.results,
             images=self.images,
+            metadata=self.metadata,
             source=source,
         )

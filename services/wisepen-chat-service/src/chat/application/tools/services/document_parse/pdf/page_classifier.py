@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from chat.application.tools.services.document_parse.pdf.config import (
     PDF_ENABLE_MIXED_PAGE_TYPE,
@@ -16,10 +16,6 @@ _PAGE_TYPE_SCANNED = "scanned"
 _PAGE_TYPE_EMPTY = "empty"
 
 _IMAGE_BLOCK_TYPE = 1
-_LINE_ALIGNMENT_TOLERANCE = 6.0
-_MIN_TABLE_LIKE_LINES = 3
-_MIN_TABLE_LIKE_COLUMNS = 2
-_MIN_VECTOR_SHAPES = 8
 
 
 @dataclass(slots=True)
@@ -37,11 +33,6 @@ class PageProbe:
     text_length: int
     has_images: bool
     image_area_ratio: Optional[float]
-    maybe_vector_table: bool
-    maybe_text_table: bool
-    maybe_scanned_table: bool
-    table_candidate_reason: str = "none"
-    scanned_table_candidate_reason: str = "none"
 
 
 class PageClassifier:
@@ -66,6 +57,32 @@ class PageClassifier:
     def classify_page(self, page) -> str:
         return self.probe_page(page, page_index=-1).page_type
 
+    def fallback_probe_page(self, page, *, page_index: int) -> PageProbe:
+        text = self._fallback_text(page)
+        text_length = len(text)
+        image_probe = self._safe_probe_images(page)
+        page_type = self._determine_page_type(text, image_probe)
+
+        log_debug(
+            "page_probe_fallback",
+            page=page_index + 1 if page_index >= 0 else None,
+            page_type=page_type,
+            text_length=text_length,
+            has_images=image_probe.has_displayed_images,
+            image_area_ratio=round(image_probe.area_ratio, 3)
+            if image_probe.area_ratio is not None
+            else None,
+        )
+
+        return PageProbe(
+            page_index=page_index,
+            page_type=page_type,
+            text=text,
+            text_length=text_length,
+            has_images=image_probe.has_displayed_images,
+            image_area_ratio=image_probe.area_ratio,
+        )
+
     def probe_page(self, page, *, page_index: int) -> PageProbe:
         blocks = self._get_blocks(page)
         text = self._text_from_blocks(blocks)
@@ -78,23 +95,6 @@ class PageClassifier:
             )
 
         page_type = self._determine_page_type(text, image_probe)
-        maybe_text_table, text_reason = self._probe_text_table(blocks, text)
-        maybe_vector_table, vector_reason = self._probe_vector_table(page)
-        maybe_scanned_table = False
-        scanned_reason = (
-            "await_ocr_or_image_gate"
-            if page_type == _PAGE_TYPE_SCANNED
-            else "not_scanned_page"
-        )
-
-        if maybe_vector_table and maybe_text_table:
-            table_reason = f"{vector_reason}+{text_reason}"
-        elif maybe_vector_table:
-            table_reason = vector_reason
-        elif maybe_text_table:
-            table_reason = text_reason
-        else:
-            table_reason = "no_table_signal"
 
         log_debug(
             "page_probe",
@@ -105,9 +105,6 @@ class PageClassifier:
             image_area_ratio=round(image_probe.area_ratio, 3)
             if image_probe.area_ratio is not None
             else None,
-            maybe_vector_table=maybe_vector_table,
-            maybe_text_table=maybe_text_table,
-            maybe_scanned_table=maybe_scanned_table,
         )
 
         return PageProbe(
@@ -117,11 +114,6 @@ class PageClassifier:
             text_length=text_length,
             has_images=image_probe.has_displayed_images,
             image_area_ratio=image_probe.area_ratio,
-            maybe_vector_table=maybe_vector_table,
-            maybe_text_table=maybe_text_table,
-            maybe_scanned_table=maybe_scanned_table,
-            table_candidate_reason=table_reason,
-            scanned_table_candidate_reason=scanned_reason,
         )
 
     def _determine_page_type(self, text: str, image_probe: ImageProbe) -> str:
@@ -178,47 +170,6 @@ class PageClassifier:
             return block[4].strip()
         return ""
 
-    def _probe_text_table(self, blocks: List[Any], text: str) -> Tuple[bool, str]:
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        separator_like_lines = 0
-        for line in lines:
-            if "\t" in line or "|" in line:
-                columns = [
-                    part for part in line.replace("|", "\t").split("\t") if part.strip()
-                ]
-                if len(columns) >= _MIN_TABLE_LIKE_COLUMNS:
-                    separator_like_lines += 1
-                    continue
-            if self._split_by_wide_spaces(line) >= _MIN_TABLE_LIKE_COLUMNS:
-                separator_like_lines += 1
-
-        if separator_like_lines >= _MIN_TABLE_LIKE_LINES:
-            return True, "text_column_separators"
-
-        x_positions: Dict[int, int] = {}
-        for block in blocks:
-            if self._block_type(block) == _IMAGE_BLOCK_TYPE:
-                continue
-            if not isinstance(block, (list, tuple)) or len(block) < 5:
-                continue
-            block_text = self._block_text(block)
-            if not block_text:
-                continue
-            try:
-                x0 = float(block[0])
-            except Exception:
-                continue
-            bucket = int(round(x0 / _LINE_ALIGNMENT_TOLERANCE))
-            x_positions[bucket] = x_positions.get(bucket, 0) + 1
-
-        repeated_columns = sum(
-            1 for count in x_positions.values() if count >= _MIN_TABLE_LIKE_LINES
-        )
-        if repeated_columns >= _MIN_TABLE_LIKE_COLUMNS:
-            return True, "repeated_text_columns"
-
-        return False, "no_text_table_signal"
-
     def _image_probe_from_blocks(self, blocks: List[Any], page) -> ImageProbe:
         page_area = float(page.rect.width * page.rect.height)
         image_area = 0.0
@@ -242,57 +193,6 @@ class PageClassifier:
 
         area_ratio = image_area / page_area if page_area > 0 else 0.0
         return ImageProbe(True, area_ratio, False)
-
-    def _split_by_wide_spaces(self, line: str) -> int:
-        import re
-
-        return len([part for part in re.split(r"\s{2,}", line) if part.strip()])
-
-    def _probe_vector_table(self, page) -> Tuple[bool, str]:
-        try:
-            drawings = page.get_drawings()
-        except Exception:
-            return False, "vector_probe_failed"
-
-        if not drawings:
-            return False, "no_vector_shapes"
-
-        line_like = 0
-        rect_like = 0
-        for drawing in drawings:
-            rect = drawing.get("rect")
-            if rect is not None:
-                width = float(getattr(rect, "width", 0.0))
-                height = float(getattr(rect, "height", 0.0))
-                if width > 8 and height > 8:
-                    rect_like += 1
-                if width > 20 and height <= 2:
-                    line_like += 1
-                elif height > 20 and width <= 2:
-                    line_like += 1
-
-            for item in drawing.get("items", []) or []:
-                if not item:
-                    continue
-                op = item[0]
-                if op == "l" and len(item) >= 3:
-                    p1 = item[1]
-                    p2 = item[2]
-                    dx = abs(
-                        float(getattr(p1, "x", 0.0)) - float(getattr(p2, "x", 0.0))
-                    )
-                    dy = abs(
-                        float(getattr(p1, "y", 0.0)) - float(getattr(p2, "y", 0.0))
-                    )
-                    if (dx > 20 and dy <= 2) or (dy > 20 and dx <= 2):
-                        line_like += 1
-                elif op == "re":
-                    rect_like += 1
-
-        if line_like + rect_like >= _MIN_VECTOR_SHAPES:
-            return True, "vector_grid_lines"
-
-        return False, "insufficient_vector_shapes"
 
     def _probe_images(self, page, *, fallback_has_images: bool = False) -> ImageProbe:
         try:
@@ -336,6 +236,24 @@ class PageClassifier:
 
         log_event("image_area_calc_failed")
         return ImageProbe(True, None, True)
+
+    def _safe_probe_images(self, page) -> ImageProbe:
+        try:
+            return self._probe_images(page)
+        except Exception as e:
+            log_event("image_probe_failed", error=repr(e))
+            return ImageProbe(False, None, True)
+
+    def _fallback_text(self, page) -> str:
+        try:
+            return normalize_text(page.get_text("text", sort=True))
+        except TypeError:
+            try:
+                return normalize_text(page.get_text("text"))
+            except Exception:
+                return ""
+        except Exception:
+            return ""
 
     def _has_large_image_area(self, page) -> bool:
         image_probe = self._probe_images(page)

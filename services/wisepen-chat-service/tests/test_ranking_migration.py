@@ -43,8 +43,11 @@ def test_rank_documents_by_bm25_edges_and_scores() -> None:
     assert [item.id for item in empty_query.ranked] == ["a", "b"]
     assert all(item.score == 0.0 for item in empty_query.ranked)
 
-    single = rank_documents_by_bm25("alpha", [("a", "alpha")])
-    assert single.ranked[0].score == 1.0
+    single = rank_documents_by_bm25("alpha beta", [("a", "alpha")])
+    assert single.ranked[0].score > 0.0
+
+    unrelated_single = rank_documents_by_bm25("python", [("a", "java")])
+    assert unrelated_single.ranked[0].score == 0.0
 
     ranked = rank_documents_by_bm25(
         "python",

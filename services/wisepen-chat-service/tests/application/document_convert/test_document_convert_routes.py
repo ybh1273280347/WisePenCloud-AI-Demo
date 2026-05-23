@@ -1,16 +1,21 @@
 import asyncio
 from pathlib import Path
+from typing import List, Optional
 
 import pytest
 
-from chat.application.document_export import GeneratedDocumentFile
+from chat.application.document_export import ExportOptions, GeneratedDocumentFile
 from chat.application.tools.services.document_convert.errors import (
     DocumentConvertError,
     DocumentExportError,
+    InvalidDocumentRefError,
     DocumentParseError,
     UnreadableDocumentRefError,
 )
-from chat.application.tools.services.document_convert.service import DocumentConvertService
+from chat.application.tools.services.document_convert.service import (
+    DocumentConvertService,
+    normalize_convert_request,
+)
 from chat.application.tools.services.document_file import DocumentTempFileResolver
 from chat.application.tools.services.document_parse.models import DocumentParseResult
 
@@ -33,6 +38,7 @@ def test_md_file_ref_to_docx_uses_text_export(tmp_path: Path) -> None:
         assert service.export_service.export_content_calls == [
             ("# RAG\n\ncontent", "docx", "markdown", "RAG___v1.docx")
         ]
+        assert service.export_service.export_content_options[0].title is None
 
     asyncio.run(run())
 
@@ -109,6 +115,200 @@ def test_pdf_file_ref_to_docx_uses_parse_export(tmp_path: Path) -> None:
         assert service.export_service.export_markdown_calls == [
             ("# parsed", "docx", None)
         ]
+
+    asyncio.run(run())
+
+
+def test_title_is_passed_to_export_options(tmp_path: Path) -> None:
+    async def run() -> None:
+        source = _scoped_file(tmp_path, "user", "session", "input.md", "# source")
+        service = _service(tmp_path)
+
+        await service.convert_document(
+            user_id="user",
+            session_id="session",
+            file_ref=str(source),
+            target_format="pdf",
+            title="Quarterly Report",
+        )
+
+        assert service.export_service.export_content_options[0].title == "Quarterly Report"
+
+    asyncio.run(run())
+
+
+def test_empty_title_is_rejected() -> None:
+    with pytest.raises(DocumentConvertError):
+        normalize_convert_request(
+            file_ref="input.md",
+            file_name=None,
+            target_format="pdf",
+            user_id="user",
+            session_id="session",
+            title="",
+        )
+
+
+def test_reference_docx_file_ref_is_resolved_and_passed_to_export(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        source = _scoped_file(tmp_path, "user", "session", "input.md", "# source")
+        reference = _scoped_binary(
+            tmp_path,
+            "user",
+            "session",
+            "reference.docx",
+            b"docx",
+        )
+        service = _service(tmp_path)
+
+        await service.convert_document(
+            user_id="user",
+            session_id="session",
+            file_ref=str(source),
+            target_format="docx",
+            reference_docx_file_ref=str(reference),
+        )
+
+        assert service.export_service.export_content_options[0].reference_docx == reference.resolve()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("target_format", ["pdf", "html", "markdown", "txt"])
+def test_reference_docx_file_ref_is_rejected_for_non_docx_targets(
+    target_format: str,
+) -> None:
+    with pytest.raises(DocumentConvertError):
+        normalize_convert_request(
+            file_ref="input.md",
+            file_name=None,
+            target_format=target_format,
+            user_id="user",
+            session_id="session",
+            reference_docx_file_ref="reference.docx",
+        )
+
+
+def test_reference_docx_invalid_ref_maps_to_invalid_document_ref(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        source = _scoped_file(tmp_path, "user", "session", "input.md", "# source")
+        outside = tmp_path / "outside.docx"
+        outside.write_bytes(b"docx")
+        service = _service(tmp_path)
+
+        with pytest.raises(InvalidDocumentRefError):
+            await service.convert_document(
+                user_id="user",
+                session_id="session",
+                file_ref=str(source),
+                target_format="docx",
+                reference_docx_file_ref=str(outside),
+            )
+
+    asyncio.run(run())
+
+
+def test_reference_docx_unreadable_ref_maps_to_unreadable_document_ref(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        source = _scoped_file(tmp_path, "user", "session", "input.md", "# source")
+        missing = tmp_path / "user" / "session" / "missing.docx"
+        service = _service(tmp_path)
+
+        with pytest.raises(UnreadableDocumentRefError):
+            await service.convert_document(
+                user_id="user",
+                session_id="session",
+                file_ref=str(source),
+                target_format="docx",
+                reference_docx_file_ref=str(missing),
+            )
+
+    asyncio.run(run())
+
+
+def test_reference_docx_file_ref_must_be_docx(tmp_path: Path) -> None:
+    async def run() -> None:
+        source = _scoped_file(tmp_path, "user", "session", "input.md", "# source")
+        reference = _scoped_file(tmp_path, "user", "session", "reference.txt", "text")
+        service = _service(tmp_path)
+
+        with pytest.raises(DocumentConvertError):
+            await service.convert_document(
+                user_id="user",
+                session_id="session",
+                file_ref=str(source),
+                target_format="docx",
+                reference_docx_file_ref=str(reference),
+            )
+
+    asyncio.run(run())
+
+
+def test_reference_docx_file_ref_directory_is_rejected(tmp_path: Path) -> None:
+    async def run() -> None:
+        source = _scoped_file(tmp_path, "user", "session", "input.md", "# source")
+        directory = tmp_path / "user" / "session" / "reference.docx"
+        directory.mkdir(parents=True)
+        service = _service(tmp_path)
+
+        with pytest.raises(UnreadableDocumentRefError):
+            await service.convert_document(
+                user_id="user",
+                session_id="session",
+                file_ref=str(source),
+                target_format="docx",
+                reference_docx_file_ref=str(directory),
+            )
+
+    asyncio.run(run())
+
+
+def test_route_log_includes_export_intent_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        source = _scoped_file(tmp_path, "user", "session", "input.md", "# source")
+        reference = _scoped_binary(
+            tmp_path,
+            "user",
+            "session",
+            "reference.docx",
+            b"docx",
+        )
+        service = _service(tmp_path)
+        events: List[dict] = []
+
+        def capture_log_event(event_name: str, **kwargs) -> None:
+            if event_name == "document_convert route resolved":
+                events.append(kwargs)
+
+        monkeypatch.setattr(
+            "chat.application.tools.services.document_convert.service.log_event",
+            capture_log_event,
+        )
+
+        await service.convert_document(
+            user_id="user",
+            session_id="session",
+            file_ref=str(source),
+            target_format="docx",
+            title="Report",
+            reference_docx_file_ref=str(reference),
+        )
+
+        assert events
+        assert events[0]["route_kind"] == "text_export"
+        assert events[0]["requires_parse"] is False
+        assert events[0]["export_source_format"] == "markdown"
+        assert events[0]["title_provided"] is True
+        assert events[0]["reference_docx_used"] is True
 
     asyncio.run(run())
 
@@ -205,6 +405,8 @@ class FakeExportService:
     def __init__(self) -> None:
         self.export_content_calls = []
         self.export_markdown_calls = []
+        self.export_content_options = []
+        self.export_markdown_options = []
 
     async def export_content(
         self,
@@ -215,10 +417,12 @@ class FakeExportService:
         target_format: str,
         source_format: str,
         file_name=None,
+        options: Optional[ExportOptions] = None,
     ) -> GeneratedDocumentFile:
         self.export_content_calls.append(
             (content, target_format, source_format, file_name)
         )
+        self.export_content_options.append(options)
         return _generated(
             user_id=user_id,
             session_id=session_id,
@@ -233,8 +437,10 @@ class FakeExportService:
         markdown: str,
         target_format: str,
         file_name=None,
+        options: Optional[ExportOptions] = None,
     ) -> GeneratedDocumentFile:
         self.export_markdown_calls.append((markdown, target_format, file_name))
+        self.export_markdown_options.append(options)
         return _generated(
             user_id=user_id,
             session_id=session_id,

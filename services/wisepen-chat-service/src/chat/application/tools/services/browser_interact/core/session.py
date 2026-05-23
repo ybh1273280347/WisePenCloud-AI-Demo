@@ -48,6 +48,9 @@ class BrowserSessionManager:
     def page(self) -> Optional[Page]:
         return self._page
 
+    def set_current_page(self, page: Page) -> None:
+        self._page = page
+
     @property
     def has_session(self) -> bool:
         return self._session_id is not None

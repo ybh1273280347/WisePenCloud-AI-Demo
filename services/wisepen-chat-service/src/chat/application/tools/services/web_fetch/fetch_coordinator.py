@@ -11,25 +11,22 @@ from chat.application.tools.common.security.network import (
     validate_public_http_url,
 )
 from chat.application.tools.services.web_fetch.base import BaseFetcher
-from chat.application.tools.services.web_fetch.content_processor import ContentProcessor
 from chat.application.tools.services.web_fetch.errors import UnsupportedMediaError
-from chat.application.tools.services.web_fetch.models import FetchedDocument
+from chat.application.tools.services.web_fetch.models import (
+    FetchedDocument,
+    FetchedLink,
+    FetchedPage,
+)
 from common.logger import log_event, log_fail, log_ok
 
 _BATCH_CONCURRENCY = 5
 _MAX_FAILURE_REASONS_IN_ERROR = 5
 
 
-class FetchContentKind(str, Enum):
-    RAW = "raw"
-    MARKDOWN = "markdown"
-
-
 class FetchFailureReason(str, Enum):
     EXCEPTION = "exception"
     EMPTY_CONTENT = "empty_content"
     SHORT_CONTENT = "short_content"
-    PROCESSING_FAILED = "processing_failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +35,9 @@ class FetchResultItem:
     success: bool
     content: Optional[str] = None
     document: Optional[FetchedDocument] = None
+    links: Optional[List[FetchedLink]] = None
+    final_url: Optional[str] = None
+    status_code: Optional[int] = None
     error: Optional[str] = None
     fetcher: Optional[str] = None
 
@@ -45,7 +45,6 @@ class FetchResultItem:
 @dataclass(frozen=True, slots=True)
 class FetchChainStep:
     fetcher: BaseFetcher
-    content_kind: FetchContentKind
     min_content_length: int
     skip_document_url: bool = False
 
@@ -76,17 +75,15 @@ class FetchCoordinator:
     def __init__(
         self,
         fetchers: List[BaseFetcher],
-        processor: ContentProcessor,
         min_content_length: int,
         last_resort_min_length: int,
         cache_ttl_seconds: int,
         cache_max_items: int,
     ):
-        self._cache: TTLCache[str, str] = TTLCache(
+        self._cache: TTLCache[str, str | FetchedPage] = TTLCache(
             maxsize=cache_max_items,
             ttl=cache_ttl_seconds,
         )
-        self._processor = processor
         self._chain = _build_chain(
             fetchers=fetchers,
             min_content_length=min_content_length,
@@ -120,6 +117,17 @@ class FetchCoordinator:
 
         cached = self._get_cached(url)
         if cached is not None:
+            if isinstance(cached, FetchedPage):
+                return FetchResultItem(
+                    url=url,
+                    success=True,
+                    content=cached.markdown,
+                    links=cached.links,
+                    final_url=cached.final_url or None,
+                    status_code=cached.status_code,
+                    fetcher="cache",
+                )
+
             return FetchResultItem(
                 url=url,
                 success=True,
@@ -192,50 +200,55 @@ class FetchCoordinator:
                     fetcher=step.fetcher_name,
                 )
 
-            if step.content_kind == FetchContentKind.MARKDOWN:
-                result = content.strip()
+            page_links: Optional[List[FetchedLink]] = None
+            final_url: Optional[str] = None
+            status_code: Optional[int] = None
+            if isinstance(content, FetchedPage):
+                page_links = content.links
+                final_url = content.final_url or None
+                status_code = content.status_code
+                content = content.markdown
 
-                if len(result) < step.min_content_length:
-                    failure = FetchAttemptFailure(
-                        fetcher_name=step.fetcher_name,
-                        reason=FetchFailureReason.SHORT_CONTENT,
-                        message=f"内容过短({len(result)}字符，阈值{step.min_content_length})",
-                        length=len(result),
-                        threshold=step.min_content_length,
-                    )
-                    failures.append(failure)
-                    log_fail(
-                        "web_fetch fetcher",
-                        f"降级: {failure.reason.value}",
-                        url=url,
-                        fetcher=step.fetcher_name,
-                        length=failure.length,
-                        threshold=failure.threshold,
-                    )
-                    continue
+            result = content.strip()
+
+            if len(result) < step.min_content_length:
+                failure = FetchAttemptFailure(
+                    fetcher_name=step.fetcher_name,
+                    reason=FetchFailureReason.SHORT_CONTENT,
+                    message=f"内容过短({len(result)}字符，阈值{step.min_content_length})",
+                    length=len(result),
+                    threshold=step.min_content_length,
+                )
+                failures.append(failure)
+                log_fail(
+                    "web_fetch fetcher",
+                    f"降级: {failure.reason.value}",
+                    url=url,
+                    fetcher=step.fetcher_name,
+                    length=failure.length,
+                    threshold=failure.threshold,
+                )
+                continue
+
+            if page_links is not None or final_url is not None or status_code is not None:
+                self._set_cached(
+                    url,
+                    FetchedPage(
+                        markdown=result,
+                        links=page_links or [],
+                        final_url=final_url or "",
+                        status_code=status_code,
+                    ),
+                )
             else:
-                result = await asyncio.to_thread(self._processor.process, content)
-
-                if result is None:
-                    failure = FetchAttemptFailure(
-                        fetcher_name=step.fetcher_name,
-                        reason=FetchFailureReason.PROCESSING_FAILED,
-                        message="内容处理失败",
-                    )
-                    failures.append(failure)
-                    log_fail(
-                        "web_fetch fetcher",
-                        f"降级: {failure.reason.value}",
-                        url=url,
-                        fetcher=step.fetcher_name,
-                    )
-                    continue
-
-            self._set_cached(url, result)
+                self._set_cached(url, result)
             return FetchResultItem(
                 url=url,
                 success=True,
                 content=result,
+                links=page_links,
+                final_url=final_url,
+                status_code=status_code,
                 fetcher=step.fetcher_name,
             )
 
@@ -246,13 +259,13 @@ class FetchCoordinator:
             fetcher=None,
         )
 
-    def _get_cached(self, url: str) -> Optional[str]:
+    def _get_cached(self, url: str) -> Optional[str | FetchedPage]:
         self._cache.expire()
         return self._cache.get(url)
 
-    def _set_cached(self, url: str, markdown: str) -> None:
+    def _set_cached(self, url: str, page: str | FetchedPage) -> None:
         self._cache.expire()
-        self._cache[url] = markdown
+        self._cache[url] = page
 
     async def fetch_many(self, urls: List[str]) -> List[FetchResultItem]:
         """并发获取多个 URL，并保持输入顺序。"""
@@ -353,22 +366,15 @@ def _build_chain(
     last_index = len(fetchers) - 1
 
     for index, fetcher in enumerate(fetchers):
-        content_kind = (
-            FetchContentKind.RAW
-            if fetcher.name == "static"
-            else FetchContentKind.MARKDOWN
-        )
-
         chain.append(
             FetchChainStep(
                 fetcher=fetcher,
-                content_kind=content_kind,
                 min_content_length=(
                     last_resort_min_length
                     if index == last_index
                     else min_content_length
                 ),
-                skip_document_url=content_kind == FetchContentKind.MARKDOWN,
+                skip_document_url=fetcher.name != "static",
             )
         )
 

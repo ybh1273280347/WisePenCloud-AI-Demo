@@ -78,7 +78,7 @@ def format_evidence_result(result: EvidenceRankResult) -> str:
     if has_web_search_result:
         lines.append(
             "These ranked items are search-result snippets, not fetched page bodies. "
-            "For technical details, direct quotes, conflict resolution, or high-confidence evidence, "
+            "For technical details, direct quotes, conflict resolution, or source verification, "
             "call web_fetch with the selected URLs in one batch."
         )
     if has_chunk_evidence:

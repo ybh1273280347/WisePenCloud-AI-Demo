@@ -321,6 +321,34 @@ def test_rank_evidence_ranks_web_search_artifact_results() -> None:
                         "domain": "alpha.example",
                         "snippet": "Receipt protocol overflow evidence.",
                     },
+                    {
+                        "source_id": "5",
+                        "title": "Gamma unrelated",
+                        "url": "https://gamma.example/docs",
+                        "domain": "gamma.example",
+                        "snippet": "Different content.",
+                    },
+                    {
+                        "source_id": "6",
+                        "title": "Delta unrelated",
+                        "url": "https://delta.example/docs",
+                        "domain": "delta.example",
+                        "snippet": "Different content.",
+                    },
+                    {
+                        "source_id": "7",
+                        "title": "Epsilon unrelated",
+                        "url": "https://epsilon.example/docs",
+                        "domain": "epsilon.example",
+                        "snippet": "Different content.",
+                    },
+                    {
+                        "source_id": "8",
+                        "title": "Zeta unrelated",
+                        "url": "https://zeta.example/docs",
+                        "domain": "zeta.example",
+                        "snippet": "Different content.",
+                    },
                 ],
             }
         ),
@@ -336,7 +364,7 @@ def test_rank_evidence_ranks_web_search_artifact_results() -> None:
     )
     formatted = format_evidence_result(result)
 
-    assert result.total_chunks_scanned == 4
+    assert result.total_chunks_scanned == 8
     assert result.evidence
     assert all(ev.evidence_type == "web_search_result" for ev in result.evidence)
     assert result.evidence[0].source_id in {"1", "3", "4"}
@@ -530,10 +558,25 @@ def test_rank_evidence_fielded_bm25_title_weight_beats_body_repetition() -> None
     )
     assert title_content_id is not None
     assert body_content_id is not None
+    distractor_ids = [
+        tool_content_store.put(
+            session_id="session-rank-fielded-title",
+            tool_name="document_parse",
+            source=f"distractor-{index}.md",
+            text=f"无关正文 {index}",
+            metadata={"title": f"无关标题 {index}"},
+        )
+        for index in range(3)
+    ]
+    assert all(content_id is not None for content_id in distractor_ids)
 
     result = rank_evidence(
         query="苹果",
-        content_ids=[title_content_id, body_content_id],
+        content_ids=[
+            title_content_id,
+            body_content_id,
+            *(content_id for content_id in distractor_ids if content_id is not None),
+        ],
         session_id="session-rank-fielded-title",
         max_evidence=2,
     )
@@ -548,21 +591,36 @@ def test_rank_evidence_fielded_bm25_keeps_original_order_on_equal_scores() -> No
         tool_name="document_parse",
         source="first.md",
         text="第一段内容",
-        metadata={"title": "相同"},
+        metadata={"title": "stabletoken"},
     )
     second_id = tool_content_store.put(
         session_id="session-rank-stable",
         tool_name="document_parse",
         source="second.md",
         text="第二段内容",
-        metadata={"title": "相同"},
+        metadata={"title": "stabletoken"},
     )
     assert first_id is not None
     assert second_id is not None
+    distractor_ids = [
+        tool_content_store.put(
+            session_id="session-rank-stable",
+            tool_name="document_parse",
+            source=f"stable-distractor-{index}.md",
+            text=f"unrelated {index}",
+            metadata={"title": f"unrelated {index}"},
+        )
+        for index in range(3)
+    ]
+    assert all(content_id is not None for content_id in distractor_ids)
 
     result = rank_evidence(
-        query="zzzz-no-match",
-        content_ids=[first_id, second_id],
+        query="stabletoken",
+        content_ids=[
+            first_id,
+            second_id,
+            *(content_id for content_id in distractor_ids if content_id is not None),
+        ],
         session_id="session-rank-stable",
         max_evidence=2,
     )

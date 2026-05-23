@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
@@ -45,9 +45,14 @@ def rank_documents_by_bm25(
         )
 
     if len(documents) < 2:
+        doc_id, text = documents[0]
         return Bm25RankResult(
-            ranked=tuple(
-                RankedDocument(id=doc_id, score=1.0, rank=0) for doc_id in doc_ids
+            ranked=(
+                RankedDocument(
+                    id=doc_id,
+                    score=_score_single_document(text, tokenized_query),
+                    rank=0,
+                ),
             )
         )
 
@@ -104,13 +109,34 @@ def _score_documents(
 
     scores = bm25.get_scores(tokenized_query)
     ordered = sorted(
-        zip(doc_ids, scores),
-        key=lambda item: item[1],
-        reverse=True,
+        enumerate(zip(doc_ids, scores)),
+        key=lambda item: (-item[1][1], item[0]),
     )
     return tuple(
         RankedDocument(id=doc_id, score=float(score), rank=rank)
-        for rank, (doc_id, score) in enumerate(ordered)
+        for rank, (_, (doc_id, score)) in enumerate(ordered)
+    )
+
+
+def _score_single_document(text: str, tokenized_query: List[str]) -> float:
+    tokenized_document = tokenize_for_bm25(text)
+    if not tokenized_document:
+        return 0.0
+
+    query_terms = set(tokenized_query)
+    document_terms = set(tokenized_document)
+    overlap_terms = query_terms.intersection(document_terms)
+    if not overlap_terms:
+        return 0.0
+
+    query_frequencies = Counter(tokenized_query)
+    document_frequencies = Counter(tokenized_document)
+    overlap_frequency = sum(
+        min(query_frequencies[term], document_frequencies[term])
+        for term in overlap_terms
+    )
+    return float(
+        (2 * overlap_frequency) / (len(tokenized_query) + len(tokenized_document))
     )
 
 

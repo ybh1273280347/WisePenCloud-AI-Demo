@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Optional
 
 import trafilatura
@@ -11,16 +12,19 @@ from chat.application.tools.services.web_fetch.utils.text import normalize_text
 from common.logger import log_event, log_fail
 
 _HTML_DETECTION_SCAN_CHARS = 1024
+_HTML_FRAGMENT_TAG_RE = re.compile(
+    r"</?(html|head|body|main|article|section|div|p|h[1-6]|ul|ol|li|table|tr|td|a)\b",
+    re.IGNORECASE,
+)
 
 for _LOGGER_NAME in ("courlan", "htmldate", "trafilatura"):
     logging.getLogger(_LOGGER_NAME).setLevel(logging.ERROR)
 
 
 def _looks_like_html(text: str) -> bool:
-    lower_head = text[:_HTML_DETECTION_SCAN_CHARS].lower()
-    return (
-        "<html" in lower_head or "<!doctype html" in lower_head or "<body" in lower_head
-    )
+    head = text[:_HTML_DETECTION_SCAN_CHARS]
+    lower_head = head.lower()
+    return "<!doctype html" in lower_head or bool(_HTML_FRAGMENT_TAG_RE.search(head))
 
 
 def _extract_markdown_from_html(
@@ -123,9 +127,6 @@ class ContentProcessor:
         self._min_content_length = min_content_length
 
     def process(self, content: str) -> Optional[str]:
-        return self._process_text(content)
-
-    def _process_text(self, content: str) -> Optional[str]:
         stripped = content.strip()
         if not stripped:
             return None

@@ -43,9 +43,8 @@ def test_pdf_parser_accepts_public_ocr_adapter() -> None:
         classifier=object(),
         text_extractor=object(),
         page_renderer=object(),
-        table_extractor=object(),
         ocr_adapter=adapter,
-        scanned_table_extractor=object(),
+        marker_extractor=object(),
     )
 
     assert parser.ocr_adapter is adapter

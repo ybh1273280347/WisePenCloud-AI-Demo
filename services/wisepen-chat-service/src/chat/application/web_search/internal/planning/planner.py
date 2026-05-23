@@ -8,23 +8,10 @@ from chat.application.web_search.internal.planning.models import (
     SearchPlan,
     WikipediaKeyword,
 )
-from common.logger import log_event
 
 _CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 _CJK_RATIO_THRESHOLD = 0.3
-
-_BANNED_QUESTION_TERMS = (
-    "为什么",
-    "怎么",
-    "如何",
-    "怎么办",
-    "区别是什么",
-    "怎么配置",
-)
-
-_MAX_ENGLISH_WORDS = 6
-_MAX_COMPACT_LENGTH = 40
 
 _EN_PROFILE_ENGINES: Tuple[str, ...] = ("aol",)
 _ZH_PROFILE_ENGINES: Tuple[str, ...] = ("bing",)
@@ -89,28 +76,6 @@ def detect_query_language(query: str) -> str:
     return "zh" if ratio > _CJK_RATIO_THRESHOLD else "en"
 
 
-def validate_wikipedia_keyword(keyword: str) -> bool:
-    keyword = " ".join(keyword.strip().split())
-
-    if not keyword:
-        return False
-
-    if "?" in keyword or "？" in keyword:
-        return False
-
-    if len(keyword.split()) > _MAX_ENGLISH_WORDS:
-        return False
-
-    compact = "".join(keyword.split())
-    if len(compact) > _MAX_COMPACT_LENGTH:
-        return False
-
-    if any(term in keyword for term in _BANNED_QUESTION_TERMS):
-        return False
-
-    return True
-
-
 _VALID_MODES = frozenset(QUERY_VARIANT_MAX_RESULTS.keys())
 
 
@@ -164,32 +129,30 @@ def build_search_plan(
             )
         )
 
-    validated_keywords: List[WikipediaKeyword] = []
+    selected_keywords: List[WikipediaKeyword] = []
     raw_keywords = wikipedia_keywords or []
     grounding_budget = GROUNDING_BUDGET[mode]
     max_kw = grounding_budget["max_keywords"]
 
     for raw_kw in raw_keywords:
-        if not validate_wikipedia_keyword(raw_kw):
-            log_event(
-                "Wikipedia keyword 验证失败，已丢弃",
-                keyword=raw_kw,
-            )
+        keyword = raw_kw.strip()
+
+        if not keyword:
             continue
 
-        kw_language = detect_query_language(raw_kw)
-        validated_keywords.append(
+        kw_language = detect_query_language(keyword)
+        selected_keywords.append(
             WikipediaKeyword(
-                text=raw_kw,
+                text=keyword,
                 language=kw_language,
             )
         )
 
-        if len(validated_keywords) >= max_kw:
+        if len(selected_keywords) >= max_kw:
             break
 
     return SearchPlan(
         mode=mode,
         query_variants=tuple(variants),
-        wikipedia_keywords=tuple(validated_keywords),
+        wikipedia_keywords=tuple(selected_keywords),
     )

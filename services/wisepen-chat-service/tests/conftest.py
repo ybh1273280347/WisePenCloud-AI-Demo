@@ -34,7 +34,15 @@ _TEST_SETTINGS = SimpleNamespace(
     QDRANT_HOST="localhost",
     QDRANT_PORT=6333,
     QDRANT_PASSWORD="test",
+    FOURGET_ENABLED=True,
+    FOURGET_BASE_URL="http://fourget:80",
+    FOURGET_WEB_SCRAPER="ddg",
+    FOURGET_TIMEOUT=8.0,
+    FOURGET_MAX_CONCURRENCY=5,
+    FOURGET_MAX_RETRIES=1,
+    FOURGET_RETRY_BACKOFF_SECONDS=0.4,
     SERPER_ENABLED=False,
+    SEARXNG_ENABLED=False,
     SEARXNG_BASE_URL="http://localhost:8080",
     SERPER_API_KEY=None,
     SERPER_BASE_URL="https://google.serper.dev",
@@ -113,6 +121,9 @@ class _FetchResultItem:
     success: bool
     content: str = ""
     document: object = None
+    links: object = None
+    final_url: str = ""
+    status_code: int | None = None
     error: str = ""
 
 

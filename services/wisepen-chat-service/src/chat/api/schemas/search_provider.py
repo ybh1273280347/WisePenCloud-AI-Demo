@@ -1,6 +1,13 @@
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 
 from chat.application.web_search.search_provider_config import (
     MODES,
@@ -40,7 +47,7 @@ class SetCustomSearchProviderRequest(BaseModel):
 
     provider: StrictStr = Field(
         ...,
-        description="搜索服务商：serper/tavily/brave/serpapi/exa/perplexity",
+        description="搜索服务商：serper/tavily/brave/serpapi/exa/perplexity/anysearch",
     )
     api_key: StrictStr = Field(..., description="用户提供的 API Key")
 
@@ -56,8 +63,12 @@ class SetCustomSearchProviderRequest(BaseModel):
     @field_validator("api_key")
     @classmethod
     def validate_api_key(cls, value: str) -> str:
-        if not value:
-            raise ValueError("api_key is required")
         if value != value.strip():
             raise ValueError("api_key must not contain leading or trailing whitespace")
         return value
+
+    @model_validator(mode="after")
+    def validate_provider_api_key(self) -> "SetCustomSearchProviderRequest":
+        if self.provider != "anysearch" and not self.api_key:
+            raise ValueError("api_key is required")
+        return self

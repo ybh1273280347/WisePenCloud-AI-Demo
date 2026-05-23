@@ -67,6 +67,7 @@ class ExtractedLink:
     url: str
     anchor_text: str
     surrounding_text: str
+    source: str = "markdown"
 
 
 @dataclass(frozen=True, slots=True)

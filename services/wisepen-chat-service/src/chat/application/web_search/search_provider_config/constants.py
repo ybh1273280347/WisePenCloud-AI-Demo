@@ -12,6 +12,7 @@ PROVIDER_BRAVE = "brave"
 PROVIDER_SERPAPI = "serpapi"
 PROVIDER_EXA = "exa"
 PROVIDER_PERPLEXITY = "perplexity"
+PROVIDER_ANYSEARCH = "anysearch"
 PROVIDERS: FrozenSet[str] = frozenset(
     {
         PROVIDER_SERPER,
@@ -20,6 +21,7 @@ PROVIDERS: FrozenSet[str] = frozenset(
         PROVIDER_SERPAPI,
         PROVIDER_EXA,
         PROVIDER_PERPLEXITY,
+        PROVIDER_ANYSEARCH,
     }
 )
 

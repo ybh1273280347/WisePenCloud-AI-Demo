@@ -20,6 +20,7 @@ from chat.application.tools.services.web_crawl.frontier import CrawlFrontier
 from chat.application.tools.services.web_crawl.link_extractor import (
     extract_markdown_links,
     extract_markdown_title,
+    merge_extracted_links,
 )
 from chat.application.tools.services.web_crawl.models import (
     CrawlItemKind,
@@ -29,7 +30,7 @@ from chat.application.tools.services.web_crawl.models import (
 from chat.application.tools.services.web_crawl.politeness import PerHostPoliteness
 from chat.application.tools.services.web_crawl.robots import RobotsDecision
 from chat.application.tools.services.web_fetch.fetch_coordinator import FetchResultItem
-from chat.application.tools.services.web_fetch.models import FetchedDocument
+from chat.application.tools.services.web_fetch.models import FetchedDocument, FetchedLink
 from chat.application.tools.services.web_crawl import service as service_module
 
 
@@ -45,6 +46,30 @@ def test_markdown_link_extraction() -> None:
     assert links[1].anchor_text == ""
     assert links[1].url == "https://example.com/raw"
     assert "Authentication API" in links[0].surrounding_text
+
+
+def test_link_discovery_merges_dom_markdown_and_html_links() -> None:
+    links = merge_extracted_links(
+        markdown=(
+            "# Docs\n"
+            "[Markdown API](/api/markdown)\n"
+            '<a href="/api/html"><span>HTML API</span></a>'
+        ),
+        base_url="https://docs.example.com/start",
+        fetched_links=[
+            FetchedLink(
+                url="https://docs.example.com/api/dom",
+                anchor_text="DOM API",
+                surrounding_text="DOM API reference",
+            )
+        ],
+    )
+
+    urls = [link.url for link in links]
+    assert "https://docs.example.com/api/dom" in urls
+    assert "/api/markdown" in urls
+    assert "https://docs.example.com/api/html" in urls
+    assert next(link for link in links if link.url.endswith("/api/dom")).source == "dom"
 
 
 def test_canonicalize_url_supports_base_url() -> None:
@@ -83,9 +108,15 @@ async def test_crawl_fetches_relevant_links_and_skips_blocked_path() -> None:
             seed: FetchResultItem(
                 url=seed,
                 success=True,
+                links=[
+                    FetchedLink(
+                        url=auth,
+                        anchor_text="Authentication API",
+                        surrounding_text="Authentication API reference",
+                    )
+                ],
                 content=(
                     "# Docs\n"
-                    "[Authentication API](/api/auth)\n"
                     "[Pricing](/pricing)\n"
                     "[Login](/login)\n"
                     "https://external.example.org/auth-reference"
@@ -116,6 +147,42 @@ async def test_crawl_fetches_relevant_links_and_skips_blocked_path() -> None:
     assert auth in urls
     assert any(item.skip_reason == CrawlSkipReason.BLOCKED_PATH.value for item in skipped)
     assert result.fetched_pages >= 2
+
+
+@pytest.mark.asyncio
+async def test_crawl_fetches_dom_only_discovered_links() -> None:
+    seed = "https://docs.example.com/"
+    dom_link = "https://docs.example.com/api/dom-only"
+    coordinator = FakeFetchCoordinator(
+        {
+            seed: FetchResultItem(
+                url=seed,
+                success=True,
+                content="# Docs\nNo markdown links here.",
+                links=[
+                    FetchedLink(
+                        url=dom_link,
+                        anchor_text="DOM Only API",
+                        surrounding_text="DOM Only API details",
+                    )
+                ],
+            ),
+            dom_link: FetchResultItem(url=dom_link, success=True, content="# DOM Only\nAPI details."),
+        }
+    )
+
+    result = await _service(coordinator).crawl(
+        CrawlRequest(
+            user_id="u1",
+            session_id="s1",
+            seed_urls=[seed],
+            objective="dom only api details",
+            max_depth=1,
+            max_pages=3,
+        )
+    )
+
+    assert dom_link in [item.url for item in result.items]
 
 
 @pytest.mark.asyncio
@@ -377,6 +444,7 @@ class FakeHandoffResult:
 
 async def _run_async_tests() -> None:
     await test_crawl_fetches_relevant_links_and_skips_blocked_path()
+    await test_crawl_fetches_dom_only_discovered_links()
     await test_max_depth_controls_second_layer_fetching()
     await test_document_result_outputs_file_ref_only()
     await test_robots_and_rate_limit_failures_do_not_block_other_hosts()
@@ -397,6 +465,7 @@ def patch_runtime_dependencies():
 def main() -> None:
     _patch_runtime_dependencies()
     test_markdown_link_extraction()
+    test_link_discovery_merges_dom_markdown_and_html_links()
     test_canonicalize_url_supports_base_url()
     test_frontier_external_budgets()
     asyncio.run(_run_async_tests())

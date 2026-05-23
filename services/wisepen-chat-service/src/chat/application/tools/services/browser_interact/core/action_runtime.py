@@ -16,7 +16,7 @@ from .protocol import (
     make_session_error,
 )
 from .session import BrowserSessionError, BrowserSessionManager
-from .snapshot import ref_selector
+from .snapshot import parse_ref
 
 
 def session_state(
@@ -66,9 +66,8 @@ async def selector_or_error_response(
     page: Page,
     ref: str,
 ) -> Tuple[Optional[str], Optional[str]]:
-    try:
-        return ref_selector(ref), None
-    except ValueError:
+    parsed = parse_ref(ref)
+    if parsed is None:
         return None, await action_error_response(
             session_manager,
             page,
@@ -77,6 +76,7 @@ async def selector_or_error_response(
                 f"Do NOT use role names like 'searchbox', 'button', 'link', 'textbox' or labels like 'Search'."
             ),
         )
+    return parsed, None
 
 
 async def get_or_create_page_or_error(

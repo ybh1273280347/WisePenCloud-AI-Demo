@@ -1,20 +1,17 @@
 from chat.application.tools.services.document_parse.document_parse_service import DocumentParseService
 from chat.application.tools.services.document_parse.epub.parser import EpubParser
 from chat.application.tools.services.document_parse.office.fallback_parser import OfficeFallbackParser
-from chat.application.tools.services.document_parse.office.native_parser import OfficeNativeParser
 from chat.application.tools.services.document_parse.office.parser import OfficeParser
 from chat.application.tools.services.document_parse.office.primary_parser import OfficePrimaryParser
+from chat.application.tools.services.document_parse.pdf.marker_extractor import (
+    MarkerPdfExtractor,
+)
 from chat.application.tools.services.document_parse.pdf.page_classifier import PageClassifier
 from chat.application.tools.services.document_parse.pdf.page_renderer import PageRenderer
 from chat.application.tools.services.document_parse.pdf.parser import PdfParser
-from chat.application.tools.services.document_parse.pdf.scanned_table_extractor import (
-    ScannedTableExtractor,
-)
-from chat.application.tools.services.document_parse.pdf.table_extractor import TableExtractor
 from chat.application.tools.services.document_parse.pdf.text_extractor import TextExtractor
 from chat.application.tools.services.document_parse.spreadsheet.parser import SpreadsheetParser
 from chat.application.tools.common.ocr import OcrImageAdapter, OcrProcessor
-from chat.application.tools.common.ocr.config import OCR_LANGUAGE
 from common.logger import log_event
 
 
@@ -28,21 +25,18 @@ def build_document_parse_service(
 
     office_fallback_parser = OfficeFallbackParser()
     office_primary_parser = OfficePrimaryParser()
-    office_native_parser = OfficeNativeParser()
 
     pdf_parser = PdfParser(
         classifier=PageClassifier(),
         text_extractor=TextExtractor(),
         page_renderer=PageRenderer(),
-        table_extractor=TableExtractor(),
+        marker_extractor=MarkerPdfExtractor(),
         ocr_adapter=OcrImageAdapter(local_ocr_processor=local_ocr_processor),
-        scanned_table_extractor=ScannedTableExtractor(lang=OCR_LANGUAGE),
     )
 
     office_parser = OfficeParser(
         primary_parser=office_primary_parser,
         fallback_parser=office_fallback_parser,
-        native_parser=office_native_parser,
     )
 
     epub_parser = EpubParser()
@@ -54,7 +48,6 @@ def build_document_parse_service(
         office_parser=type(office_parser).__name__,
         office_primary_parser=type(office_primary_parser).__name__,
         office_fallback_parser=type(office_fallback_parser).__name__,
-        office_native_parser=type(office_native_parser).__name__,
         epub_parser=type(epub_parser).__name__,
         spreadsheet_parser=type(spreadsheet_parser).__name__,
     )

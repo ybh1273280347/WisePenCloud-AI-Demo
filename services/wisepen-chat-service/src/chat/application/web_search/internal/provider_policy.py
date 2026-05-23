@@ -11,9 +11,6 @@ from chat.application.web_search.internal.planning.models import (
 )
 from chat.application.web_search.provider_policy import CustomProviderCredential
 
-_MIN_USEFUL_RESULTS = 3
-
-
 @dataclass(frozen=True, slots=True)
 class ProviderCapabilities:
     supports_web: bool = True
@@ -21,6 +18,7 @@ class ProviderCapabilities:
 
 
 _PROVIDER_CAPABILITIES = {
+    "fourget": ProviderCapabilities(supports_web=True, supports_images=False),
     "searxng": ProviderCapabilities(supports_web=True, supports_images=True),
     "serper": ProviderCapabilities(supports_web=True, supports_images=True),
     "custom:serper": ProviderCapabilities(supports_web=True, supports_images=True),
@@ -29,6 +27,7 @@ _PROVIDER_CAPABILITIES = {
     "custom:tavily": ProviderCapabilities(supports_web=True, supports_images=False),
     "custom:exa": ProviderCapabilities(supports_web=True, supports_images=False),
     "custom:perplexity": ProviderCapabilities(supports_web=True, supports_images=False),
+    "custom:anysearch": ProviderCapabilities(supports_web=True, supports_images=False),
 }
 
 
@@ -72,8 +71,9 @@ def select_default_provider_calls(
     *,
     mode: str,
     variants: Tuple[QueryVariant, ...],
-    searxng_responses: Sequence[VariantSearchResponse],
+    primary_responses: Sequence[VariantSearchResponse],
     serper_enabled: bool,
+    primary_provider: str = "fourget",
 ) -> Tuple[ProviderCall, ...]:
     if not serper_enabled:
         return ()
@@ -82,7 +82,12 @@ def select_default_provider_calls(
     if primary is None:
         return ()
 
-    useful = total_useful_results(searxng_responses)
+    useful = total_useful_results(primary_responses)
+
+    if primary_provider == "fourget":
+        if mode in {"fast", "normal", "deep"} and useful == 0:
+            return (ProviderCall("serper", primary, primary.max_results),)
+        return ()
 
     if mode == "fast":
         if useful == 0:
@@ -90,7 +95,7 @@ def select_default_provider_calls(
         return ()
 
     if mode == "normal":
-        if useful < _MIN_USEFUL_RESULTS:
+        if useful < 3:
             return (ProviderCall("serper", primary, primary.max_results),)
         return ()
 

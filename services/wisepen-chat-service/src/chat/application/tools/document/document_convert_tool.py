@@ -1,6 +1,5 @@
 from typing import Any, Dict, Optional
 
-from chat.application.document_export import DocumentExportError
 from chat.application.tools.document.formatting import format_generated_document_result
 from chat.application.tools.services.document_convert import DocumentConvertService
 from chat.application.tools.services.document_convert.errors import DocumentConvertError
@@ -32,6 +31,14 @@ _TOOL_SCHEMA = {
         "file_name": {
             "type": "string",
             "description": "Optional output file name. Name only; not a path.",
+        },
+        "title": {
+            "type": "string",
+            "description": "Optional non-empty document title for generated outputs.",
+        },
+        "reference_docx_file_ref": {
+            "type": "string",
+            "description": "Optional server-side temporary .docx file_ref used as a DOCX style reference. Only valid when target_format is docx.",
         },
     },
     "required": ["file_ref", "target_format"],
@@ -69,6 +76,8 @@ class DocumentConvertTool(BaseTool):
 
         target_format: str = kwargs["target_format"]
         file_name: Optional[str] = kwargs.get("file_name")
+        title: Optional[str] = kwargs.get("title")
+        reference_docx_file_ref: Optional[str] = kwargs.get("reference_docx_file_ref")
 
         try:
             generated = await self.convert_service.convert_document(
@@ -77,6 +86,8 @@ class DocumentConvertTool(BaseTool):
                 file_ref=file_ref,
                 target_format=target_format,
                 file_name=file_name,
+                title=title,
+                reference_docx_file_ref=reference_docx_file_ref,
             )
 
             log_ok(
@@ -93,8 +104,6 @@ class DocumentConvertTool(BaseTool):
                 generated=generated,
             )
 
-        except DocumentExportError as exc:
-            return f"[Tool Error] Export failed: {exc}"
         except DocumentConvertError as exc:
             return f"[Tool Error] {exc}"
         except Exception as exc:

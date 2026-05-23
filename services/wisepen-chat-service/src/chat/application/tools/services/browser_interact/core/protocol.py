@@ -58,6 +58,7 @@ class SnapshotPayload:
     refs_valid_for: str = "current_dom_only"
     mode: str = "full"
     goal: Optional[str] = None
+    refs: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

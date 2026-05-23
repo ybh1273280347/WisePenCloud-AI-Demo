@@ -18,6 +18,7 @@ const MIN_CONTENT_TEXT_LENGTH = 200;
 const TEXT_STABILITY_INTERVAL_MS = 500;
 const TEXT_STABILITY_STABLE_ROUNDS = 3;
 const TEXT_STABILITY_TIMEOUT_MS = 8000;
+const MAX_DISCOVERED_LINKS = 400;
 
 const BLOCKED_RESOURCE_TYPES = new Set([
   'image',
@@ -120,6 +121,149 @@ function envProxyConfig() {
   return proxy;
 }
 
+class BrowserRuntime {
+  constructor() {
+    this.browser = null;
+    this.launchPromise = null;
+    this.launchCount = 0;
+  }
+
+  async getBrowser() {
+    if (this.browser && this.browser.isConnected()) {
+      return this.browser;
+    }
+
+    if (!this.launchPromise) {
+      this.launchPromise = this._launchBrowser();
+    }
+
+    try {
+      return await this.launchPromise;
+    } finally {
+      this.launchPromise = null;
+    }
+  }
+
+  async newContext(options) {
+    const browser = await this.getBrowser();
+
+    try {
+      return await browser.newContext(options);
+    } catch (error) {
+      if (this._isBrowserDisconnected(error)) {
+        process.stderr.write('Browser disconnected while creating context, restarting\n');
+        const browser = await this.restart();
+        return browser.newContext(options);
+      }
+
+      throw error;
+    }
+  }
+
+  async restart() {
+    await this.close();
+    return this.getBrowser();
+  }
+
+  async close() {
+    const browser = this.browser;
+    this.browser = null;
+
+    if (browser) {
+      await browser.close().catch(() => { });
+    }
+  }
+
+  async _launchBrowser() {
+    const launchOptions = {
+      headless: true,
+      args: BROWSER_ARGS,
+    };
+
+    const proxy = envProxyConfig();
+    if (proxy) {
+      launchOptions.proxy = proxy;
+    }
+
+    const browser = await chromium.launch(launchOptions);
+    this.browser = browser;
+    this.launchCount += 1;
+
+    browser.on('disconnected', () => {
+      if (this.browser === browser) {
+        this.browser = null;
+      }
+      process.stderr.write('Browser disconnected\n');
+    });
+
+    process.stderr.write(`Browser launched, count: ${this.launchCount}\n`);
+    return browser;
+  }
+
+  _isBrowserDisconnected(error) {
+    const message = error && error.message ? error.message : String(error);
+    return /browser.*(closed|disconnected)|target.*closed/i.test(message);
+  }
+}
+
+async function setupContext(context) {
+  await context.route('**/*', route => {
+    const resourceType = route.request().resourceType();
+
+    if (BLOCKED_RESOURCE_TYPES.has(resourceType)) {
+      return route.abort();
+    }
+
+    return route.continue();
+  });
+
+  await context.addInitScript(() => {
+    try {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+        configurable: true,
+      });
+    } catch (_) {
+      // best-effort
+    }
+
+    try {
+      const permissions = window.navigator.permissions;
+      const originalQuery = permissions?.query;
+
+      if (originalQuery) {
+        permissions.query = function query(parameters) {
+          return parameters?.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : originalQuery.call(this, parameters);
+        };
+      }
+    } catch (_) {
+      // best-effort
+    }
+
+    try {
+      if (!window.chrome) {
+        window.chrome = {
+          runtime: {},
+          loadTimes() { },
+          csi() { },
+          app: {},
+        };
+      }
+    } catch (_) {
+      // best-effort
+    }
+
+    try {
+      delete window.__pwInitScripts;
+      delete window.__playwright__binding__;
+    } catch (_) {
+      // best-effort
+    }
+  });
+}
+
 async function autoScroll(page) {
   let previousHeight = 0;
   let stableCount = 0;
@@ -170,6 +314,49 @@ async function autoScroll(page) {
   }
 
   await sleep(POST_SCROLL_IDLE_MS);
+}
+
+async function extractLinkCandidates(page) {
+  return page.evaluate((maxLinks) => {
+    const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+    const candidates = [];
+    const seen = new Set();
+    const elements = Array.from(document.querySelectorAll('a[href], area[href]'));
+
+    for (const element of elements) {
+      if (candidates.length >= maxLinks) break;
+
+      const rawHref = element.getAttribute('href');
+      if (!rawHref || !rawHref.trim()) continue;
+
+      let absoluteUrl = '';
+      try {
+        absoluteUrl = new URL(rawHref, document.baseURI || window.location.href).href;
+      } catch (_) {
+        continue;
+      }
+
+      if (seen.has(absoluteUrl)) continue;
+      seen.add(absoluteUrl);
+
+      const anchorText = normalize(element.innerText || element.textContent || element.getAttribute('aria-label') || '');
+      const contextElement =
+        element.closest('p,li,article,section,main,nav,header,footer,td,th,div') ||
+        element.parentElement;
+      const surroundingText = normalize(contextElement?.innerText || contextElement?.textContent || '').slice(0, 500);
+
+      candidates.push({
+        url: absoluteUrl,
+        anchorText,
+        surroundingText,
+      });
+    }
+
+    return candidates;
+  }, MAX_DISCOVERED_LINKS).catch(error => {
+    process.stderr.write(`Link extraction failed: ${error.message}\n`);
+    return [];
+  });
 }
 
 async function waitForTextStability(page) {
@@ -330,26 +517,19 @@ function chooseBestPageData(candidates) {
 // ---------------------------------------------------------------------------
 // 主抓取逻辑
 // ---------------------------------------------------------------------------
-async function fetchUrl(url) {
+async function fetchPage(url, options = {}) {
   process.stderr.write(`Fetching: ${url}\n`);
 
-  let browser;
+  let ownedRuntime;
+  const runtime = options.runtime || new BrowserRuntime();
   let context;
 
+  if (!options.runtime) {
+    ownedRuntime = runtime;
+  }
+
   try {
-    const launchOptions = {
-      headless: true,
-      args: BROWSER_ARGS,
-    };
-
-    const proxy = envProxyConfig();
-    if (proxy) {
-      launchOptions.proxy = proxy;
-    }
-
-    browser = await chromium.launch(launchOptions);
-
-    context = await browser.newContext({
+    context = await runtime.newContext({
       locale: 'zh-CN',
       timezoneId: 'Asia/Shanghai',
       viewport: {
@@ -358,61 +538,7 @@ async function fetchUrl(url) {
       },
     });
 
-    await context.route('**/*', route => {
-      const resourceType = route.request().resourceType();
-
-      if (BLOCKED_RESOURCE_TYPES.has(resourceType)) {
-        return route.abort();
-      }
-
-      return route.continue();
-    });
-
-    await context.addInitScript(() => {
-      try {
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined,
-          configurable: true,
-        });
-      } catch (_) {
-        // best-effort
-      }
-
-      try {
-        const permissions = window.navigator.permissions;
-        const originalQuery = permissions?.query;
-
-        if (originalQuery) {
-          permissions.query = function query(parameters) {
-            return parameters?.name === 'notifications'
-              ? Promise.resolve({ state: Notification.permission })
-              : originalQuery.call(this, parameters);
-          };
-        }
-      } catch (_) {
-        // best-effort
-      }
-
-      try {
-        if (!window.chrome) {
-          window.chrome = {
-            runtime: {},
-            loadTimes() { },
-            csi() { },
-            app: {},
-          };
-        }
-      } catch (_) {
-        // best-effort
-      }
-
-      try {
-        delete window.__pwInitScripts;
-        delete window.__playwright__binding__;
-      } catch (_) {
-        // best-effort
-      }
-    });
+    await setupContext(context);
 
     const page = await context.newPage();
 
@@ -444,6 +570,7 @@ async function fetchUrl(url) {
     await autoScroll(page);
     await waitForTextStability(page);
 
+    const links = await extractLinkCandidates(page);
     const selectorPageData = await extractPageData(page);
     const readabilityPageData = await extractReadabilityData(page);
 
@@ -478,7 +605,12 @@ async function fetchUrl(url) {
 
     process.stderr.write(`markdownLength: ${markdown.length}\n`);
 
-    return markdown;
+    return {
+      markdown,
+      links,
+      finalUrl,
+      statusCode,
+    };
   } catch (error) {
     process.stderr.write(`Error: ${error.message}\n`);
 
@@ -506,12 +638,19 @@ async function fetchUrl(url) {
       await context.close().catch(() => { });
     }
 
-    if (browser) {
-      await browser.close().catch(() => { });
+    if (ownedRuntime) {
+      await ownedRuntime.close();
     }
   }
 }
 
+async function fetchUrl(url, options = {}) {
+  const result = await fetchPage(url, options);
+  return result.markdown;
+}
+
 module.exports = {
+  BrowserRuntime,
+  fetchPage,
   fetchUrl,
 };

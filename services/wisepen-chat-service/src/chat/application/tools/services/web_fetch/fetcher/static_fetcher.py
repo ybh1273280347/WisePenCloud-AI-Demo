@@ -4,8 +4,12 @@ from urllib.parse import urljoin
 
 import httpx
 from chat.application.tools.common.content_detection import ContentDetector
-from chat.application.tools.common.security.network import UrlSecurityError, validate_public_http_url
+from chat.application.tools.common.security.network import (
+    UrlSecurityError,
+    validate_public_http_url,
+)
 from chat.application.tools.services.web_fetch.base import BaseFetcher
+from chat.application.tools.services.web_fetch.content_processor import ContentProcessor
 from chat.application.tools.services.web_fetch.errors import UnsupportedMediaError
 from chat.application.tools.services.web_fetch.fetcher.content_detection_adapter import (
     build_web_fetch_detection_hints,
@@ -73,11 +77,13 @@ class StaticFetcher(BaseFetcher):
         max_retries: int = 3,
         max_response_bytes: int = 50 * 1024 * 1024,
         content_detector: Optional[ContentDetector] = None,
+        processor: Optional[ContentProcessor] = None,
     ):
         self._timeout = timeout
         self._max_retries = max_retries
         self._max_response_bytes = max_response_bytes
         self._content_detector = content_detector or ContentDetector()
+        self._processor = processor or ContentProcessor()
         self._headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -157,12 +163,21 @@ class StaticFetcher(BaseFetcher):
                     if content is None:
                         return None
 
-                    return await build_web_fetch_result(
+                    result = await build_web_fetch_result(
                         url=current_url,
                         content=content,
                         hints=hints,
                         detector=self._content_detector,
                     )
+                    if isinstance(result, FetchedDocument):
+                        return result
+
+                    processed = await asyncio.to_thread(self._processor.process, result)
+                    if not processed:
+                        _log_static_fetch_fail("内容处理失败", url=current_url)
+                        return None
+
+                    return processed
 
         except UrlSecurityError:
             raise

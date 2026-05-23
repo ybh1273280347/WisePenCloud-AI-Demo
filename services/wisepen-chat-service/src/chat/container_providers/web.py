@@ -49,6 +49,7 @@ def register_web_providers(container_cls: Any) -> None:
         timeout=WEB_FETCH_STATIC_TIMEOUT,
         max_response_bytes=WEB_FETCH_MAX_DOCUMENT_SIZE,
         content_detector=container_cls.content_detector,
+        processor=container_cls.content_processor,
     )
     container_cls.steel_fetcher_config = providers.Singleton(
         SteelFetcherConfig,
@@ -63,6 +64,7 @@ def register_web_providers(container_cls: Any) -> None:
         SteelFetcher,
         config=container_cls.steel_fetcher_config,
         concurrency=STEEL_CONCURRENCY,
+        processor=container_cls.content_processor,
     )
     container_cls.local_script_fetcher = providers.Singleton(
         LocalScriptFetcher,
@@ -79,7 +81,6 @@ def register_web_providers(container_cls: Any) -> None:
             container_cls.steel_fetcher,
             container_cls.local_script_fetcher,
         ),
-        processor=container_cls.content_processor,
         min_content_length=WEB_FETCH_MIN_CONTENT_LENGTH,
         last_resort_min_length=WEB_FETCH_LAST_RESORT_MIN_LENGTH,
         cache_ttl_seconds=WEB_FETCH_CACHE_TTL_SECONDS,

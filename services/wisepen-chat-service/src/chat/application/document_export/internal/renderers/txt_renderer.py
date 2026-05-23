@@ -1,29 +1,24 @@
 import asyncio
-import re
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, field
+from typing import List, Optional, Sequence
+
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
 from ...models import ExportRequest
 from .base import DocumentRenderer
-
-_HEADING_PATTERN = re.compile(r"(?m)^\s{0,3}#{1,6}\s+")
-_FENCE_PATTERN = re.compile(r"(?m)^(`{3,}|~{3,})")
-_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\([^)]+\)")
-_UNORDERED_LIST_PATTERN = re.compile(r"(?m)^\s*[-*+]\s+")
-_ORDERED_LIST_PATTERN = re.compile(r"(?m)^\s*\d+\.\s+")
-_STAR_EMPHASIS_PATTERN = re.compile(r"(?m)(\*{1,3})(.+?)\1")
-_INLINE_CODE_PATTERN = re.compile(r"`([^`]+)`")
-_STRIKETHROUGH_PATTERN = re.compile(r"~~(.+?)~~")
-
-
-def _make_placeholder(index: int) -> str:
-    return f"\x00CODEBLOCK{index}\x00"
 
 
 @dataclass(frozen=True, slots=True)
 class TxtRenderer(DocumentRenderer):
     target_format: str = "txt"
+    md: MarkdownIt = field(init=False)
+
+    def __post_init__(self) -> None:
+        md = MarkdownIt("commonmark", {"html": False, "linkify": True})
+        md.enable("table")
+        md.enable("strikethrough")
+        object.__setattr__(self, "md", md)
 
     async def render(self, request: ExportRequest) -> None:
         text = self._markdown_to_text(request.markdown)
@@ -35,55 +30,111 @@ class TxtRenderer(DocumentRenderer):
         )
 
     def _markdown_to_text(self, markdown: str) -> str:
-        code_blocks: List[str] = []
-        text = self._extract_code_blocks(markdown, code_blocks)
-        text = self._strip_markdown_syntax(text)
-        text = self._restore_code_blocks(text, code_blocks)
-        return text.strip() + "\n"
+        tokens = self.md.parse(markdown)
+        lines = self._tokens_to_lines(tokens)
+        text = "\n".join(self._compact_lines(lines)).strip()
+        return text + "\n" if text else "\n"
 
-    def _extract_code_blocks(self, markdown: str, code_blocks: List[str]) -> str:
-        lines = markdown.split("\n")
-        result: List[str] = []
-        in_fence = False
-        fence_char = ""
+    def _tokens_to_lines(self, tokens: Sequence[Token]) -> List[str]:
+        lines: List[str] = []
+        in_table = False
+        table_rows: List[List[str]] = []
+        current_row: Optional[List[str]] = None
+        current_cell_parts: Optional[List[str]] = None
+        pending_list_prefix: Optional[str] = None
 
+        for token in tokens:
+            if token.type == "table_open":
+                in_table = True
+                table_rows = []
+                continue
+
+            if token.type == "table_close":
+                for row in table_rows:
+                    if row:
+                        lines.append(" | ".join(row))
+                lines.append("")
+                in_table = False
+                continue
+
+            if token.type == "tr_open":
+                current_row = []
+                continue
+
+            if token.type == "tr_close":
+                if current_row is not None:
+                    table_rows.append(current_row)
+                current_row = None
+                continue
+
+            if token.type in ("th_open", "td_open"):
+                current_cell_parts = []
+                continue
+
+            if token.type in ("th_close", "td_close"):
+                if current_row is not None and current_cell_parts is not None:
+                    current_row.append(self._normalize_inline_text(current_cell_parts))
+                current_cell_parts = None
+                continue
+
+            if token.type in ("fence", "code_block"):
+                lines.extend(token.content.rstrip("\n").split("\n"))
+                lines.append("")
+                continue
+
+            if token.type == "list_item_open":
+                pending_list_prefix = "- "
+                continue
+
+            if token.type in ("bullet_list_close", "ordered_list_close", "blockquote_close"):
+                lines.append("")
+                continue
+
+            if token.type == "inline":
+                text = self._inline_tokens_to_text(token.children or [])
+                if in_table and current_cell_parts is not None:
+                    current_cell_parts.append(text)
+                    continue
+                if text.strip():
+                    if pending_list_prefix is not None:
+                        lines.append(pending_list_prefix + text.strip())
+                        pending_list_prefix = None
+                    else:
+                        lines.extend(text.split("\n"))
+                continue
+
+            if token.type in ("paragraph_close", "heading_close"):
+                lines.append("")
+
+        return lines
+
+    def _inline_tokens_to_text(self, tokens: Sequence[Token]) -> str:
+        parts: List[str] = []
+        for token in tokens:
+            if token.type in ("text", "code_inline"):
+                parts.append(token.content)
+            elif token.type in ("softbreak", "hardbreak"):
+                parts.append("\n")
+            elif token.type == "image":
+                image_text = self._inline_tokens_to_text(token.children or [])
+                parts.append(image_text or token.content)
+            elif token.children:
+                parts.append(self._inline_tokens_to_text(token.children))
+        return "".join(parts)
+
+    def _normalize_inline_text(self, parts: Sequence[str]) -> str:
+        return " ".join("".join(parts).split())
+
+    def _compact_lines(self, lines: Sequence[str]) -> List[str]:
+        compacted: List[str] = []
+        previous_blank = True
         for line in lines:
-            if not in_fence:
-                m = _FENCE_PATTERN.match(line)
-                if m:
-                    in_fence = True
-                    fence_char = m.group(1)[0]
-                    code_blocks.append("")
-                    continue
-                result.append(line)
-            else:
-                if (
-                    line.strip().startswith(fence_char * 3)
-                    and line.strip().strip(fence_char) == ""
-                ):
-                    in_fence = False
-                    fence_char = ""
-                    placeholder = _make_placeholder(len(code_blocks) - 1)
-                    result.append(placeholder)
-                    continue
-                idx = len(code_blocks) - 1
-                code_blocks[idx] = code_blocks[idx] + line + "\n"
-
-        return "\n".join(result)
-
-    def _strip_markdown_syntax(self, text: str) -> str:
-        text = _HEADING_PATTERN.sub("", text)
-        text = _IMAGE_PATTERN.sub(r"\1", text)
-        text = _LINK_PATTERN.sub(r"\1", text)
-        text = _UNORDERED_LIST_PATTERN.sub("", text)
-        text = _ORDERED_LIST_PATTERN.sub("", text)
-        text = _INLINE_CODE_PATTERN.sub(r"\1", text)
-        text = _STAR_EMPHASIS_PATTERN.sub(r"\2", text)
-        text = _STRIKETHROUGH_PATTERN.sub(r"\1", text)
-        return text
-
-    def _restore_code_blocks(self, text: str, code_blocks: List[str]) -> str:
-        for i, block in enumerate(code_blocks):
-            placeholder = _make_placeholder(i)
-            text = text.replace(placeholder, block.rstrip())
-        return text
+            cleaned = line.rstrip()
+            is_blank = cleaned == ""
+            if is_blank and previous_blank:
+                continue
+            compacted.append(cleaned)
+            previous_blank = is_blank
+        while compacted and compacted[-1] == "":
+            compacted.pop()
+        return compacted

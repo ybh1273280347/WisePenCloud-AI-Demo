@@ -2,6 +2,7 @@ from typing import Dict, Optional
 
 from chat.application.tools.services.web_fetch.content_processor import ContentProcessor
 from common.logger import log_fail, log_ok
+from playwright.async_api import ElementHandle
 
 from ..action_runtime import (
     action_error_response,
@@ -70,9 +71,39 @@ async def _should_invalidate_after_fill(target) -> bool:
     )
 
 
-async def _resolve_fill_target(target):
+async def _resolve_ref_element_or_error(
+    session_manager: BrowserSessionManager,
+    snapshot_manager: SnapshotManager,
+    page,
+    ref: str,
+    resolved_snapshot_id: Optional[str],
+) -> tuple[Optional[ElementHandle], Optional[str]]:
     try:
-        if await target.is_editable(timeout=500):
+        target = await snapshot_manager.resolve_element(page, ref)
+    except ValueError:
+        return None, await action_error_response(
+            session_manager,
+            page,
+            make_schema_error(
+                f"Invalid ref '{ref}'. Ref must be an exact id from the latest snapshot, such as 'e1', 'e2', 'e123'. "
+                f"Do NOT use role names like 'searchbox', 'button', 'link', 'textbox' or labels like 'Search'."
+            ),
+        )
+
+    if target is None:
+        page_state = await get_page_state(page)
+        return None, build_error_response(
+            session_state=session_state(session_manager),
+            page_state=page_state,
+            error=make_ref_not_found_error(ref, resolved_snapshot_id),
+        )
+
+    return target, None
+
+
+async def _resolve_fill_target(target: ElementHandle):
+    try:
+        if await target.is_editable():
             return target
     except Exception:
         return None
@@ -80,10 +111,7 @@ async def _resolve_fill_target(target):
     return None
 
 
-async def _resolve_select_target(target):
-    if await target.count() == 0:
-        return None
-
+async def _resolve_select_target(target: ElementHandle):
     try:
         data = await target.evaluate(
             """el => ({
@@ -99,17 +127,18 @@ async def _resolve_select_target(target):
     return None
 
 
-async def _resolve_check_target(target):
-    if await target.count() == 0:
-        return None
-
+async def _resolve_check_target(target: ElementHandle):
     try:
         data = await target.evaluate(
             """el => ({
                 tag: el.tagName.toLowerCase(),
                 type: (el.getAttribute('type') || '').toLowerCase(),
                 role: (el.getAttribute('role') || '').toLowerCase(),
-                disabled: Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true'
+                disabled: Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true',
+                hasLabelControl: Boolean(
+                    (el.tagName.toUpperCase() === 'LABEL' ? el : el.closest && el.closest('label'))?.control
+                ),
+                hasNestedCheckInput: Boolean(el.querySelector && el.querySelector('input[type="checkbox"], input[type="radio"]'))
             })"""
         )
 
@@ -121,10 +150,67 @@ async def _resolve_check_target(target):
 
         if data["role"] in ("checkbox", "radio"):
             return target
+
+        if data["hasLabelControl"] or data["hasNestedCheckInput"]:
+            return target
     except Exception:
         return None
 
     return None
+
+
+async def _is_checked(target: ElementHandle) -> bool:
+    try:
+        return bool(
+            await target.evaluate(
+                """el => {
+                    const tag = el.tagName && el.tagName.toUpperCase();
+                    if (tag === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
+                        return el.checked;
+                    }
+                    const role = el.getAttribute && (el.getAttribute('role') || '').toLowerCase();
+                    const ariaCheckedRoles = ['checkbox','radio','switch','menuitemcheckbox','menuitemradio','option','treeitem'];
+                    if (role && ariaCheckedRoles.includes(role)) {
+                        return el.getAttribute('aria-checked') === 'true';
+                    }
+                    const label = tag === 'LABEL' ? el : (el.closest && el.closest('label'));
+                    if (label && label.tagName && label.tagName.toUpperCase() === 'LABEL' && label.control) {
+                        const control = label.control;
+                        if (control.type === 'checkbox' || control.type === 'radio') {
+                            return control.checked;
+                        }
+                    }
+                    const input = el.querySelector && el.querySelector('input[type="checkbox"], input[type="radio"]');
+                    if (input) return input.checked;
+                    return false;
+                }"""
+            )
+        )
+    except Exception:
+        return False
+
+
+async def _js_click_check_target(target: ElementHandle) -> None:
+    await target.evaluate(
+        """el => {
+            const tag = el.tagName && el.tagName.toUpperCase();
+            if (tag === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
+                el.click();
+                return;
+            }
+            const label = tag === 'LABEL' ? el : (el.closest && el.closest('label'));
+            if (label && label.tagName && label.tagName.toUpperCase() === 'LABEL' && label.control) {
+                label.control.click();
+                return;
+            }
+            const input = el.querySelector && el.querySelector('input[type="checkbox"], input[type="radio"]');
+            if (input) {
+                input.click();
+                return;
+            }
+            el.click();
+        }"""
+    )
 
 
 async def handle_click_ref(
@@ -156,7 +242,7 @@ async def handle_click_ref(
     if snap_error:
         return await action_error_response(session_manager, page, snap_error)
 
-    selector, selector_error_response = await selector_or_error_response(
+    parsed_ref, selector_error_response = await selector_or_error_response(
         session_manager,
         page,
         ref,
@@ -166,17 +252,18 @@ async def handle_click_ref(
 
     opened_new_page = False
 
+    target = None
     try:
         pages_before = list(page.context.pages)
-        target = page.locator(selector).first
-
-        if await target.count() == 0:
-            page_state = await get_page_state(page)
-            return build_error_response(
-                session_state=session_state(session_manager),
-                page_state=page_state,
-                error=make_ref_not_found_error(ref, resolved_snapshot_id),
-            )
+        target, ref_error_response = await _resolve_ref_element_or_error(
+            session_manager,
+            snapshot_manager,
+            page,
+            parsed_ref,
+            resolved_snapshot_id,
+        )
+        if ref_error_response:
+            return ref_error_response
 
         await target.scroll_into_view_if_needed()
         await target.click()
@@ -229,6 +316,9 @@ async def handle_click_ref(
                 context={"ref": ref, "snapshot_id": resolved_snapshot_id},
             ),
         )
+    finally:
+        if target is not None:
+            await target.dispose()
 
     snapshot_manager.invalidate()
 
@@ -296,7 +386,7 @@ async def handle_fill_ref(
     if snap_error:
         return await action_error_response(session_manager, page, snap_error)
 
-    selector, selector_error_response = await selector_or_error_response(
+    parsed_ref, selector_error_response = await selector_or_error_response(
         session_manager,
         page,
         ref,
@@ -304,16 +394,17 @@ async def handle_fill_ref(
     if selector_error_response:
         return selector_error_response
 
+    target = None
     try:
-        target = page.locator(selector).first
-
-        if await target.count() == 0:
-            page_state = await get_page_state(page)
-            return build_error_response(
-                session_state=session_state(session_manager),
-                page_state=page_state,
-                error=make_ref_not_found_error(ref, resolved_snapshot_id),
-            )
+        target, ref_error_response = await _resolve_ref_element_or_error(
+            session_manager,
+            snapshot_manager,
+            page,
+            parsed_ref,
+            resolved_snapshot_id,
+        )
+        if ref_error_response:
+            return ref_error_response
 
         fill_target = await _resolve_fill_target(target)
         if fill_target is None:
@@ -348,6 +439,9 @@ async def handle_fill_ref(
                 context={"ref": ref, "snapshot_id": resolved_snapshot_id},
             ),
         )
+    finally:
+        if target is not None:
+            await target.dispose()
 
     page_state = await get_page_state(page)
     text_length = len(text)
@@ -410,7 +504,7 @@ async def handle_select_ref(
     if snap_error:
         return await action_error_response(session_manager, page, snap_error)
 
-    selector, selector_error_response = await selector_or_error_response(
+    parsed_ref, selector_error_response = await selector_or_error_response(
         session_manager,
         page,
         ref,
@@ -418,15 +512,17 @@ async def handle_select_ref(
     if selector_error_response:
         return selector_error_response
 
+    target = None
     try:
-        target = page.locator(selector).first
-        if await target.count() == 0:
-            page_state = await get_page_state(page)
-            return build_error_response(
-                session_state=session_state(session_manager),
-                page_state=page_state,
-                error=make_ref_not_found_error(ref, resolved_snapshot_id),
-            )
+        target, ref_error_response = await _resolve_ref_element_or_error(
+            session_manager,
+            snapshot_manager,
+            page,
+            parsed_ref,
+            resolved_snapshot_id,
+        )
+        if ref_error_response:
+            return ref_error_response
 
         select_target = await _resolve_select_target(target)
         if select_target is None:
@@ -462,6 +558,9 @@ async def handle_select_ref(
                 context={"ref": ref, "snapshot_id": resolved_snapshot_id},
             ),
         )
+    finally:
+        if target is not None:
+            await target.dispose()
 
     snapshot_manager.invalidate()
 
@@ -523,7 +622,7 @@ async def handle_check_ref(
     if snap_error:
         return await action_error_response(session_manager, page, snap_error)
 
-    selector, selector_error_response = await selector_or_error_response(
+    parsed_ref, selector_error_response = await selector_or_error_response(
         session_manager,
         page,
         ref,
@@ -531,15 +630,17 @@ async def handle_check_ref(
     if selector_error_response:
         return selector_error_response
 
+    target = None
     try:
-        target = page.locator(selector).first
-        if await target.count() == 0:
-            page_state = await get_page_state(page)
-            return build_error_response(
-                session_state=session_state(session_manager),
-                page_state=page_state,
-                error=make_ref_not_found_error(ref, resolved_snapshot_id),
-            )
+        target, ref_error_response = await _resolve_ref_element_or_error(
+            session_manager,
+            snapshot_manager,
+            page,
+            parsed_ref,
+            resolved_snapshot_id,
+        )
+        if ref_error_response:
+            return ref_error_response
 
         check_target = await _resolve_check_target(target)
         if check_target is None:
@@ -556,10 +657,15 @@ async def handle_check_ref(
             )
         await check_target.scroll_into_view_if_needed()
 
-        if checked:
-            await check_target.check()
-        else:
-            await check_target.uncheck()
+        current_checked = await _is_checked(check_target)
+        if checked != current_checked:
+            try:
+                await check_target.click()
+            except Exception:
+                await _js_click_check_target(check_target)
+
+            if await _is_checked(check_target) != checked:
+                await _js_click_check_target(check_target)
 
         await page.wait_for_timeout(_SETTLE_WAIT_MS)
     except Exception as error:
@@ -575,6 +681,9 @@ async def handle_check_ref(
                 context={"ref": ref, "snapshot_id": resolved_snapshot_id},
             ),
         )
+    finally:
+        if target is not None:
+            await target.dispose()
 
     snapshot_manager.invalidate()
 

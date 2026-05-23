@@ -55,7 +55,15 @@ class StorageSettings(BaseModel):
 
 class WebSearchSettings(BaseModel):
     # Web Search 工具配置
+    FOURGET_ENABLED: bool = True
+    FOURGET_BASE_URL: str = "http://fourget:80"
+    FOURGET_WEB_SCRAPER: str = "ddg"
+    FOURGET_TIMEOUT: float = 8.0
+    FOURGET_MAX_CONCURRENCY: int = 5
+    FOURGET_MAX_RETRIES: int = 1
+    FOURGET_RETRY_BACKOFF_SECONDS: float = 0.4
     SERPER_ENABLED: bool = True
+    SEARXNG_ENABLED: bool = False
     SEARXNG_BASE_URL: str = "http://localhost:8080"
     SERPER_API_KEY: Optional[str] = "ce1fb242cbfc5dd0097d97f0ea866bf34f571ba3"
     SERPER_BASE_URL: str = "https://google.serper.dev"
@@ -64,6 +72,9 @@ class WebSearchSettings(BaseModel):
     SERPAPI_BASE_URL: str = "https://serpapi.com"
     EXA_BASE_URL: str = "https://api.exa.ai"
     PERPLEXITY_BASE_URL: str = "https://api.perplexity.ai"
+    ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
+    ANYSEARCH_TIMEOUT_SECONDS: float = 8.0
+    ANYSEARCH_ZONE: Optional[str] = None
     WIKIPEDIA_BASE_URL_TEMPLATE: str = "https://{language}.wikipedia.org"
 
 

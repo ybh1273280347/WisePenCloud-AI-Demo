@@ -23,6 +23,9 @@ from chat.application.web_search.internal.ranking.url_ranker import (
 from chat.application.web_search.internal.runner.custom_provider_runner import (
     run_custom_provider_calls,
 )
+from chat.application.web_search.internal.runner.fourget_variant_runner import (
+    run_fourget_variants,
+)
 from chat.application.web_search.internal.runner.searxng_variant_runner import (
     run_searxng_variants,
 )
@@ -35,6 +38,9 @@ from chat.application.web_search.internal.runner.wikipedia_grounding_runner impo
 )
 from chat.application.web_search.internal.searcher.searxng_searcher import (
     SearXNGSearcher,
+)
+from chat.application.web_search.internal.searcher.fourget_searcher import (
+    FourGetSearcher,
 )
 from chat.application.web_search.internal.searcher.serper_searcher import SerperSearcher
 from chat.application.web_search.models.common import (
@@ -110,13 +116,19 @@ class SearchCoordinator:
         self,
         *,
         cache: SearchCache,
+        fourget_searcher: FourGetSearcher,
         searxng_searcher: SearXNGSearcher,
         serper_searcher: SerperSearcher,
+        fourget_enabled: bool = True,
+        searxng_enabled: bool = False,
         serper_enabled: bool = False,
     ) -> None:
         self._cache = cache
+        self._fourget_searcher = fourget_searcher
         self._searxng_searcher = searxng_searcher
         self._serper_searcher = serper_searcher
+        self._fourget_enabled = fourget_enabled
+        self._searxng_enabled = searxng_enabled
         self._serper_enabled = serper_enabled
 
     async def search_many(self, request: SearchManyRequest) -> SearchManyResult:
@@ -171,37 +183,69 @@ class SearchCoordinator:
         main_search_started = time.monotonic()
 
         if not custom_mode:
-            log_event(
-                "搜索源调度 SearXNG",
-                search_call_id=search_call_id,
-                variants=len(plan.query_variants),
-                with_images=request.with_images,
-            )
-            searxng_variant_results = await run_searxng_variants(
-                search_call_id=search_call_id,
-                variants=list(plan.query_variants),
-                searcher=self._searxng_searcher,
-                cache=self._cache,
-                with_images=request.with_images,
-            )
-            all_variants.extend(searxng_variant_results)
-            log_event(
-                "搜索源 SearXNG 完成",
-                search_call_id=search_call_id,
-                results=len(searxng_variant_results),
-            )
+            platform_variant_results: List[VariantSearchResponse] = []
+            platform_source = "fourget" if self._fourget_enabled else "searxng"
+
+            if self._fourget_enabled:
+                log_event(
+                    "搜索源调度 FourGet",
+                    search_call_id=search_call_id,
+                    variants=len(plan.query_variants),
+                    with_images=request.with_images,
+                )
+                platform_variant_results = await run_fourget_variants(
+                    search_call_id=search_call_id,
+                    variants=list(plan.query_variants),
+                    searcher=self._fourget_searcher,
+                    cache=self._cache,
+                    with_images=request.with_images,
+                )
+                all_variants.extend(platform_variant_results)
+                log_event(
+                    "搜索源 FourGet 完成",
+                    search_call_id=search_call_id,
+                    results=len(platform_variant_results),
+                )
+            elif self._searxng_enabled:
+                log_event(
+                    "搜索源调度 SearXNG",
+                    search_call_id=search_call_id,
+                    variants=len(plan.query_variants),
+                    with_images=request.with_images,
+                )
+                platform_variant_results = await run_searxng_variants(
+                    search_call_id=search_call_id,
+                    variants=list(plan.query_variants),
+                    searcher=self._searxng_searcher,
+                    cache=self._cache,
+                    with_images=request.with_images,
+                )
+                all_variants.extend(platform_variant_results)
+                log_event(
+                    "搜索源 SearXNG 完成",
+                    search_call_id=search_call_id,
+                    results=len(platform_variant_results),
+                )
+            else:
+                log_event(
+                    "平台搜索源未启用",
+                    search_call_id=search_call_id,
+                    fourget_enabled=self._fourget_enabled,
+                    searxng_enabled=self._searxng_enabled,
+                )
 
             default_provider_calls = select_default_provider_calls(
                 mode=request.mode,
                 variants=plan.query_variants,
-                searxng_responses=searxng_variant_results,
+                primary_responses=platform_variant_results,
                 serper_enabled=self._serper_enabled,
+                primary_provider=platform_source,
             )
 
             if not default_provider_calls:
-                searxng_useful = sum(
+                primary_useful = sum(
                     1
-                    for r in searxng_variant_results
+                    for r in platform_variant_results
                     for item in r.response.results
                     if item.title.strip() and item.url.strip()
                 )
@@ -210,7 +254,8 @@ class SearchCoordinator:
                     search_call_id=search_call_id,
                     serper_enabled=self._serper_enabled,
                     mode=request.mode,
-                    searxng_useful=searxng_useful,
+                    primary_source=platform_source,
+                    primary_useful=primary_useful,
                 )
 
             if default_provider_calls:
@@ -362,6 +407,7 @@ class SearchCoordinator:
         return tuple(grounding)
 
     async def close(self) -> None:
+        await self._fourget_searcher.close()
         await self._searxng_searcher.close()
         await self._serper_searcher.close()
         await close_wikipedia_grounding_client()

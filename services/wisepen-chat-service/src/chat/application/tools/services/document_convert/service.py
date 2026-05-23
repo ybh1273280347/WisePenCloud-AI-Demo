@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import FrozenInstanceError, dataclass
+from dataclasses import FrozenInstanceError, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -10,6 +10,7 @@ from chat.application.document_export import (
     SUPPORTED_EXPORT_FORMATS,
     DocumentExportError,
     DocumentExportService,
+    ExportOptions,
     GeneratedDocumentFile,
 )
 from chat.application.tools.common.errors.document_parse import (
@@ -72,6 +73,16 @@ class NormalizedDocumentConvertRequest:
     target_format: str
     user_id: str
     session_id: str
+    title: Optional[str]
+    reference_docx_file_ref: Optional[str]
+    reference_docx_path: Optional[Path]
+
+
+@dataclass(frozen=True, slots=True)
+class _DocumentConvertRoute:
+    route_kind: str
+    requires_parse: bool
+    export_source_format: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +99,8 @@ class DocumentConvertService:
         file_ref: str,
         target_format: str,
         file_name: Optional[str] = None,
+        title: Optional[str] = None,
+        reference_docx_file_ref: Optional[str] = None,
     ) -> GeneratedDocumentFile:
         request = normalize_convert_request(
             file_ref=file_ref,
@@ -95,6 +108,8 @@ class DocumentConvertService:
             target_format=target_format,
             user_id=user_id,
             session_id=session_id,
+            title=title,
+            reference_docx_file_ref=reference_docx_file_ref,
         )
         try:
             source = self.temp_file_resolver.resolve(
@@ -121,6 +136,9 @@ class DocumentConvertService:
             )
             raise UnreadableDocumentRefError() from exc
 
+        reference_docx_path = self._resolve_reference_docx_path(request)
+        request = replace(request, reference_docx_path=reference_docx_path)
+
         with document_processing_scope(
             self.temp_file_resolver.session_root(
                 user_id=request.user_id,
@@ -139,6 +157,10 @@ class DocumentConvertService:
         source: ResolvedDocumentSource,
     ) -> GeneratedDocumentFile:
         source_format = detect_source_format_from_path(source.path)
+        route = self._resolve_route(
+            source_format=source_format,
+            target_format=request.target_format,
+        )
         log_event(
             "document_convert route resolved",
             user_id=request.user_id,
@@ -148,6 +170,11 @@ class DocumentConvertService:
             target_format=request.target_format,
             output_file_name=request.output_file_name,
             size_bytes=source.size_bytes,
+            route_kind=route.route_kind,
+            requires_parse=route.requires_parse,
+            export_source_format=route.export_source_format,
+            title_provided=request.title is not None,
+            reference_docx_used=request.reference_docx_path is not None,
         )
 
         if source_format in {"markdown", "plain_text", "html"}:
@@ -200,6 +227,7 @@ class DocumentConvertService:
                 target_format=request.target_format,
                 source_format=export_source_format,
                 file_name=request.output_file_name,
+                options=self._export_options(request),
             )
         except DocumentExportError as exc:
             log_error(
@@ -224,6 +252,7 @@ class DocumentConvertService:
                 markdown=markdown,
                 target_format=request.target_format,
                 file_name=request.output_file_name,
+                options=self._export_options(request),
             )
         except DocumentExportError as exc:
             log_error(
@@ -285,6 +314,87 @@ class DocumentConvertService:
 
         return parse_result.text
 
+    def _resolve_reference_docx_path(
+        self, request: NormalizedDocumentConvertRequest
+    ) -> Optional[Path]:
+        if request.reference_docx_file_ref is None:
+            return None
+
+        try:
+            source = self.temp_file_resolver.resolve(
+                file_ref=request.reference_docx_file_ref,
+                user_id=request.user_id,
+                session_id=request.session_id,
+            )
+        except FileInvalidDocumentRefError as exc:
+            log_error(
+                "document_convert reference_docx_file_ref invalid",
+                exc,
+                user_id=request.user_id,
+                session_id=request.session_id,
+                file_ref=request.reference_docx_file_ref,
+            )
+            raise InvalidDocumentRefError() from exc
+        except FileUnreadableDocumentRefError as exc:
+            log_error(
+                "document_convert reference_docx_file_ref unreadable",
+                exc,
+                user_id=request.user_id,
+                session_id=request.session_id,
+                file_ref=request.reference_docx_file_ref,
+            )
+            raise UnreadableDocumentRefError() from exc
+
+        path = source.path
+        if not path.exists():
+            raise UnreadableDocumentRefError("reference_docx_file_ref does not exist")
+        if not path.is_file():
+            raise UnreadableDocumentRefError("reference_docx_file_ref is not a file")
+        if path.suffix.lower() != ".docx":
+            raise DocumentConvertError(
+                "reference_docx_file_ref must point to a .docx file"
+            )
+        return path
+
+    def _resolve_route(
+        self, *, source_format: str, target_format: str
+    ) -> _DocumentConvertRoute:
+        if source_format in {"markdown", "plain_text", "html"}:
+            if target_format not in _TEXT_EXPORT_TARGETS:
+                raise UnsupportedDocumentRouteError(
+                    f"unsupported route: {source_format}->{target_format}"
+                )
+            return _DocumentConvertRoute(
+                route_kind="text_export",
+                requires_parse=False,
+                export_source_format=(
+                    "plain_text" if source_format == "plain_text" else "markdown"
+                ),
+            )
+
+        if source_format in _PARSE_EXPORT_SUFFIXES:
+            if target_format not in _PARSE_EXPORT_TARGETS:
+                raise UnsupportedDocumentRouteError(
+                    f"unsupported route: {source_format}->{target_format}"
+                )
+            return _DocumentConvertRoute(
+                route_kind="parse_export",
+                requires_parse=True,
+                export_source_format="markdown",
+            )
+
+        raise UnsupportedDocumentRouteError(
+            f"unsupported route: {source_format}->{target_format}"
+        )
+
+    def _export_options(
+        self, request: NormalizedDocumentConvertRequest
+    ) -> ExportOptions:
+        return ExportOptions(
+            title=request.title,
+            reference_docx=request.reference_docx_path,
+        )
+
 
 def normalize_convert_request(
     *,
@@ -293,6 +403,8 @@ def normalize_convert_request(
     target_format: str,
     user_id: str,
     session_id: str,
+    title: Optional[str] = None,
+    reference_docx_file_ref: Optional[str] = None,
 ) -> NormalizedDocumentConvertRequest:
     if not file_ref or not str(file_ref).strip():
         raise InvalidDocumentRefError("file_ref is required")
@@ -304,6 +416,16 @@ def normalize_convert_request(
         raise DocumentConvertError("user_id is required")
     if not session_id or not str(session_id).strip():
         raise DocumentConvertError("session_id is required")
+    if title is not None:
+        if not isinstance(title, str) or not title.strip():
+            raise DocumentConvertError("title must be a non-empty string")
+    if reference_docx_file_ref is not None:
+        if not isinstance(reference_docx_file_ref, str) or not reference_docx_file_ref.strip():
+            raise InvalidDocumentRefError("reference_docx_file_ref must be a non-empty string")
+        if target_format != "docx":
+            raise DocumentConvertError(
+                "reference_docx_file_ref is only supported for docx export"
+            )
 
     if file_name is not None:
         if not isinstance(file_name, str) or not file_name.strip():
@@ -321,6 +443,9 @@ def normalize_convert_request(
         target_format=target_format,
         user_id=user_id,
         session_id=session_id,
+        title=title,
+        reference_docx_file_ref=reference_docx_file_ref,
+        reference_docx_path=None,
     )
 
 

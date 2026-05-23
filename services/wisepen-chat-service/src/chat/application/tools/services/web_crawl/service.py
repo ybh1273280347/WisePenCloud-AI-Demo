@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
 from chat.application.algorithms.ranking import (
@@ -19,8 +20,8 @@ from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
 from chat.application.tools.services.web_crawl.errors import CrawlConfigurationError, CrawlInputError
 from chat.application.tools.services.web_crawl.frontier import CrawlFrontier
 from chat.application.tools.services.web_crawl.link_extractor import (
-    extract_markdown_links,
     extract_markdown_title,
+    merge_extracted_links,
 )
 from chat.application.tools.services.web_crawl.models import (
     CrawlFrontierItem,
@@ -35,7 +36,7 @@ from chat.application.tools.services.web_crawl.models import (
 from chat.application.tools.services.web_crawl.politeness import PerHostPoliteness
 from chat.application.tools.services.web_crawl.robots import RobotsPolicy
 from chat.application.tools.services.web_fetch.fetch_coordinator import FetchCoordinator, FetchResultItem
-from chat.application.tools.services.web_fetch.models import FetchedDocument
+from chat.application.tools.services.web_fetch.models import FetchedDocument, FetchedLink
 
 
 _BLOCKED_SCHEMES = {
@@ -165,66 +166,68 @@ class WebCrawlService:
         documents_found = 0
         skipped_count = 0
 
-        for depth in range(request.max_depth + 1):
-            batch = frontier.pop_batch_for_depth(depth, limit=request.max_pages)
+        while frontier.has_pending() and not frontier.reached_page_budget():
+            batch = frontier.pop_next_batch(limit=_FETCH_WAVE_LIMIT)
             if not batch:
-                continue
+                break
 
             allowed_items: List[CrawlFrontierItem] = []
-            for item in batch:
-                decision = await self._pre_fetch_check(
-                    item=item,
-                    robots_policy=robots_policy,
-                    politeness=politeness,
-                    is_seed_url=item.depth == 0,
-                )
+            decisions = await asyncio.gather(
+                *[
+                    self._pre_fetch_check(
+                        item=item,
+                        robots_policy=robots_policy,
+                        politeness=politeness,
+                        is_seed_url=item.depth == 0,
+                    )
+                    for item in batch
+                ]
+            )
+            for decision in decisions:
                 if decision.allowed:
                     allowed_items.append(decision.item)
                 else:
                     items.append(decision.to_result_item())
                     skipped_count += 1
 
-            while allowed_items:
-                still_allowed: List[CrawlFrontierItem] = []
-                for item in allowed_items:
-                    if politeness.is_blocked(item.url):
-                        items.append(
-                            CrawlResultItem(
-                                url=item.url,
-                                kind=CrawlItemKind.SKIPPED.value,
-                                depth=item.depth,
-                                success=False,
-                                source_url=item.source_url,
-                                error="host blocked due to prior 429/403/503",
-                                skip_reason=CrawlSkipReason.RATE_LIMITED.value,
-                            )
+            wave: List[CrawlFrontierItem] = []
+            for item in allowed_items:
+                if politeness.is_blocked(item.url):
+                    items.append(
+                        CrawlResultItem(
+                            url=item.url,
+                            kind=CrawlItemKind.SKIPPED.value,
+                            depth=item.depth,
+                            success=False,
+                            source_url=item.source_url,
+                            error="host blocked due to prior 429/403/503",
+                            skip_reason=CrawlSkipReason.RATE_LIMITED.value,
                         )
-                        skipped_count += 1
-                    else:
-                        still_allowed.append(item)
-
-                if not still_allowed:
-                    break
-
-                allowed_items = still_allowed
-                wave, allowed_items = _take_fetch_wave(allowed_items)
-                await self._wait_politeness(wave, politeness)
-                fetch_results = await self._fetch_coordinator.fetch_many(
-                    [item.url for item in wave]
-                )
-
-                for frontier_item, fetch_item in zip(wave, fetch_results):
-                    self._mark_blocked_if_needed(fetch_item, politeness)
-                    handled = await self._handle_fetch_result(
-                        request=request,
-                        frontier=frontier,
-                        frontier_item=frontier_item,
-                        fetch_item=fetch_item,
                     )
-                    items.extend(handled.items)
-                    fetched_pages += handled.fetched_pages
-                    documents_found += handled.documents_found
-                    skipped_count += handled.skipped_count
+                    skipped_count += 1
+                else:
+                    wave.append(item)
+
+            if not wave:
+                continue
+
+            await self._wait_politeness(wave, politeness)
+            fetch_results = await self._fetch_coordinator.fetch_many(
+                [item.url for item in wave]
+            )
+
+            for frontier_item, fetch_item in zip(wave, fetch_results):
+                self._mark_blocked_if_needed(fetch_item, politeness)
+                handled = await self._handle_fetch_result(
+                    request=request,
+                    frontier=frontier,
+                    frontier_item=frontier_item,
+                    fetch_item=fetch_item,
+                )
+                items.extend(handled.items)
+                fetched_pages += handled.fetched_pages
+                documents_found += handled.documents_found
+                skipped_count += handled.skipped_count
 
         return CrawlResult(
             objective=request.objective,
@@ -344,8 +347,7 @@ class WebCrawlService:
         items: List[CrawlFrontierItem],
         politeness: PerHostPoliteness,
     ) -> None:
-        for item in items:
-            await politeness.wait_turn(item.url)
+        await asyncio.gather(*(politeness.wait_turn(item.url) for item in items))
 
     async def _handle_fetch_result(
         self,
@@ -442,6 +444,7 @@ class WebCrawlService:
                 source_item=frontier_item,
                 source_url=fetch_item.url,
                 markdown=markdown,
+                links=fetch_item.links,
             )
 
         return _HandleFetchResult(
@@ -475,8 +478,13 @@ class WebCrawlService:
         source_item: CrawlFrontierItem,
         source_url: str,
         markdown: str,
+        links: Optional[List[FetchedLink]] = None,
     ) -> _DiscoveryResult:
-        extracted = extract_markdown_links(markdown)
+        extracted = merge_extracted_links(
+            markdown=markdown,
+            base_url=source_url,
+            fetched_links=links,
+        )
         source_title = extract_markdown_title(markdown)
         candidates: List[LinkCandidate] = []
         skipped_items: List[CrawlResultItem] = []
@@ -783,24 +791,6 @@ def _skipped_item(
         error=error,
         skip_reason=reason,
     )
-
-
-def _take_fetch_wave(
-    items: List[CrawlFrontierItem],
-) -> Tuple[List[CrawlFrontierItem], List[CrawlFrontierItem]]:
-    wave: List[CrawlFrontierItem] = []
-    remaining: List[CrawlFrontierItem] = []
-    hosts: Set[str] = set()
-
-    for item in items:
-        host = _host_of(item.url)
-        if len(wave) < _FETCH_WAVE_LIMIT and host not in hosts:
-            wave.append(item)
-            hosts.add(host)
-        else:
-            remaining.append(item)
-
-    return wave, remaining
 
 
 def _host_of(url: str) -> str:

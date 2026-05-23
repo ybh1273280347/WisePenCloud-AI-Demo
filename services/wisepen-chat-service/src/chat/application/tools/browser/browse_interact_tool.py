@@ -11,7 +11,7 @@ TOOL_DESCRIPTION = (
     "Operates a local persistent browser with dedicated automation profile. "
     "Use this for interactive pages that require navigation, clicking, filling, screenshots, or page content extraction.\n\n"
     "Refs do not exist until you call snapshot.\n"
-    "After snapshot, use only exact refs from snapshot output, such as e5.\n"
+    "After snapshot, use exact refs from snapshot output, such as e5 or @e5.\n"
     "Never use role names or labels as ref values, such as searchbox, button, link, textbox, Search, or Sign in.\n"
     "Always pass browser_session_id from the previous response.\n"
     "If a fill_ref returns refs_invalidated=true, take a new snapshot before any ref action.\n"
@@ -86,9 +86,9 @@ TOOL_SCHEMA = {
                 },
                 "ref": {
                     "type": "string",
-                    "pattern": "^e[1-9][0-9]*$",
+                    "pattern": "^(?:@?e[1-9][0-9]*|ref=e[1-9][0-9]*)$",
                     "description": (
-                        "Exact ref id from the latest snapshot, e.g. e5. "
+                        "Exact ref id from the latest snapshot, e.g. e5, @e5, or ref=e5. "
                         "Required for click_ref, fill_ref, select_ref, and check_ref."
                     ),
                 },

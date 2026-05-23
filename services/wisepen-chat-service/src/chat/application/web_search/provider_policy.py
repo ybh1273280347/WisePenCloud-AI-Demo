@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 CUSTOM_PROVIDER_NAMES = frozenset(
-    {"serper", "tavily", "brave", "serpapi", "exa", "perplexity"}
+    {"serper", "tavily", "brave", "serpapi", "exa", "perplexity", "anysearch"}
 )
 
 _DEFAULT_CUSTOM_MAX_RESULTS = 10
@@ -17,6 +17,7 @@ class CustomProviderCredential:
     enabled: bool = True
     max_results: int = _DEFAULT_CUSTOM_MAX_RESULTS
     allow_secondary: bool = False
+    zone: Optional[str] = None
 
 
 def parse_custom_provider_credentials(
@@ -62,11 +63,15 @@ def _parse_custom_provider_credential(item: Any) -> Optional[CustomProviderCrede
         enabled=enabled,
         max_results=_coerce_max_results(item.get("max_results")),
         allow_secondary=bool(item.get("allow_secondary", False)),
+        zone=_parse_zone(item.get("zone")),
     )
 
 
 def _is_supported_enabled_provider(provider: str, api_key: str, enabled: bool) -> bool:
-    return enabled and provider in CUSTOM_PROVIDER_NAMES and bool(api_key)
+    if not enabled or provider not in CUSTOM_PROVIDER_NAMES:
+        return False
+
+    return provider == "anysearch" or bool(api_key)
 
 
 def _coerce_max_results(value: Any) -> int:
@@ -76,3 +81,13 @@ def _coerce_max_results(value: Any) -> int:
         return _DEFAULT_CUSTOM_MAX_RESULTS
 
     return max(1, min(value, 20))
+
+
+def _parse_zone(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    if value not in {"cn", "intl"}:
+        return None
+    return value

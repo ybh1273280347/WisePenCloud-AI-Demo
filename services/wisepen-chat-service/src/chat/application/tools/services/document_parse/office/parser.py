@@ -9,15 +9,13 @@ from chat.application.tools.common.errors.document_parse import (
 )
 from chat.application.tools.services.document_parse.models import DocumentParseResult
 from chat.application.tools.services.document_parse.office.fallback_parser import OfficeFallbackParser
-from chat.application.tools.services.document_parse.office.native_parser import OfficeNativeParser
 from chat.application.tools.services.document_parse.office.primary_parser import OfficePrimaryParser
 from common.logger import log_event
 
 _PARSER_NAME = "OfficeParser"
 _PRIMARY_PARSER = "docling"
 _FALLBACK_PARSER = "markitdown"
-_NATIVE_PARSER = "python_fallback"
-_FALLBACK_CHAIN = [_PRIMARY_PARSER, _FALLBACK_PARSER, _NATIVE_PARSER]
+_FALLBACK_CHAIN = [_PRIMARY_PARSER, _FALLBACK_PARSER]
 
 _SUFFIX_TO_FILE_TYPE = {
     ".docx": "docx",
@@ -35,16 +33,13 @@ class OfficeParser(BaseDocumentParser):
         *,
         primary_parser: OfficePrimaryParser,
         fallback_parser: OfficeFallbackParser,
-        native_parser: OfficeNativeParser,
     ):
         self.primary_parser = primary_parser
         self.fallback_parser = fallback_parser
-        self.native_parser = native_parser
         log_event(
             "OfficeParser 初始化",
             primary_parser_class=type(primary_parser).__name__,
             fallback_parser_class=type(fallback_parser).__name__,
-            native_parser_class=type(native_parser).__name__,
             fallback_chain=" -> ".join(_FALLBACK_CHAIN),
         )
 
@@ -119,38 +114,10 @@ class OfficeParser(BaseDocumentParser):
                 )
 
         if result is None:
-            try:
-                log_event(
-                    "OfficeParser 尝试",
-                    path=str(path),
-                    file_type=file_type,
-                    parser=_NATIVE_PARSER,
-                    handler_class=type(self.native_parser).__name__,
-                )
-                result = self.native_parser.parse(path, file_type=file_type)
-                selected_parser = _NATIVE_PARSER
-                log_event(
-                    "OfficeParser 尝试完成",
-                    path=str(path),
-                    file_type=file_type,
-                    parser=_NATIVE_PARSER,
-                    handler_class=type(self.native_parser).__name__,
-                    length=len(result.text),
-                )
-            except Exception as e:
-                warnings.append(f"python_fallback_failed: {type(e).__name__}: {e}")
-                log_event(
-                    "OfficeParser 尝试未完成",
-                    error=repr(e),
-                    path=str(path),
-                    file_type=file_type,
-                    parser=_NATIVE_PARSER,
-                    handler_class=type(self.native_parser).__name__,
-                )
-                raise DocumentParseError(
-                    "Office parsing failed after all fallback parsers: "
-                    + " | ".join(warnings)
-                ) from e
+            raise DocumentParseError(
+                "Office parsing failed after primary and fallback parsers: "
+                + " | ".join(warnings)
+            )
 
         result_metadata = {
             **result.metadata,
@@ -175,8 +142,6 @@ class OfficeParser(BaseDocumentParser):
                 type(self.primary_parser).__name__
                 if selected_parser == _PRIMARY_PARSER
                 else type(self.fallback_parser).__name__
-                if selected_parser == _FALLBACK_PARSER
-                else type(self.native_parser).__name__
             ),
             page_count=len(result.pages),
             table_count=len(result.tables),

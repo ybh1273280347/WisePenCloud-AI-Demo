@@ -99,6 +99,57 @@ class CrawlFrontier:
 
         return selected
 
+    def pop_next_batch(
+        self,
+        *,
+        limit: int,
+        excluded_hosts: Optional[Set[str]] = None,
+    ) -> List[CrawlFrontierItem]:
+        if limit <= 0:
+            return []
+
+        excluded_hosts = excluded_hosts or set()
+        remaining_budget = max(0, self._max_pages - self._accepted_count)
+        if remaining_budget <= 0:
+            return []
+
+        selected: List[CrawlFrontierItem] = []
+        selected_hosts: Set[str] = set()
+        limit = min(limit, remaining_budget)
+
+        for depth in sorted(self._pending_by_depth):
+            if len(selected) >= limit:
+                break
+
+            items = self._pending_by_depth[depth]
+            items.sort(key=lambda item: item.score, reverse=True)
+            remaining: List[CrawlFrontierItem] = []
+
+            for item in items:
+                host = item.current_host or _host_of(item.url)
+                if (
+                    len(selected) < limit
+                    and host not in excluded_hosts
+                    and host not in selected_hosts
+                ):
+                    selected.append(item)
+                    selected_hosts.add(host)
+                    continue
+
+                remaining.append(item)
+
+            if remaining:
+                self._pending_by_depth[depth] = remaining
+            else:
+                self._pending_by_depth.pop(depth, None)
+
+        for item in selected:
+            self._visited.add(item.url)
+            self._accepted_count += 1
+            self._mark_scope_fetched(item)
+
+        return selected
+
     def reached_page_budget(self) -> bool:
         return self._accepted_count >= self._max_pages
 

@@ -12,6 +12,7 @@ from chat.application.tools.services.web_fetch.config import (
     STEEL_MAX_RETRIES,
     WEB_FETCH_BROWSER_TIMEOUT,
 )
+from chat.application.tools.services.web_fetch.content_processor import ContentProcessor
 from chat.core.config.app_settings import settings
 from common.logger import log_event, log_fail
 from steel import AsyncSteel
@@ -29,7 +30,7 @@ class SteelFetcherConfig:
     delay_ms: float = STEEL_DELAY_MS
     region: Optional[str] = settings.STEEL_REGION
     strip_output: bool = True
-    formats: Tuple[str, ...] = ("markdown", "cleaned_html")
+    formats: Tuple[str, ...] = ("markdown", "cleaned_html", "html")
 
 
 def _log_steel_fetch_fail(message, *, url: str, **kwargs) -> None:
@@ -42,9 +43,14 @@ class SteelFetcher(BaseFetcher):
     name = "steel"
 
     def __init__(
-        self, config: SteelFetcherConfig, *, concurrency: int = STEEL_CONCURRENCY
+        self,
+        config: SteelFetcherConfig,
+        *,
+        concurrency: int = STEEL_CONCURRENCY,
+        processor: Optional[ContentProcessor] = None,
     ):
         self._config = config
+        self._processor = processor or ContentProcessor()
         self._semaphore = asyncio.Semaphore(concurrency)
         self._client = AsyncSteel(
             base_url=config.base_url,
@@ -125,7 +131,11 @@ class SteelFetcher(BaseFetcher):
                 )
                 return None
 
-            result = self._extract_content(content, url=url, status_code=status_code)
+            result = await self._extract_content(
+                content,
+                url=url,
+                status_code=status_code,
+            )
             if result is None:
                 return None
 
@@ -190,7 +200,7 @@ class SteelFetcher(BaseFetcher):
             )
             return None
 
-    def _extract_content(self, content, *, url: str, status_code) -> Optional[str]:
+    async def _extract_content(self, content, *, url: str, status_code) -> Optional[str]:
         markdown = content.markdown
         if markdown is not None:
             if self._config.strip_output:
@@ -198,8 +208,29 @@ class SteelFetcher(BaseFetcher):
             if markdown:
                 return markdown
 
+        for field_name in ("cleaned_html", "html"):
+            html = getattr(content, field_name, None)
+            if not isinstance(html, str):
+                continue
+            if self._config.strip_output:
+                html = html.strip()
+            if not html:
+                continue
+
+            processed = await asyncio.to_thread(self._processor.process, html)
+            if processed:
+                log_event(
+                    "SteelFetcher HTML 转 Markdown 成功",
+                    url=url,
+                    status_code=status_code,
+                    html_field=field_name,
+                    html_length=len(html),
+                    markdown_length=len(processed),
+                )
+                return processed
+
         _log_steel_fetch_fail(
-            "markdown 为空，降级到本地浏览器",
+            "markdown/html 均为空或处理失败，降级到本地浏览器",
             url=url,
             status_code=status_code,
             has_markdown=bool(content.markdown),

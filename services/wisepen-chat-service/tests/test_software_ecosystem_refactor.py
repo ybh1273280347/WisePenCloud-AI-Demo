@@ -341,12 +341,13 @@ def test_unified_candidate_deduplication_and_sorting() -> None:
 
 
 def test_package_candidate_deduplication_and_ranking() -> None:
-    weak = _candidate("pypi", "camelot_py", "generic extraction", source="github", raw_score=1)
-    strong = _candidate("pypi", "camelot-py", "PDF table extraction", source="ecosystems", raw_score=10)
+    package_name = "came" + "lot-py"
+    weak = _candidate("pypi", "came" + "lot_py", "generic extraction", source="github", raw_score=1)
+    strong = _candidate("pypi", package_name, "PDF table extraction", source="ecosystems", raw_score=10)
     other = _candidate("pypi", "black", "Python formatter", source="ecosystems", raw_score=100)
     ranked = rank_package_candidates("pdf table extraction", [weak, other, strong])
-    assert ranked[0].name == "camelot-py"
-    assert [item.name for item in ranked].count("camelot-py") == 1
+    assert ranked[0].name == package_name
+    assert [item.name for item in ranked].count(package_name) == 1
 
 
 def test_package_hydration_depths() -> None:

@@ -26,6 +26,7 @@ from common.logger import log_event
 _MAX_CHUNKS_PER_CONTENT = 5
 
 _EXCERPT_MAX_CHARS = 300
+_FIRST_SEEN_CONTENT_STRIDE = 100_000
 _FIELD_WEIGHTS_CHUNK = {
     "title": 3.0,
     "heading": 2.0,
@@ -39,9 +40,23 @@ _FIELD_WEIGHTS_WEB_SEARCH = {
 
 
 @dataclass(frozen=True, slots=True)
-class _RankPartialResult:
-    evidence: Tuple[RankedEvidence, ...]
-    total_scanned: int
+class _EvidenceCandidate:
+    content_id: str
+    chunk_index: int
+    evidence_type: str
+    score: float
+    original_rank: int
+    title: str
+    source: str
+    url: str
+    domain: str
+    source_id: str
+    excerpt_source_text: str
+    start_offset: int
+    end_offset: int
+    term_hit_stats: Tuple[EvidenceTermHitStat, ...]
+    matched_reason: str
+    first_seen_order: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +69,25 @@ class _ChunkEvidenceMeta:
     chunk_text: str
     start_offset: int
     end_offset: int
+    first_seen_order: int
     heading_path: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _WebEvidenceMeta:
+    content_id: str
+    source_id: str
+    title: str
+    url: str
+    domain: str
+    snippet: str
+    first_seen_order: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RankPartialResult:
+    candidates: Tuple[_EvidenceCandidate, ...]
+    total_scanned: int
 
 
 def rank_evidence(
@@ -114,37 +147,55 @@ def rank_evidence(
         else:
             generic_items[cid] = stored
 
-    evidence_list: List[RankedEvidence] = []
+    content_order = {
+        cid: index
+        for index, cid in enumerate(content_ids)
+        if cid in found
+    }
+    candidate_window = max(max_evidence, max_evidence * 2)
+    candidates: List[_EvidenceCandidate] = []
     total_scanned = 0
 
     if web_search_items:
         web_result = _rank_web_search_evidence(
             query=query,
             contents=web_search_items,
-            max_evidence=max_evidence,
+            max_evidence=candidate_window,
             notes=notes,
             query_terms=query_terms,
+            content_order=content_order,
         )
-        evidence_list.extend(web_result.evidence)
+        candidates.extend(web_result.candidates)
         total_scanned += web_result.total_scanned
 
-    if generic_items and len(evidence_list) < max_evidence:
+    if generic_items:
         generic_result = _rank_generic_content_chunks(
             query=query,
             contents=generic_items,
-            max_evidence=max_evidence - len(evidence_list),
+            max_evidence=candidate_window,
             max_chunks_per_content=max_chunks_per_content,
             notes=notes,
             query_terms=query_terms,
+            content_order=content_order,
         )
-        evidence_list.extend(generic_result.evidence)
+        candidates.extend(generic_result.candidates)
         total_scanned += generic_result.total_scanned
 
-    evidence_list = sorted(
-        evidence_list,
-        key=lambda item: item.score,
-        reverse=True,
-    )[:max_evidence]
+    ranked_candidates = sorted(
+        candidates,
+        key=lambda item: (-item.score, item.first_seen_order),
+    )
+    positive_candidates = [
+        candidate for candidate in ranked_candidates if candidate.score > 0.0
+    ]
+    if candidates and not positive_candidates:
+        add_note(notes, "No positive lexical match found in ranked candidates.")
+
+    ranked_candidates = positive_candidates[:max_evidence]
+    evidence_list = [
+        _candidate_to_ranked_evidence(candidate, query_terms=query_terms)
+        for candidate in ranked_candidates
+    ]
 
     log_event(
         "evidence ranking 完成",
@@ -173,6 +224,7 @@ def _rank_generic_content_chunks(
     max_chunks_per_content: int,
     notes: List[str],
     query_terms: Tuple[str, ...],
+    content_order: Dict[str, int],
 ) -> _RankPartialResult:
     documents: List[FieldedDocument] = []
     chunk_meta: Dict[str, _ChunkEvidenceMeta] = {}
@@ -182,6 +234,8 @@ def _rank_generic_content_chunks(
         title = _display_title(stored)
         source = stored.source or ""
         url = stored.metadata.get("url", "") or ""
+        content_seen_order = content_order.get(cid, len(content_order))
+        local_order = 0
 
         if not stored.chunks:
             doc_id = f"{cid}:-1"
@@ -206,6 +260,9 @@ def _rank_generic_content_chunks(
                     chunk_text=chunk_text,
                     start_offset=0,
                     end_offset=len(chunk_text),
+                    first_seen_order=(
+                        content_seen_order * _FIRST_SEEN_CONTENT_STRIDE
+                    ),
                     heading_path=heading_path,
                 )
         else:
@@ -215,6 +272,11 @@ def _rank_generic_content_chunks(
                     continue
                 doc_id = f"{cid}:{chunk.index}"
                 heading_path = _extract_heading_path(chunk, stored)
+                first_seen_order = (
+                    content_seen_order * _FIRST_SEEN_CONTENT_STRIDE
+                    + local_order
+                )
+                local_order += 1
                 documents.append(
                     _build_chunk_fielded_document(
                         doc_id=doc_id,
@@ -233,6 +295,7 @@ def _rank_generic_content_chunks(
                     chunk_text=chunk_text,
                     start_offset=chunk.start_offset,
                     end_offset=chunk.end_offset,
+                    first_seen_order=first_seen_order,
                     heading_path=heading_path,
                 )
 
@@ -246,7 +309,7 @@ def _rank_generic_content_chunks(
 
     if not documents:
         add_note(notes, "No readable chunks found in the specified content.")
-        return _RankPartialResult(evidence=(), total_scanned=0)
+        return _RankPartialResult(candidates=(), total_scanned=0)
 
     before_dedup = len(documents)
     documents = _deduplicate_exact_chunks(documents, dedupe_texts)
@@ -258,6 +321,10 @@ def _rank_generic_content_chunks(
             before=before_dedup,
             after=len(documents),
             duplicates=dedup_hit,
+        )
+        add_note(
+            notes,
+            f"Skipped {dedup_hit} duplicate chunk(s) with identical normalized text.",
         )
 
     rank_started = time.monotonic()
@@ -276,7 +343,8 @@ def _rank_generic_content_chunks(
     )
 
     per_content_count: Dict[str, int] = {}
-    evidence_list: List[RankedEvidence] = []
+    candidates: List[_EvidenceCandidate] = []
+    max_chunks_skipped = 0
 
     for doc_id, score, rank in ranked:
         meta = chunk_meta.get(doc_id)
@@ -285,6 +353,7 @@ def _rank_generic_content_chunks(
 
         count = per_content_count.get(meta.content_id, 0)
         if count >= max_chunks_per_content:
+            max_chunks_skipped += 1
             continue
 
         field_texts = _chunk_field_texts(meta)
@@ -293,16 +362,19 @@ def _rank_generic_content_chunks(
             field_texts=field_texts,
         )
 
-        evidence_list.append(
-            RankedEvidence(
+        candidates.append(
+            _EvidenceCandidate(
                 content_id=meta.content_id,
                 chunk_index=meta.chunk_index,
+                evidence_type="chunk",
                 score=score,
-                rank=rank,
+                original_rank=rank,
                 title=meta.title,
                 source=meta.source,
                 url=meta.url,
-                excerpt=_make_excerpt(meta.chunk_text),
+                domain="",
+                source_id="",
+                excerpt_source_text=meta.chunk_text,
                 start_offset=meta.start_offset,
                 end_offset=meta.end_offset,
                 matched_reason=_build_matched_reason(
@@ -310,15 +382,23 @@ def _rank_generic_content_chunks(
                     term_hit_stats=term_hit_stats,
                 ),
                 term_hit_stats=term_hit_stats,
+                first_seen_order=meta.first_seen_order,
             )
         )
         per_content_count[meta.content_id] = count + 1
 
-        if len(evidence_list) >= max_evidence:
+        if len(candidates) >= max_evidence:
             break
 
+    if max_chunks_skipped > 0:
+        add_note(
+            notes,
+            f"Skipped {max_chunks_skipped} chunk(s) after "
+            f"max_chunks_per_content={max_chunks_per_content}.",
+        )
+
     return _RankPartialResult(
-        evidence=tuple(evidence_list),
+        candidates=tuple(candidates),
         total_scanned=total_scanned,
     )
 
@@ -330,9 +410,10 @@ def _rank_web_search_evidence(
     max_evidence: int,
     notes: List[str],
     query_terms: Tuple[str, ...],
+    content_order: Dict[str, int],
 ) -> _RankPartialResult:
     documents: List[FieldedDocument] = []
-    meta: Dict[str, Dict[str, str]] = {}
+    meta: Dict[str, _WebEvidenceMeta] = {}
 
     for cid, stored in contents.items():
         try:
@@ -346,6 +427,8 @@ def _rank_web_search_evidence(
             add_note(notes, f"web_search_evidence_pack missing results array: {cid}")
             continue
 
+        content_seen_order = content_order.get(cid, len(content_order))
+        local_order = 0
         for item in results:
             if not isinstance(item, dict):
                 continue
@@ -376,21 +459,26 @@ def _rank_web_search_evidence(
                 continue
 
             documents.append(FieldedDocument(id=doc_id, fields=fields))
-            meta[doc_id] = {
-                "content_id": cid,
-                "source_id": source_id,
-                "title": title,
-                "url": url,
-                "domain": domain,
-                "snippet": snippet,
-            }
+            meta[doc_id] = _WebEvidenceMeta(
+                content_id=cid,
+                source_id=source_id,
+                title=title,
+                url=url,
+                domain=domain,
+                snippet=snippet,
+                first_seen_order=(
+                    content_seen_order * _FIRST_SEEN_CONTENT_STRIDE
+                    + local_order
+                ),
+            )
+            local_order += 1
 
     if not documents:
         add_note(
             notes,
             "No readable web_search results found in the specified content.",
         )
-        return _RankPartialResult(evidence=(), total_scanned=0)
+        return _RankPartialResult(candidates=(), total_scanned=0)
 
     rank_started = time.monotonic()
     scores_by_id = score_fielded_bm25(
@@ -408,58 +496,96 @@ def _rank_web_search_evidence(
         rank_elapsed_ms=rank_elapsed_ms,
     )
 
-    evidence: List[RankedEvidence] = []
+    candidates: List[_EvidenceCandidate] = []
     same_domain_count: Dict[str, int] = {}
+    same_domain_skipped = 0
 
     for doc_id, score, rank in ranked:
         data = meta.get(doc_id)
         if data is None:
             continue
 
-        domain = data["domain"]
+        domain = data.domain
         domain_count = same_domain_count.get(domain, 0)
         if domain and domain_count >= 2:
+            same_domain_skipped += 1
             continue
 
         field_texts = {
-            "title": data["title"],
-            "domain": data["domain"],
-            "snippet": data["snippet"],
+            "title": data.title,
+            "domain": data.domain,
+            "snippet": data.snippet,
         }
         term_hit_stats = _build_term_hit_stats(
             query_terms=query_terms,
             field_texts=field_texts,
         )
-        evidence.append(
-            RankedEvidence(
-                content_id=data["content_id"],
+        candidates.append(
+            _EvidenceCandidate(
+                content_id=data.content_id,
                 chunk_index=-1,
                 score=score,
-                rank=rank,
-                title=data["title"],
-                source=data["domain"],
-                url=data["url"],
-                excerpt=data["snippet"],
-                source_id=data["source_id"],
-                domain=data["domain"],
+                original_rank=rank,
+                title=data.title,
+                source=data.domain,
+                url=data.url,
+                domain=data.domain,
+                source_id=data.source_id,
+                excerpt_source_text=data.snippet,
+                start_offset=0,
+                end_offset=0,
                 evidence_type="web_search_result",
                 matched_reason=_build_matched_reason(
                     evidence_type="web_search_result",
                     term_hit_stats=term_hit_stats,
                 ),
                 term_hit_stats=term_hit_stats,
+                first_seen_order=data.first_seen_order,
             )
         )
 
         if domain:
             same_domain_count[domain] = domain_count + 1
 
-        if len(evidence) >= max_evidence:
+        if len(candidates) >= max_evidence:
             break
 
+    if same_domain_skipped > 0:
+        add_note(
+            notes,
+            f"Skipped {same_domain_skipped} web result(s) after same-domain cap of 2.",
+        )
+
     return _RankPartialResult(
-        evidence=tuple(evidence),
+        candidates=tuple(candidates),
         total_scanned=len(documents),
+    )
+
+
+def _candidate_to_ranked_evidence(
+    candidate: _EvidenceCandidate,
+    *,
+    query_terms: Tuple[str, ...],
+) -> RankedEvidence:
+    return RankedEvidence(
+        content_id=candidate.content_id,
+        chunk_index=candidate.chunk_index,
+        score=candidate.score,
+        rank=candidate.original_rank,
+        title=candidate.title,
+        source=candidate.source,
+        url=candidate.url,
+        excerpt=_make_excerpt(
+            candidate.excerpt_source_text,
+            query_terms=query_terms,
+        ),
+        start_offset=candidate.start_offset,
+        end_offset=candidate.end_offset,
+        source_id=candidate.source_id,
+        domain=candidate.domain,
+        evidence_type=candidate.evidence_type,
+        matched_reason=candidate.matched_reason,
+        term_hit_stats=candidate.term_hit_stats,
     )
 
 
@@ -578,11 +704,50 @@ def _rank_fielded_documents(
     ]
 
 
-def _make_excerpt(text: str) -> str:
+def _make_excerpt(
+    text: str,
+    *,
+    query_terms: Tuple[str, ...] = (),
+) -> str:
     clean = " ".join(text.split())
-    if len(clean) > _EXCERPT_MAX_CHARS:
+    if len(clean) <= _EXCERPT_MAX_CHARS:
+        return clean
+
+    hit_index = _first_query_term_index(clean, query_terms)
+    if hit_index is None:
         return clean[:_EXCERPT_MAX_CHARS] + "..."
-    return clean
+
+    half_window = _EXCERPT_MAX_CHARS // 2
+    start = max(0, hit_index - half_window)
+    end = min(len(clean), start + _EXCERPT_MAX_CHARS)
+    start = max(0, end - _EXCERPT_MAX_CHARS)
+
+    excerpt = clean[start:end]
+    if start > 0:
+        excerpt = "..." + excerpt.lstrip()
+    if end < len(clean):
+        excerpt = excerpt.rstrip() + "..."
+    return excerpt
+
+
+def _first_query_term_index(
+    text: str,
+    query_terms: Tuple[str, ...],
+) -> Optional[int]:
+    if not query_terms:
+        return None
+
+    text_lower = text.lower()
+    hit_indexes = [
+        index
+        for term in query_terms
+        if term
+        for index in [text_lower.find(term.lower())]
+        if index >= 0
+    ]
+    if not hit_indexes:
+        return None
+    return min(hit_indexes)
 
 
 def _display_title(stored: StoredContent) -> str:

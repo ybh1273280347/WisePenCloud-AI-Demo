@@ -22,7 +22,7 @@ class UserSearchProviderConfig(Document):
 
     provider: Optional[str] = Field(
         default=None,
-        description="custom 模式下选择的搜索服务商：serper/tavily/brave/serpapi/exa/perplexity",
+        description="custom 模式下选择的搜索服务商：serper/tavily/brave/serpapi/exa/perplexity/anysearch",
     )
 
     encrypted_api_key: Optional[str] = Field(

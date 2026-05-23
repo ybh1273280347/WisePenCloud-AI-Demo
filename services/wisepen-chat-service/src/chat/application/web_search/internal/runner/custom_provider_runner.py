@@ -12,6 +12,9 @@ from chat.application.web_search.errors import (
 from chat.application.web_search.internal.cache import SearchCache, make_search_cache_key
 from chat.application.web_search.internal.models.helpers import has_response_content
 from chat.application.web_search.internal.planning.models import VariantSearchResponse
+from chat.application.web_search.internal.searcher.anysearch_searcher import (
+    AnySearchSearcher,
+)
 from chat.application.web_search.internal.searcher.brave_searcher import BraveSearcher
 from chat.application.web_search.internal.searcher.exa_searcher import ExaSearcher
 from chat.application.web_search.internal.searcher.perplexity_searcher import (
@@ -170,6 +173,7 @@ async def _run_one_custom_provider_call(
             "max_results": call.max_results,
             "language": call.variant.language,
             "with_images": provider_with_images,
+            "zone": credential.zone,
         }
     )
     cache_key = make_search_cache_key(
@@ -412,6 +416,15 @@ async def _search_custom_provider(
                 with_images=False,
                 source=source,
             )
+
+        if credential.provider == "anysearch":
+            return await searcher.search(
+                call.variant.text,
+                max_results=call.max_results,
+                with_images=False,
+                language=call.variant.language,
+                source=source,
+            )
     finally:
         await searcher.close()
 
@@ -450,6 +463,13 @@ def _build_custom_searcher(credential: CustomProviderCredential):
         return PerplexitySearcher(
             api_key=credential.api_key,
             base_url=settings.PERPLEXITY_BASE_URL,
+        )
+    if credential.provider == "anysearch":
+        return AnySearchSearcher(
+            api_key=credential.api_key or None,
+            base_url=settings.ANYSEARCH_BASE_URL,
+            timeout_seconds=settings.ANYSEARCH_TIMEOUT_SECONDS,
+            zone=credential.zone or settings.ANYSEARCH_ZONE,
         )
     raise SearchProviderError(credential.provider, "unsupported custom provider")
 

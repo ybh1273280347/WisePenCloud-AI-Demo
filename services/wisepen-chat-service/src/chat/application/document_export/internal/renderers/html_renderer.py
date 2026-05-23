@@ -44,6 +44,56 @@ blockquote {
 }
 img {
   max-width: 100%;
+  height: auto;
+}
+@page {
+  margin: 18mm 16mm;
+}
+@media print {
+  html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body {
+    color: #111827;
+    font-size: 12pt;
+    margin: 0;
+    max-width: none;
+    padding: 0;
+  }
+  main {
+    width: 100%;
+  }
+  h1, h2, h3, h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  pre, blockquote, table, img {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  pre {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+  table {
+    display: table;
+    table-layout: auto;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  img {
+    max-width: 100%;
+  }
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
 }
 """.strip()
 

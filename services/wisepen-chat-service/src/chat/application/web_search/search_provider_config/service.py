@@ -12,6 +12,7 @@ from chat.application.web_search.search_provider_config.constants import (
     MODE_DEFAULT,
     MODES,
     PROVIDERS,
+    PROVIDER_ANYSEARCH,
     PUBLIC_ERROR_NOT_CONFIGURED,
     PUBLIC_ERROR_PROVIDER_ERROR,
     STATUS_PROVIDER_ERROR,
@@ -43,6 +44,10 @@ class RuntimeSearchProviderContext:
     error_status: Optional[str] = None
     error_last_error_code: Optional[str] = None
     error_message: Optional[str] = None
+
+
+_ANYSEARCH_ANONYMOUS_ENCRYPTED_KEY = "__anysearch_anonymous__"
+_ANYSEARCH_ANONYMOUS_KEY_MARKER = "anonymous"
 
 
 class SearchProviderConfigService:
@@ -99,7 +104,7 @@ class SearchProviderConfigService:
         api_key: str,
     ) -> UserSearchProviderConfig:
         _validate_provider(provider)
-        if not api_key:
+        if not api_key and provider != PROVIDER_ANYSEARCH:
             raise ServiceException(
                 ChatErrorCode.CUSTOM_PROVIDER_NOT_CONFIGURED,
                 custom_msg="自定义搜索源 API Key 不能为空",
@@ -110,17 +115,20 @@ class SearchProviderConfigService:
                 custom_msg="自定义搜索源 API Key 不能包含首尾空白",
             )
 
-        try:
-            encrypted = self._cipher.encrypt(
-                user_id=user_id,
-                provider=provider,
-                api_key=api_key,
-            )
-        except CredentialEncryptionError as e:
-            raise ServiceException(
-                ChatErrorCode.CUSTOM_PROVIDER_ERROR,
-                custom_msg=str(e),
-            ) from e
+        if provider == PROVIDER_ANYSEARCH and not api_key:
+            encrypted = _anysearch_anonymous_credential()
+        else:
+            try:
+                encrypted = self._cipher.encrypt(
+                    user_id=user_id,
+                    provider=provider,
+                    api_key=api_key,
+                )
+            except CredentialEncryptionError as e:
+                raise ServiceException(
+                    ChatErrorCode.CUSTOM_PROVIDER_ERROR,
+                    custom_msg=str(e),
+                ) from e
 
         existing = await self._repository.get_by_user_id(user_id)
         if (
@@ -280,6 +288,11 @@ class SearchProviderConfigService:
         assert config.provider is not None
         assert config.encrypted_api_key is not None
         assert config.encryption_key_id is not None
+        if (
+            config.provider == PROVIDER_ANYSEARCH
+            and config.encrypted_api_key == _ANYSEARCH_ANONYMOUS_ENCRYPTED_KEY
+        ):
+            return ""
         return self._cipher.decrypt(
             user_id=config.user_id,
             provider=config.provider,
@@ -304,6 +317,14 @@ def _has_complete_custom_provider(
     if config is None:
         return False
 
+    if (
+        config.provider == PROVIDER_ANYSEARCH
+        and config.encrypted_api_key == _ANYSEARCH_ANONYMOUS_ENCRYPTED_KEY
+        and config.encryption_key_id == _ANYSEARCH_ANONYMOUS_KEY_MARKER
+        and config.key_fingerprint == _ANYSEARCH_ANONYMOUS_KEY_MARKER
+    ):
+        return True
+
     return all(
         (
             config.provider,
@@ -313,6 +334,20 @@ def _has_complete_custom_provider(
             config.key_prefix4,
             config.key_last4,
         )
+    )
+
+
+def _anysearch_anonymous_credential():
+    from chat.application.web_search.search_provider_config.encryption import (
+        EncryptedCredential,
+    )
+
+    return EncryptedCredential(
+        encrypted_value=_ANYSEARCH_ANONYMOUS_ENCRYPTED_KEY,
+        encryption_key_id=_ANYSEARCH_ANONYMOUS_KEY_MARKER,
+        key_fingerprint=_ANYSEARCH_ANONYMOUS_KEY_MARKER,
+        key_prefix4="",
+        key_last4="",
     )
 
 
