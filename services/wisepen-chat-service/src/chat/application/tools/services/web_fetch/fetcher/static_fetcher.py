@@ -1,6 +1,6 @@
 import asyncio
 from typing import List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from chat.application.tools.common.content_detection import ContentDetector
@@ -17,7 +17,15 @@ from chat.application.tools.services.web_fetch.fetcher.content_detection_adapter
     is_declared_unsupported_media,
     should_read_web_fetch_body,
 )
-from chat.application.tools.services.web_fetch.models import FetchedDocument
+from chat.application.tools.services.web_fetch.models import (
+    FetchedDocument,
+    FetchedPage,
+    FetchedRedirect,
+)
+from chat.application.tools.services.web_fetch.utils.page_metadata import (
+    extract_markdown_title,
+    extract_page_domain,
+)
 from common.logger import log_error, log_event, log_fail
 
 _MAX_REDIRECTS = 5
@@ -96,7 +104,9 @@ class StaticFetcher(BaseFetcher):
         self._client: Optional[httpx.AsyncClient] = None
         self._client_lock = asyncio.Lock()
 
-    async def fetch(self, url: str) -> Optional[str | FetchedDocument]:
+    async def fetch(
+        self, url: str
+    ) -> Optional[str | FetchedDocument | FetchedPage | FetchedRedirect]:
         redirect_count = 0
         current_url = url
 
@@ -116,11 +126,18 @@ class StaticFetcher(BaseFetcher):
                             )
                             return None
 
-                        current_url = urljoin(str(response.url), location)
-                        current_url = await asyncio.to_thread(
-                            validate_public_http_url, current_url
+                        next_url = urljoin(str(response.url), location)
+                        next_url = await asyncio.to_thread(
+                            validate_public_http_url, next_url
                         )
+                        if not _is_same_or_www_equivalent_host(current_url, next_url):
+                            return FetchedRedirect(
+                                url=current_url,
+                                redirect_url=next_url,
+                                status_code=response.status_code,
+                            )
 
+                        current_url = next_url
                         redirect_count += 1
                         continue
 
@@ -177,7 +194,15 @@ class StaticFetcher(BaseFetcher):
                         _log_static_fetch_fail("内容处理失败", url=current_url)
                         return None
 
-                    return processed
+                    final_url = str(response.url)
+                    return FetchedPage(
+                        markdown=processed,
+                        links=[],
+                        title=extract_markdown_title(processed),
+                        final_url=final_url,
+                        domain=extract_page_domain(final_url),
+                        status_code=response.status_code,
+                    )
 
         except UrlSecurityError:
             raise
@@ -228,3 +253,12 @@ class StaticFetcher(BaseFetcher):
                 follow_redirects=False,
             )
             return self._client
+
+
+def _is_same_or_www_equivalent_host(left_url: str, right_url: str) -> bool:
+    return _normalize_redirect_host(left_url) == _normalize_redirect_host(right_url)
+
+
+def _normalize_redirect_host(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    return host.removeprefix("www.")

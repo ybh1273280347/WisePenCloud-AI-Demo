@@ -108,7 +108,8 @@ def _install_module_stub(name: str, **attrs) -> None:
 
 
 class _ContentProcessor:
-    pass
+    def process(self, content: str) -> str:
+        return content
 
 
 class _FetchCoordinator:
@@ -122,9 +123,13 @@ class _FetchResultItem:
     content: str = ""
     document: object = None
     links: object = None
+    title: str = ""
     final_url: str = ""
+    domain: str = ""
     status_code: int | None = None
+    redirect_url: str = ""
     error: str = ""
+    fetcher: str = ""
 
 
 class _LocalScriptFetcher:

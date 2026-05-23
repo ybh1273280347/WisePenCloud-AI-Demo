@@ -15,6 +15,10 @@ from chat.application.tools.services.web_fetch.config import (
     WEB_FETCH_LOCAL_WORKER_TIMEOUT,
 )
 from chat.application.tools.services.web_fetch.models import FetchedLink, FetchedPage
+from chat.application.tools.services.web_fetch.utils.page_metadata import (
+    extract_markdown_title,
+    extract_page_domain,
+)
 from common.logger import log_event, log_error, log_fail
 
 
@@ -192,10 +196,15 @@ class _LocalWorker:
 
         self.handled_count += 1
 
+        final_url = str(response.get("finalUrl") or "")
+        title = str(response.get("title") or "") or extract_markdown_title(markdown)
+
         return FetchedPage(
             markdown=markdown,
             links=links,
-            final_url=str(response.get("finalUrl") or ""),
+            title=title,
+            final_url=final_url,
+            domain=extract_page_domain(final_url),
             status_code=response.get("statusCode"),
         )
 

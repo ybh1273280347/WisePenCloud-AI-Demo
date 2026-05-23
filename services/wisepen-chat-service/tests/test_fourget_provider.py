@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 import httpx
 import pytest
@@ -469,6 +469,85 @@ def test_default_chain_policy_is_fourget_to_serper_and_excludes_searxng() -> Non
     assert "searxng" not in [call.provider for call in fallback_calls]
 
 
+def test_deep_fourget_low_coverage_supplements_serper() -> None:
+    variant = _variant("primary query")
+    calls = select_default_provider_calls(
+        mode="deep",
+        variants=(variant,),
+        primary_responses=(
+            VariantSearchResponse(
+                variant=variant,
+                response=SearchResponse(
+                    query="primary query",
+                    results=(
+                        SearchResult(
+                            title="One",
+                            url="https://one.example/a",
+                            snippet="result",
+                        ),
+                        SearchResult(
+                            title="Two",
+                            url="https://one.example/b",
+                            snippet="result",
+                        ),
+                    ),
+                    source="fourget",
+                ),
+            ),
+        ),
+        serper_enabled=True,
+    )
+
+    assert [call.provider for call in calls] == ["serper"]
+
+
+def test_deep_fourget_sufficient_coverage_skips_serper() -> None:
+    variant = _variant("primary query")
+    calls = select_default_provider_calls(
+        mode="deep",
+        variants=(variant,),
+        primary_responses=(
+            VariantSearchResponse(
+                variant=variant,
+                response=SearchResponse(
+                    query="primary query",
+                    results=(
+                        SearchResult(
+                            title="One",
+                            url="https://one.example/a",
+                            snippet="result",
+                        ),
+                        SearchResult(
+                            title="Two",
+                            url="https://two.example/a",
+                            snippet="result",
+                        ),
+                        SearchResult(
+                            title="Three",
+                            url="https://three.example/a",
+                            snippet="result",
+                        ),
+                        SearchResult(
+                            title="Four",
+                            url="https://one.example/b",
+                            snippet="result",
+                        ),
+                        SearchResult(
+                            title="Five",
+                            url="https://two.example/b",
+                            snippet="result",
+                        ),
+                    ),
+                    source="fourget",
+                ),
+            ),
+        ),
+        serper_enabled=True,
+    )
+
+    assert calls == ()
+
+
 def test_fourget_success_does_not_call_serper() -> None:
     async def run() -> SearchResponse:
         coordinator = _coordinator(
@@ -492,7 +571,7 @@ def test_fourget_success_does_not_call_serper() -> None:
         try:
             result = await coordinator.search_many(
                 SearchManyRequest(
-                    queries=["RAG reranking", "reranking RAG"],
+                    queries=["RAG reranking"],
                     mode="fast",
                 )
             )
@@ -528,8 +607,57 @@ def test_fourget_failure_calls_serper() -> None:
         try:
             result = await coordinator.search_many(
                 SearchManyRequest(
-                    queries=["RAG reranking", "reranking RAG"],
+                    queries=["RAG reranking"],
                     mode="fast",
+                )
+            )
+            return result.response
+        finally:
+            await coordinator.close()
+
+    response = asyncio.run(run())
+
+    assert serper.calls
+    assert "serper" in (response.source or "")
+
+
+def test_deep_low_coverage_fourget_calls_serper() -> None:
+    serper = _StubSerperSearcher(
+        SearchResponse(
+            query="query",
+            results=(
+                SearchResult(
+                    title="Serper",
+                    url="https://serper.example",
+                    snippet="supplement",
+                ),
+            ),
+            source="serper",
+        )
+    )
+
+    async def run() -> SearchResponse:
+        coordinator = _coordinator(
+            fourget_searcher=_StubFourGetSearcher(
+                SearchResponse(
+                    query="query",
+                    results=(
+                        SearchResult(
+                            title="FourGet",
+                            url="https://fourget.example",
+                            snippet="primary",
+                        ),
+                    ),
+                    source="fourget",
+                )
+            ),
+            serper_searcher=serper,
+        )
+        try:
+            result = await coordinator.search_many(
+                SearchManyRequest(
+                    queries=["RAG reranking", "RAG reranking official"],
+                    mode="deep",
                 )
             )
             return result.response
@@ -574,7 +702,7 @@ def test_default_chain_still_enters_ranking_pipeline(monkeypatch: pytest.MonkeyP
         try:
             result = await coordinator.search_many(
                 SearchManyRequest(
-                    queries=["RAG reranking", "reranking RAG"],
+                    queries=["RAG reranking"],
                     mode="fast",
                 )
             )

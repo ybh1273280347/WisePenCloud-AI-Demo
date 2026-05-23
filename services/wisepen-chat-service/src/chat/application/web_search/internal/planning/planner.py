@@ -28,6 +28,7 @@ QUERY_VARIANT_MAX_RESULTS = {
         "primary": 30,
         "secondary": 15,
         "extra": 10,
+        "extra_2": 10,
     },
 }
 
@@ -40,6 +41,7 @@ QUERY_VARIANT_WEIGHTS = {
         "primary": 1.0,
         "secondary": 0.8,
         "extra": 0.5,
+        "extra_2": 0.5,
     },
 }
 

@@ -1,7 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from chat.application.tools.services.web_fetch.models import FetchedDocument, FetchedPage
+from chat.application.tools.services.web_fetch.models import (
+    FetchedDocument,
+    FetchedPage,
+    FetchedRedirect,
+)
 
 
 class BaseFetcher(ABC):
@@ -15,4 +19,6 @@ class BaseFetcher(ABC):
     name: str
 
     @abstractmethod
-    async def fetch(self, url: str) -> Optional[str | FetchedDocument | FetchedPage]: ...
+    async def fetch(
+        self, url: str
+    ) -> Optional[str | FetchedDocument | FetchedPage | FetchedRedirect]: ...

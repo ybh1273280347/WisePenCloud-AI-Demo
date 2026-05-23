@@ -13,6 +13,11 @@ from chat.application.tools.services.web_fetch.config import (
     WEB_FETCH_BROWSER_TIMEOUT,
 )
 from chat.application.tools.services.web_fetch.content_processor import ContentProcessor
+from chat.application.tools.services.web_fetch.models import FetchedPage
+from chat.application.tools.services.web_fetch.utils.page_metadata import (
+    extract_markdown_title,
+    extract_page_domain,
+)
 from chat.core.config.app_settings import settings
 from common.logger import log_event, log_fail
 from steel import AsyncSteel
@@ -76,13 +81,13 @@ class SteelFetcher(BaseFetcher):
         await self._client.close()
         log_event("SteelFetcher 关闭")
 
-    async def fetch(self, url: str) -> Optional[str]:
+    async def fetch(self, url: str) -> Optional[FetchedPage]:
         started_at = time.monotonic()
 
         async with self._semaphore:
             return await self._fetch_inner(url, started_at)
 
-    async def _fetch_inner(self, url: str, started_at: float) -> Optional[str]:
+    async def _fetch_inner(self, url: str, started_at: float) -> Optional[FetchedPage]:
         try:
             kwargs = {
                 "url": url,
@@ -139,6 +144,11 @@ class SteelFetcher(BaseFetcher):
             if result is None:
                 return None
 
+            final_url = _metadata_string(metadata, "final_url", "url") or url
+            title = _metadata_string(metadata, "title") or extract_markdown_title(
+                result
+            )
+
             log_event(
                 "SteelFetcher 完成",
                 url=url,
@@ -149,7 +159,14 @@ class SteelFetcher(BaseFetcher):
                 has_html=bool(content.html),
                 elapsed_seconds=f"{elapsed:.2f}",
             )
-            return result
+            return FetchedPage(
+                markdown=result,
+                links=[],
+                title=title,
+                final_url=final_url,
+                domain=extract_page_domain(final_url),
+                status_code=status_code,
+            )
 
         except steel.RateLimitError as e:
             elapsed = time.monotonic() - started_at
@@ -238,3 +255,15 @@ class SteelFetcher(BaseFetcher):
             has_html=bool(content.html),
         )
         return None
+
+
+def _metadata_string(metadata, *names: str) -> str:
+    if metadata is None:
+        return ""
+
+    for name in names:
+        value = getattr(metadata, name, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return ""

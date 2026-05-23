@@ -13,6 +13,8 @@ from chat.application.tools.knowledge.tool_content_batch_read_tool import (
     ToolContentBatchReadTool,
 )
 from chat.application.tools.knowledge.tool_content_read_tool import ToolContentReadTool
+from chat.application.tools.services.web_fetch.fetch_coordinator import FetchResultItem
+from chat.application.tools.web.web_fetch_tool import WebFetchTool
 from chat.application.tools.services.evidence_ranking import (
     format_evidence_result,
     rank_evidence,
@@ -30,25 +32,34 @@ from chat.application.web_search import (
     SearchResponse,
     SearchResult,
 )
+from chat.application.web_search.internal.planning.planner import build_search_plan
 
 
 class _StaticSearchCoordinator:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        results: tuple[SearchResult, ...] | None = None,
+        source: str = "test",
+    ) -> None:
         self.request = None
+        self.results = results
+        self.source = source
 
     async def search_many(self, request):
         self.request = request
         return SearchManyResult(
             response=SearchResponse(
                 query="artifact protocol",
-                source="test",
+                source=self.source,
                 images=(
                     ImageResult(
                         url="https://img.example/search.png",
                         desc="search image",
                     ),
                 ),
-                results=(
+                results=self.results
+                or (
                     SearchResult(
                         title="Alpha protocol",
                         url="https://alpha.example/docs",
@@ -77,10 +88,48 @@ class _StaticSearchCoordinator:
         )
 
 
+class _StaticFetchCoordinator:
+    def __init__(self, mapping: dict[str, FetchResultItem]) -> None:
+        self.mapping = mapping
+        self.calls: list[list[str]] = []
+
+    async def fetch_many(self, urls: list[str]) -> list[FetchResultItem]:
+        self.calls.append(list(urls))
+        return [
+            self.mapping.get(
+                url,
+                FetchResultItem(url=url, success=False, error="missing fake response"),
+            )
+            for url in urls
+        ]
+
+
+class _UnusedFileHandoffStore:
+    def write_bytes(self, **kwargs):
+        raise AssertionError("document handoff should not be used in this test")
+
+
 def _content_id_from_receipt(receipt: str) -> str:
     match = re.search(r"^content_id: (cnt_[a-f0-9]+)$", receipt, re.MULTILINE)
     assert match is not None
     return match.group(1)
+
+
+def _suggested_source_ids_from_result(result: str) -> list[str]:
+    match = re.search(r"^suggested_fetch_source_ids: (.+)$", result, re.MULTILINE)
+    assert match is not None
+    return json.loads(match.group(1))
+
+
+def _needle_results(count: int) -> tuple[SearchResult, ...]:
+    return tuple(
+        SearchResult(
+            title=f"Needle guide {index}",
+            url=f"https://source{index}.example/docs",
+            snippet=f"needle{index} verification evidence from source {index}.",
+        )
+        for index in range(1, count + 1)
+    )
 
 
 def test_evidence_rank_models_term_hit_stats_defaults() -> None:
@@ -143,6 +192,259 @@ def test_cache_and_format_still_returns_content_window() -> None:
     assert "[Content]\nvisible window body" in result
 
 
+def test_web_search_schema_includes_objective() -> None:
+    tool = WebSearchTool(coordinator=_StaticSearchCoordinator())
+
+    objective_schema = tool.parameters_schema["properties"]["objective"]
+
+    assert objective_schema["type"] == "string"
+    assert "actual information goal" in objective_schema["description"]
+    assert tool.parameters_schema["properties"]["allowed_domains"]["type"] == "array"
+    assert tool.parameters_schema["properties"]["blocked_domains"]["type"] == "array"
+
+
+def test_web_fetch_caches_page_provenance_metadata() -> None:
+    coordinator = _StaticFetchCoordinator(
+        {
+            "https://alpha.example/docs": FetchResultItem(
+                url="https://alpha.example/docs",
+                success=True,
+                content="# Alpha Docs\n\nreceipt protocol evidence",
+                title="Alpha Docs",
+                final_url="https://alpha.example/docs?ref=final",
+                domain="alpha.example",
+                status_code=200,
+                fetcher="StaticFetcher",
+            ),
+        }
+    )
+    tool = WebFetchTool(
+        fetcher=coordinator,
+        file_handoff_store=_UnusedFileHandoffStore(),
+    )
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-fetch-meta", "user_id": "user-1"},
+            urls=["https://alpha.example/docs"],
+            objective="verify receipt protocol",
+        )
+    )
+
+    content_id = _content_id_from_receipt(result)
+    stored = tool_content_store.get(
+        content_id=content_id,
+        session_id="session-fetch-meta",
+    )
+
+    assert coordinator.calls == [["https://alpha.example/docs"]]
+    assert stored is not None
+    assert stored.metadata["content_kind"] == "web_page"
+    assert stored.metadata["url"] == "https://alpha.example/docs"
+    assert stored.metadata["final_url"] == "https://alpha.example/docs?ref=final"
+    assert stored.metadata["title"] == "Alpha Docs"
+    assert stored.metadata["domain"] == "alpha.example"
+    assert stored.metadata["status_code"] == 200
+    assert stored.metadata["fetcher"] == "StaticFetcher"
+    assert stored.metadata["cache_hit"] is False
+    assert stored.metadata["objective"] == "verify receipt protocol"
+    assert "title: Alpha Docs" in result
+    assert "final_url: https://alpha.example/docs?ref=final" in result
+    assert "[Page Evidence]" in result
+    assert "raw_content_id:" in result
+    assert "objective: verify receipt protocol" in result
+    assert "final_answer_generated: false" in result
+    assert "extracted_evidence:" in result
+    assert "lexical_score:" in result
+    assert "receipt protocol evidence" in result
+    assert "confidence" not in result.lower()
+    assert "probability" not in result.lower()
+
+
+def test_web_fetch_resolves_source_ids_from_web_search_artifact() -> None:
+    receipt = cache_artifact_and_format_receipt(
+        session_id="session-source-fetch",
+        tool_name="web_search",
+        source="alpha",
+        text=json.dumps(
+            {
+                "content_kind": "web_search_evidence_pack",
+                "results": [
+                    {
+                        "source_id": "3",
+                        "title": "Alpha Docs",
+                        "url": "https://alpha.example/docs",
+                        "domain": "alpha.example",
+                        "snippet": "Alpha receipt protocol.",
+                    },
+                    {
+                        "source_id": "7",
+                        "title": "Beta Docs",
+                        "url": "https://beta.example/docs",
+                        "domain": "beta.example",
+                        "snippet": "Beta receipt protocol.",
+                    },
+                ],
+            }
+        ),
+        metadata={"content_kind": "web_search_evidence_pack"},
+    )
+    search_content_id = _content_id_from_receipt(receipt)
+    coordinator = _StaticFetchCoordinator(
+        {
+            "https://alpha.example/docs": FetchResultItem(
+                url="https://alpha.example/docs",
+                success=True,
+                content="# Alpha Page\n\nsource id fetch evidence",
+                final_url="https://alpha.example/docs",
+                status_code=200,
+                fetcher="StaticFetcher",
+            ),
+        }
+    )
+    tool = WebFetchTool(
+        fetcher=coordinator,
+        file_handoff_store=_UnusedFileHandoffStore(),
+    )
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-source-fetch", "user_id": "user-1"},
+            from_search_content_id=search_content_id,
+            source_ids=["3"],
+            objective="check source id fetch",
+        )
+    )
+
+    fetched_content_id = _content_id_from_receipt(result)
+    stored = tool_content_store.get(
+        content_id=fetched_content_id,
+        session_id="session-source-fetch",
+    )
+
+    assert coordinator.calls == [["https://alpha.example/docs"]]
+    assert stored is not None
+    assert stored.metadata["source_id"] == "3"
+    assert stored.metadata["from_search_content_id"] == search_content_id
+    assert stored.metadata["url"] == "https://alpha.example/docs"
+    assert stored.metadata["title"] == "Alpha Docs"
+    assert stored.metadata["domain"] == "alpha.example"
+    assert stored.metadata["objective"] == "check source id fetch"
+    assert f"from_search_content_id: {search_content_id}" in result
+    assert "source_id: 3" in result
+    assert "[Page Evidence]" in result
+    assert "objective: check source id fetch" in result
+    assert "source id fetch evidence" in result
+
+
+def test_web_fetch_without_objective_keeps_raw_window_only() -> None:
+    coordinator = _StaticFetchCoordinator(
+        {
+            "https://alpha.example/docs": FetchResultItem(
+                url="https://alpha.example/docs",
+                success=True,
+                content="# Alpha Docs\n\nreceipt protocol evidence",
+                title="Alpha Docs",
+                final_url="https://alpha.example/docs",
+                domain="alpha.example",
+                status_code=200,
+                fetcher="StaticFetcher",
+            ),
+        }
+    )
+    tool = WebFetchTool(
+        fetcher=coordinator,
+        file_handoff_store=_UnusedFileHandoffStore(),
+    )
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-fetch-no-objective", "user_id": "user-1"},
+            urls=["https://alpha.example/docs"],
+        )
+    )
+
+    content_id = _content_id_from_receipt(result)
+    stored = tool_content_store.get(
+        content_id=content_id,
+        session_id="session-fetch-no-objective",
+    )
+
+    assert stored is not None
+    assert "objective" not in stored.metadata
+    assert "[Page Evidence]" not in result
+
+
+def test_web_fetch_objective_no_positive_match_keeps_raw_content_id() -> None:
+    coordinator = _StaticFetchCoordinator(
+        {
+            "https://alpha.example/docs": FetchResultItem(
+                url="https://alpha.example/docs",
+                success=True,
+                content="# Alpha Docs\n\nreceipt protocol evidence",
+                title="Alpha Docs",
+                final_url="https://alpha.example/docs",
+                domain="alpha.example",
+                status_code=200,
+                fetcher="StaticFetcher",
+            ),
+        }
+    )
+    tool = WebFetchTool(
+        fetcher=coordinator,
+        file_handoff_store=_UnusedFileHandoffStore(),
+    )
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-fetch-no-match", "user_id": "user-1"},
+            urls=["https://alpha.example/docs"],
+            objective="zzzzzz yyyyyy qqqqqq",
+        )
+    )
+
+    raw_content_id = _content_id_from_receipt(result)
+
+    assert f"raw_content_id: {raw_content_id}" in result
+    assert "extracted_evidence: []" in result
+    assert "needs_more_context: true" in result
+    assert "No positive lexical match" in result
+
+
+def test_web_fetch_formats_cross_host_redirect_result() -> None:
+    coordinator = _StaticFetchCoordinator(
+        {
+            "https://alpha.example/start": FetchResultItem(
+                url="https://alpha.example/start",
+                success=False,
+                status_code=302,
+                redirect_url="https://beta.example/final",
+                error="Cross-host redirect requires explicit web_fetch call.",
+                fetcher="StaticFetcher",
+            ),
+        }
+    )
+    tool = WebFetchTool(
+        fetcher=coordinator,
+        file_handoff_store=_UnusedFileHandoffStore(),
+    )
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-fetch-redirect", "user_id": "user-1"},
+            urls=["https://alpha.example/start"],
+        )
+    )
+
+    assert coordinator.calls == [["https://alpha.example/start"]]
+    assert "[Redirect]" in result
+    assert "redirect_url: https://beta.example/final" in result
+    assert "status_code: 302" in result
+    assert "cross-host redirects require an explicit follow-up fetch" in result
+    assert "confidence" not in result.lower()
+    assert "probability" not in result.lower()
+
+
 def test_web_search_fast_returns_snippets() -> None:
     coordinator = _StaticSearchCoordinator()
     tool = WebSearchTool(coordinator=coordinator)
@@ -150,7 +452,7 @@ def test_web_search_fast_returns_snippets() -> None:
     result = asyncio.run(
         tool.execute(
             {"session_id": "session-fast", "user_id": "user-1"},
-            queries=["evidence protocol", "artifact rank"],
+            queries=["evidence protocol"],
             mode="fast",
         )
     )
@@ -162,7 +464,26 @@ def test_web_search_fast_returns_snippets() -> None:
     assert coordinator.request.mode == "fast"
 
 
-def test_web_search_normal_returns_receipt_only_artifact() -> None:
+def test_deep_search_plan_consumes_four_query_variants() -> None:
+    queries = [
+        "alpha protocol",
+        "beta protocol",
+        "gamma protocol",
+        "delta protocol",
+    ]
+
+    plan = build_search_plan(mode="deep", queries=queries)
+
+    assert [variant.text for variant in plan.query_variants] == queries
+    assert [variant.role for variant in plan.query_variants] == [
+        "primary",
+        "secondary",
+        "extra",
+        "extra_2",
+    ]
+
+
+def test_web_search_normal_returns_receipt_and_ranked_evidence() -> None:
     coordinator = _StaticSearchCoordinator()
     tool = WebSearchTool(coordinator=coordinator)
 
@@ -187,7 +508,17 @@ def test_web_search_normal_returns_receipt_only_artifact() -> None:
     assert "blocking_final_answer: true" in result
     assert "Snippet:" not in result
     assert "Sources (reranked order for citations)" not in result
-    assert "Alpha evidence receipt protocol" not in result
+    assert "[WebSearch Ranking]" in result
+    assert f"search_content_id: {content_id}" in result
+    assert "ranked_search_evidence:" in result
+    assert "source_id: 1" in result
+    assert "title: Alpha protocol" in result
+    assert "domain: alpha.example" in result
+    assert "url: https://alpha.example/docs" in result
+    assert "snippet: Alpha evidence receipt protocol" in result
+    assert "lexical_score:" in result
+    assert "confidence" not in result.lower()
+    assert "probability" not in result.lower()
     assert stored.content_type == "application/json"
     assert stored.metadata["required_next_tool"] == "evidence_rank"
     assert stored.metadata["blocking_final_answer"] is True
@@ -230,6 +561,245 @@ def test_web_search_deep_returns_receipt_only_artifact() -> None:
     assert json.loads(stored.text)["mode"] == "deep"
 
 
+def test_web_search_uses_objective_for_internal_ranking() -> None:
+    coordinator = _StaticSearchCoordinator()
+    tool = WebSearchTool(coordinator=coordinator)
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-objective", "user_id": "user-1"},
+            queries=["evidence protocol", "artifact rank"],
+            objective="runtime required tool followup",
+            mode="normal",
+        )
+    )
+
+    assert "ranking_query_used: runtime required tool followup" in result
+    assert "suggested_fetch_source_ids: [\"2\"]" in result
+    assert "source_id: 2" in result
+    assert "source_id: 1" not in result
+    assert "title: Beta runtime" in result
+
+
+def test_web_search_allowed_domains_filters_after_recall() -> None:
+    coordinator = _StaticSearchCoordinator()
+    tool = WebSearchTool(coordinator=coordinator)
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-allowed-domains", "user_id": "user-1"},
+            queries=["evidence protocol"],
+            mode="normal",
+            objective="runtime required tool followup",
+            allowed_domains=["beta.example"],
+        )
+    )
+
+    content_id = _content_id_from_receipt(result)
+    stored = tool_content_store.get(
+        content_id=content_id,
+        session_id="session-allowed-domains",
+    )
+    payload = json.loads(stored.text)
+
+    assert coordinator.request.queries == ["evidence protocol"]
+    assert payload["summary"]["result_count"] == 1
+    assert payload["summary"]["domain_filters"]["allowed_domains"] == [
+        "beta.example"
+    ]
+    assert payload["results"][0]["url"] == "https://beta.example/runtime"
+    assert payload["results"][0]["source_id"] == "1"
+    assert "https://alpha.example/docs" not in stored.text
+    assert "Domain filters removed 2 search results" in result
+    assert "suggested_fetch_source_ids: [\"1\"]" in result
+
+
+def test_web_search_blocked_domains_filters_after_recall() -> None:
+    coordinator = _StaticSearchCoordinator()
+    tool = WebSearchTool(coordinator=coordinator)
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-blocked-domains", "user_id": "user-1"},
+            queries=["evidence protocol"],
+            mode="normal",
+            objective="runtime required tool followup",
+            blocked_domains=["alpha.example"],
+        )
+    )
+
+    content_id = _content_id_from_receipt(result)
+    stored = tool_content_store.get(
+        content_id=content_id,
+        session_id="session-blocked-domains",
+    )
+    payload = json.loads(stored.text)
+
+    assert payload["summary"]["result_count"] == 2
+    assert payload["summary"]["domain_filters"]["blocked_domains"] == [
+        "alpha.example"
+    ]
+    assert all(item["domain"] != "alpha.example" for item in payload["results"])
+    assert "Domain filters removed 1 search results" in result
+    assert "https://alpha.example/docs" not in stored.text
+
+
+def test_web_search_rejects_invalid_domain_filters() -> None:
+    coordinator = _StaticSearchCoordinator()
+    tool = WebSearchTool(coordinator=coordinator)
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-invalid-domain-filter", "user_id": "user-1"},
+            queries=["evidence protocol"],
+            mode="normal",
+            allowed_domains=["example.com/docs"],
+        )
+    )
+
+    assert "[Tool Error]" in result
+    assert "allowed_domains items must be bare domains" in result
+
+
+def test_web_search_without_objective_falls_back_to_joined_queries() -> None:
+    coordinator = _StaticSearchCoordinator()
+    tool = WebSearchTool(coordinator=coordinator)
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-objective-fallback", "user_id": "user-1"},
+            queries=["evidence protocol", "artifact rank"],
+            mode="normal",
+        )
+    )
+
+    assert "ranking_query_used: evidence protocol artifact rank" in result
+    assert "objective was not provided" in result
+
+
+def test_web_search_no_positive_match_keeps_search_content_id_only() -> None:
+    coordinator = _StaticSearchCoordinator()
+    tool = WebSearchTool(coordinator=coordinator)
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-no-positive", "user_id": "user-1"},
+            queries=["evidence protocol", "artifact rank"],
+            objective="zzzzzz yyyyyy qqqqqq",
+            mode="normal",
+        )
+    )
+
+    content_id = _content_id_from_receipt(result)
+    stored = tool_content_store.get(
+        content_id=content_id,
+        session_id="session-no-positive",
+    )
+
+    assert stored is not None
+    assert f"search_content_id: {content_id}" in result
+    assert "ranked_search_evidence: []" in result
+    assert "suggested_fetch_source_ids: []" in result
+    assert "No positive lexical match" in result
+
+
+def test_web_search_suggested_fetch_source_ids_feed_web_fetch() -> None:
+    search_coordinator = _StaticSearchCoordinator()
+    search_tool = WebSearchTool(coordinator=search_coordinator)
+
+    search_result = asyncio.run(
+        search_tool.execute(
+            {"session_id": "session-search-to-fetch", "user_id": "user-1"},
+            queries=["evidence protocol", "artifact rank"],
+            objective="runtime required tool followup",
+            mode="normal",
+        )
+    )
+
+    search_content_id = _content_id_from_receipt(search_result)
+    source_ids = _suggested_source_ids_from_result(search_result)
+    assert source_ids[0] == "2"
+
+    fetch_coordinator = _StaticFetchCoordinator(
+        {
+            "https://beta.example/runtime": FetchResultItem(
+                url="https://beta.example/runtime",
+                success=True,
+                content="# Beta Runtime\n\nFetched runtime evidence.",
+                final_url="https://beta.example/runtime",
+                status_code=200,
+                fetcher="StaticFetcher",
+            ),
+        }
+    )
+    fetch_tool = WebFetchTool(
+        fetcher=fetch_coordinator,
+        file_handoff_store=_UnusedFileHandoffStore(),
+    )
+
+    fetch_result = asyncio.run(
+        fetch_tool.execute(
+            {"session_id": "session-search-to-fetch", "user_id": "user-1"},
+            from_search_content_id=search_content_id,
+            source_ids=[source_ids[0]],
+            objective="runtime required tool followup",
+        )
+    )
+
+    assert fetch_coordinator.calls == [["https://beta.example/runtime"]]
+    assert "source_id: 2" in fetch_result
+    assert f"from_search_content_id: {search_content_id}" in fetch_result
+
+
+def test_web_search_suggested_fetch_limits_by_mode() -> None:
+    cases = [
+        ("fast", ["needle search"], 2),
+        ("normal", ["needle search", "needle guide"], 3),
+        ("deep", ["needle search", "needle guide"], 5),
+    ]
+    objective = "needle1 needle2 needle3 needle4 needle5"
+
+    for mode, queries, expected_count in cases:
+        coordinator = _StaticSearchCoordinator(results=_needle_results(6))
+        tool = WebSearchTool(coordinator=coordinator)
+
+        result = asyncio.run(
+            tool.execute(
+                {"session_id": f"session-suggest-{mode}", "user_id": "user-1"},
+                queries=queries,
+                objective=objective,
+                mode=mode,
+            )
+        )
+
+        source_ids = _suggested_source_ids_from_result(result)
+        assert len(source_ids) == expected_count
+        assert source_ids == [str(index) for index in range(1, expected_count + 1)]
+
+
+def test_web_search_deep_accepts_four_queries() -> None:
+    coordinator = _StaticSearchCoordinator()
+    tool = WebSearchTool(coordinator=coordinator)
+    queries = [
+        "alpha protocol",
+        "beta protocol",
+        "gamma protocol",
+        "delta protocol",
+    ]
+
+    result = asyncio.run(
+        tool.execute(
+            {"session_id": "session-deep-four", "user_id": "user-1"},
+            queries=queries,
+            mode="deep",
+        )
+    )
+
+    assert "[ToolContent Receipt]" in result
+    assert coordinator.request is not None
+    assert coordinator.request.queries == queries
+
+
 def test_web_search_strict_parameter_validation() -> None:
     tool = WebSearchTool(coordinator=_StaticSearchCoordinator())
     context = {"session_id": "session-validation", "user_id": "user-1"}
@@ -247,15 +817,39 @@ def test_web_search_strict_parameter_validation() -> None:
     assert "with_images must be a boolean" in asyncio.run(
         tool.execute(
             context,
-            queries=["evidence protocol", "artifact rank"],
+            queries=["evidence protocol"],
             mode="fast",
             with_images="true",
+        )
+    )
+    assert "objective must be a string" in asyncio.run(
+        tool.execute(
+            context,
+            queries=["evidence protocol"],
+            mode="fast",
+            objective=123,
+        )
+    )
+    assert "objective must be a non-empty string" in asyncio.run(
+        tool.execute(
+            context,
+            queries=["evidence protocol"],
+            mode="fast",
+            objective="   ",
+        )
+    )
+    assert "objective must not contain leading" in asyncio.run(
+        tool.execute(
+            context,
+            queries=["evidence protocol"],
+            mode="fast",
+            objective=" evidence protocol",
         )
     )
     assert "queries items must not contain leading" in asyncio.run(
         tool.execute(
             context,
-            queries=[" evidence protocol", "artifact rank"],
+            queries=[" evidence protocol"],
             mode="fast",
         )
     )
@@ -263,7 +857,28 @@ def test_web_search_strict_parameter_validation() -> None:
         tool.execute(
             context,
             queries=["evidence protocol", "evidence  protocol"],
+            mode="normal",
+        )
+    )
+    assert "fast mode requires exactly 1 search query" in asyncio.run(
+        tool.execute(
+            context,
+            queries=["evidence protocol", "artifact rank"],
             mode="fast",
+        )
+    )
+    assert "normal mode requires 1-2 search queries" in asyncio.run(
+        tool.execute(
+            context,
+            queries=["evidence protocol", "artifact rank", "source ranking"],
+            mode="normal",
+        )
+    )
+    assert "deep mode requires 2-4 search queries" in asyncio.run(
+        tool.execute(
+            context,
+            queries=["evidence protocol"],
+            mode="deep",
         )
     )
     assert "wikipedia_keywords must be a list" in asyncio.run(

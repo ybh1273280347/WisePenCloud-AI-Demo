@@ -10,6 +10,10 @@ from chat.application.web_search.internal.planning.models import (
     VariantSearchResponse,
 )
 from chat.application.web_search.provider_policy import CustomProviderCredential
+from chat.application.web_search.utils.domains import extract_domain
+
+_DEEP_FOURGET_MIN_USEFUL_RESULTS = 5
+_DEEP_FOURGET_MIN_UNIQUE_DOMAINS = 3
 
 @dataclass(frozen=True, slots=True)
 class ProviderCapabilities:
@@ -87,6 +91,8 @@ def select_default_provider_calls(
     if primary_provider == "fourget":
         if mode in {"fast", "normal", "deep"} and useful == 0:
             return (ProviderCall("serper", primary, primary.max_results),)
+        if mode == "deep" and _needs_deep_serper_supplement(primary_responses):
+            return (ProviderCall("serper", primary, primary.max_results),)
         return ()
 
     if mode == "fast":
@@ -162,6 +168,27 @@ def total_useful_results(
             if result.title.strip() and result.url.strip():
                 total += 1
     return total
+
+
+def _needs_deep_serper_supplement(
+    responses: Sequence[VariantSearchResponse],
+) -> bool:
+    useful = total_useful_results(responses)
+    if useful < _DEEP_FOURGET_MIN_USEFUL_RESULTS:
+        return True
+    return unique_result_domains(responses) < _DEEP_FOURGET_MIN_UNIQUE_DOMAINS
+
+
+def unique_result_domains(
+    responses: Sequence[VariantSearchResponse],
+) -> int:
+    domains: set[str] = set()
+    for item in responses:
+        for result in item.response.results:
+            domain = extract_domain(result.url)
+            if domain:
+                domains.add(domain)
+    return len(domains)
 
 
 def hash_user_id(user_id: Optional[str]) -> Optional[str]:

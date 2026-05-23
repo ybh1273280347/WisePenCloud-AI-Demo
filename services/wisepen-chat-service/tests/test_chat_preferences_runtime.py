@@ -215,7 +215,7 @@ def test_web_search_uses_runtime_search_config_and_no_locale_hint() -> None:
                     }
                 ],
             },
-            queries=["python typing best practices", "Python typing guide"],
+            queries=["python typing best practices"],
             mode="fast",
         )
     )
@@ -235,7 +235,7 @@ def test_web_search_requires_ascii_english_query() -> None:
     result = asyncio.run(
         tool.execute(
             {"session_id": "session-1", "user_id": "user-1"},
-            queries=["Python typing 最佳实践", "typing guía"],
+            queries=["Python typing 最佳实践"],
             mode="fast",
         )
     )

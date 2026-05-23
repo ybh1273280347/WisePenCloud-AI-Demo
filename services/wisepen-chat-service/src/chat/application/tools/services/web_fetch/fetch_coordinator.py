@@ -16,6 +16,7 @@ from chat.application.tools.services.web_fetch.models import (
     FetchedDocument,
     FetchedLink,
     FetchedPage,
+    FetchedRedirect,
 )
 from common.logger import log_event, log_fail, log_ok
 
@@ -36,8 +37,11 @@ class FetchResultItem:
     content: Optional[str] = None
     document: Optional[FetchedDocument] = None
     links: Optional[List[FetchedLink]] = None
+    title: Optional[str] = None
     final_url: Optional[str] = None
+    domain: Optional[str] = None
     status_code: Optional[int] = None
+    redirect_url: Optional[str] = None
     error: Optional[str] = None
     fetcher: Optional[str] = None
 
@@ -123,7 +127,9 @@ class FetchCoordinator:
                     success=True,
                     content=cached.markdown,
                     links=cached.links,
+                    title=cached.title or None,
                     final_url=cached.final_url or None,
+                    domain=cached.domain or None,
                     status_code=cached.status_code,
                     fetcher="cache",
                 )
@@ -200,14 +206,41 @@ class FetchCoordinator:
                     fetcher=step.fetcher_name,
                 )
 
+            if isinstance(content, FetchedRedirect):
+                return FetchResultItem(
+                    url=url,
+                    success=False,
+                    status_code=content.status_code,
+                    redirect_url=content.redirect_url,
+                    error="Cross-host redirect requires explicit web_fetch call.",
+                    fetcher=step.fetcher_name,
+                )
+
             page_links: Optional[List[FetchedLink]] = None
+            title: Optional[str] = None
             final_url: Optional[str] = None
+            domain: Optional[str] = None
             status_code: Optional[int] = None
             if isinstance(content, FetchedPage):
                 page_links = content.links
+                title = content.title or None
                 final_url = content.final_url or None
+                domain = content.domain or None
                 status_code = content.status_code
                 content = content.markdown
+
+                if final_url and _is_cross_host_redirect(url, final_url):
+                    return FetchResultItem(
+                        url=url,
+                        success=False,
+                        title=title,
+                        final_url=final_url,
+                        domain=domain,
+                        status_code=status_code,
+                        redirect_url=final_url,
+                        error="Cross-host redirect requires explicit web_fetch call.",
+                        fetcher=step.fetcher_name,
+                    )
 
             result = content.strip()
 
@@ -236,7 +269,9 @@ class FetchCoordinator:
                     FetchedPage(
                         markdown=result,
                         links=page_links or [],
+                        title=title or "",
                         final_url=final_url or "",
+                        domain=domain or "",
                         status_code=status_code,
                     ),
                 )
@@ -247,7 +282,9 @@ class FetchCoordinator:
                 success=True,
                 content=result,
                 links=page_links,
+                title=title,
                 final_url=final_url,
+                domain=domain,
                 status_code=status_code,
                 fetcher=step.fetcher_name,
             )
@@ -384,6 +421,15 @@ def _build_chain(
 def _is_document_url(url: str) -> bool:
     url_path = urlparse(url).path.lower()
     return any(url_path.endswith(extension) for extension in DOCUMENT_EXTENSIONS)
+
+
+def _is_cross_host_redirect(original_url: str, final_url: str) -> bool:
+    return _normalize_host(original_url) != _normalize_host(final_url)
+
+
+def _normalize_host(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    return host.removeprefix("www.")
 
 
 def _format_exhausted_error(failures: List[FetchAttemptFailure]) -> str:

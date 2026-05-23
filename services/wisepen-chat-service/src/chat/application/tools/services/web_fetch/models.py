@@ -21,5 +21,14 @@ class FetchedLink:
 class FetchedPage:
     markdown: str
     links: List[FetchedLink]
+    title: str = ""
     final_url: str = ""
+    domain: str = ""
+    status_code: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FetchedRedirect:
+    url: str
+    redirect_url: str
     status_code: int | None = None

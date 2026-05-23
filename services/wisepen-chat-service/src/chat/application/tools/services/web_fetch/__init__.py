@@ -7,12 +7,13 @@ from .errors import (
     WebFetchTimeoutError,
 )
 from .fetch_coordinator import FetchCoordinator, FetchResultItem
-from .models import FetchedDocument, FetchedLink, FetchedPage
+from .models import FetchedDocument, FetchedLink, FetchedPage, FetchedRedirect
 
 __all__ = [
     "FetchedDocument",
     "FetchedLink",
     "FetchedPage",
+    "FetchedRedirect",
     "FetchCoordinator",
     "FetchResultItem",
     "FetchProviderError",

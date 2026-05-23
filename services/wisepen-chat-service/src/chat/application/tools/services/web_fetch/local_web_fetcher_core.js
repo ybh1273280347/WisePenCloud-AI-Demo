@@ -608,6 +608,7 @@ async function fetchPage(url, options = {}) {
     return {
       markdown,
       links,
+      title,
       finalUrl,
       statusCode,
     };

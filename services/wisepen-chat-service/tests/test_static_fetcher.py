@@ -13,7 +13,11 @@ from chat.application.tools.common.content_detection import (
 from chat.application.tools.services.web_fetch.errors import UnsupportedMediaError
 from chat.application.tools.services.web_fetch.fetcher import static_fetcher as static_fetcher_module
 from chat.application.tools.services.web_fetch.fetcher.static_fetcher import StaticFetcher
-from chat.application.tools.services.web_fetch.models import FetchedDocument
+from chat.application.tools.services.web_fetch.models import (
+    FetchedDocument,
+    FetchedPage,
+    FetchedRedirect,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -57,7 +61,11 @@ async def test_static_fetcher_html_response_returns_text() -> None:
     finally:
         await fetcher.close()
 
-    assert result == "<html>ok</html>"
+    assert isinstance(result, FetchedPage)
+    assert result.markdown == "<html>ok</html>"
+    assert result.final_url == "https://example.com/page"
+    assert result.domain == "example.com"
+    assert result.status_code == 200
 
 
 async def test_static_fetcher_image_response_does_not_read_body() -> None:
@@ -146,8 +154,10 @@ async def test_static_fetcher_body_size_limit_still_applies() -> None:
     assert stream.was_read is False
 
 
-async def test_static_fetcher_redirect_url_is_validated(monkeypatch: pytest.MonkeyPatch) -> None:
-    validated_urls: List[str] = []
+async def test_static_fetcher_same_host_redirect_is_followed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validated_urls: list[str] = []
 
     def fake_validate(url: str) -> str:
         validated_urls.append(url)
@@ -157,7 +167,7 @@ async def test_static_fetcher_redirect_url_is_validated(monkeypatch: pytest.Monk
         if str(request.url) == "https://example.com/start":
             return httpx.Response(
                 302,
-                headers={"location": "https://example.org/final"},
+                headers={"location": "https://www.example.com/final"},
                 request=request,
             )
         return httpx.Response(
@@ -178,7 +188,49 @@ async def test_static_fetcher_redirect_url_is_validated(monkeypatch: pytest.Monk
     finally:
         await fetcher.close()
 
-    assert result == "redirected"
+    assert isinstance(result, FetchedPage)
+    assert result.markdown == "redirected"
+    assert result.final_url == "https://www.example.com/final"
+    assert result.domain == "example.com"
+    assert result.status_code == 200
+    assert validated_urls == ["https://www.example.com/final"]
+
+
+async def test_static_fetcher_cross_host_redirect_returns_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validated_urls: list[str] = []
+
+    def fake_validate(url: str) -> str:
+        validated_urls.append(url)
+        return url
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://example.com/start":
+            return httpx.Response(
+                302,
+                headers={"location": "https://example.org/final"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=b"redirected",
+            request=request,
+        )
+
+    monkeypatch.setattr(static_fetcher_module, "validate_public_http_url", fake_validate)
+    fetcher = _fetcher_with_transport(httpx.MockTransport(handler))
+
+    try:
+        result = await fetcher.fetch("https://example.com/start")
+    finally:
+        await fetcher.close()
+
+    assert isinstance(result, FetchedRedirect)
+    assert result.url == "https://example.com/start"
+    assert result.redirect_url == "https://example.org/final"
+    assert result.status_code == 302
     assert validated_urls == ["https://example.org/final"]
 
 

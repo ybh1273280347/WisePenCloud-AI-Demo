@@ -1,11 +1,18 @@
+import asyncio
 import inspect
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 from chat.application.algorithms.url import canonicalize_url
 from chat.application.tools.common.tool_content_store import (
-    cache_artifact_and_format_receipt,
+    tool_content_store,
+)
+from chat.application.tools.services.evidence_ranking import rank_evidence
+from chat.application.tools.services.evidence_ranking.models import (
+    EvidenceRankResult,
+    RankedEvidence,
 )
 from chat.application.runtime_context import get_runtime_context
 from chat.application.web_search import (
@@ -28,11 +35,16 @@ from chat.application.web_search.utils.domains import (
 )
 from chat.application.web_search.utils.notes import add_note
 from chat.application.web_search.utils.queries import normalize_queries
+from chat.core.content_store.formatters import format_tool_content_receipt
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_event, log_fail, log_ok
 
-_SEARCH_QUERY_MIN_COUNT = 2
 _SEARCH_QUERY_LIMIT = 4
+_SEARCH_QUERY_BUDGETS = {
+    "fast": (1, 1),
+    "normal": (1, 2),
+    "deep": (2, 4),
+}
 
 _FAST_CANDIDATE_PAGE_LIMIT = 0
 _NORMAL_CANDIDATE_PAGE_LIMIT = 5
@@ -42,6 +54,14 @@ _FAST_SOURCE_DISPLAY_LIMIT = 10
 _NORMAL_SOURCE_DISPLAY_LIMIT = 15
 _DEEP_SOURCE_DISPLAY_LIMIT = 10
 
+_FAST_RANKED_EVIDENCE_LIMIT = 3
+_NORMAL_RANKED_EVIDENCE_LIMIT = 6
+_DEEP_RANKED_EVIDENCE_LIMIT = 8
+
+_FAST_SUGGESTED_FETCH_LIMIT = 2
+_NORMAL_SUGGESTED_FETCH_LIMIT = 3
+_DEEP_SUGGESTED_FETCH_LIMIT = 5
+
 _TOOL_DESCRIPTION = (
     "Searches the web with concurrent multi-query recall and returns candidate evidence: "
     "titles, URLs, snippets, optional images, background grounding, and candidate pages. "
@@ -50,11 +70,16 @@ _TOOL_DESCRIPTION = (
     "official pages, images, broad comparison, or candidate URLs for later page-body fetches.\n\n"
     "Always issue at most one web_search call per user request.\n"
     "Always put all query variants into that single queries array.\n"
-    "Always pass 2-4 short search-engine-style queries.\n"
+    "Pass query variants according to mode: fast exactly 1, normal 1-2, deep 2-4.\n"
+    "Queries are only for search recall. Pass objective when available; objective is "
+    "the user's actual information goal and is used only for evidence ranking.\n"
+    "Use allowed_domains or blocked_domains when the user asks to include or exclude "
+    "specific sites; these filters are applied after search recall.\n"
     "Every call MUST include at least one pure English query. A pure English query uses only "
     "ASCII English words, numbers, and punctuation, while preserving key technical terms in English.\n"
-    "Never call web_search with only one query.\n"
-    "Never pass more than four queries.\n"
+    "Never pass more queries than the selected mode can consume.\n"
+    "Fast mode uses one focused query; normal uses one broad query plus an optional variant; "
+    "deep uses two to four complementary variants.\n"
     "Other queries may use the user's language, English, or any language directly useful for the task.\n\n"
     "Mode rules: choose the most specific mode.\n"
     "Never use normal as the default.\n"
@@ -65,16 +90,17 @@ _TOOL_DESCRIPTION = (
     "- deep: technical research, engineering decisions, academic/paper research, community best "
     "practices, official documentation comparison, multi-source verification, recent rules/prices/"
     "laws/news, medical/legal/financial accuracy, or broad bilingual recall.\n"
-    "Never call web_fetch after fast mode.\n\n"
+    "Do not call web_fetch automatically.\n\n"
     "Return protocol: fast mode returns lightweight visible snippets/images that can be used "
-    "directly when sufficient. normal and deep mode return only a ToolContent Receipt for a "
-    "cached JSON evidence artifact. The receipt contains content_id and required_next_tool. "
-    "The search snippets and source list are intentionally omitted from the visible tool result "
-    "in normal/deep mode.\n\n"
-    "After normal/deep web_search, you MUST call evidence_rank with the user's question and "
-    "the returned content_id before answering.\n\n"
+    "directly when sufficient. normal and deep mode return a ToolContent Receipt for a cached "
+    "JSON evidence artifact plus ranked search evidence. The receipt contains content_id for "
+    "compatibility and deeper inspection.\n\n"
+    "web_search internally ranks search-result evidence using objective when provided. "
+    "It does not answer the user, fetch pages, or read page bodies. If page-level verification "
+    "or direct quotes are needed, call web_fetch with from_search_content_id and the suggested "
+    "source_ids. evidence_rank can still be called manually for re-ranking.\n\n"
     "web_search candidate pages have NOT been fetched. If page-body evidence is needed after "
-    "ranking, use web_fetch on the selected URLs."
+    "ranking, use web_fetch on the suggested source_ids or selected URLs."
 )
 
 _TOOL_SCHEMA = {
@@ -83,10 +109,11 @@ _TOOL_SCHEMA = {
         "queries": {
             "type": "array",
             "items": {"type": "string"},
-            "minItems": 2,
+            "minItems": 1,
             "maxItems": 4,
             "description": (
-                "Two to four distinct query variants for the same user intent. "
+                "Distinct query variants for the same user intent. "
+                "Use fast: exactly 1, normal: 1-2, deep: 2-4. "
                 "Include at least one pure English query."
             ),
         },
@@ -104,6 +131,35 @@ _TOOL_SCHEMA = {
             "enum": ["fast", "normal", "deep"],
             "description": (
                 "Explicit search depth: fast, normal, or deep. Follow the mode rules in the tool description."
+            ),
+        },
+        "objective": {
+            "type": "string",
+            "description": (
+                "The user's actual information goal. Queries are for search recall; "
+                "objective is used to rank search evidence and suggest which results to fetch."
+            ),
+        },
+        "allowed_domains": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": True,
+            "description": (
+                "Optional domain allow-list applied after search recall. "
+                "Use bare domains such as openai.com or docs.python.org."
+            ),
+        },
+        "blocked_domains": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "minItems": 1,
+            "maxItems": 20,
+            "uniqueItems": True,
+            "description": (
+                "Optional domain block-list applied after search recall. "
+                "Use bare domains such as csdn.net or example.com."
             ),
         },
         "with_images": {
@@ -135,6 +191,12 @@ class _OutputBudget:
     source_display_limit: int
 
 
+@dataclass(frozen=True, slots=True)
+class _DomainFilters:
+    allowed_domains: Tuple[str, ...] = ()
+    blocked_domains: Tuple[str, ...] = ()
+
+
 def _get_output_budget(mode: str) -> _OutputBudget:
     if mode == "fast":
         return _OutputBudget(
@@ -157,6 +219,28 @@ def _get_output_budget(mode: str) -> _OutputBudget:
     raise ValueError(f"Unsupported web_search mode: {mode}")
 
 
+def _get_ranked_evidence_limit(mode: str) -> int:
+    if mode == "fast":
+        return _FAST_RANKED_EVIDENCE_LIMIT
+    if mode == "normal":
+        return _NORMAL_RANKED_EVIDENCE_LIMIT
+    if mode == "deep":
+        return _DEEP_RANKED_EVIDENCE_LIMIT
+
+    raise ValueError(f"Unsupported web_search mode: {mode}")
+
+
+def _get_suggested_fetch_limit(mode: str) -> int:
+    if mode == "fast":
+        return _FAST_SUGGESTED_FETCH_LIMIT
+    if mode == "normal":
+        return _NORMAL_SUGGESTED_FETCH_LIMIT
+    if mode == "deep":
+        return _DEEP_SUGGESTED_FETCH_LIMIT
+
+    raise ValueError(f"Unsupported web_search mode: {mode}")
+
+
 def _is_pure_english_query(query: str) -> bool:
     normalized = query.strip()
     if not normalized:
@@ -168,6 +252,199 @@ def _is_pure_english_query(query: str) -> bool:
 
 def _has_pure_english_query(queries: List[str]) -> bool:
     return any(_is_pure_english_query(query) for query in queries)
+
+
+def _validate_query_count_for_mode(*, mode: str, query_count: int) -> Optional[str]:
+    min_count, max_count = _SEARCH_QUERY_BUDGETS[mode]
+    if min_count <= query_count <= max_count:
+        return None
+
+    if min_count == max_count:
+        return (
+            f"[Tool Error] web_search {mode} mode requires exactly "
+            f"{min_count} search query."
+        )
+
+    return (
+        f"[Tool Error] web_search {mode} mode requires "
+        f"{min_count}-{max_count} search queries."
+    )
+
+
+def _resolve_ranking_query(
+    *,
+    objective: Optional[str],
+    queries: List[str],
+    notes: List[str],
+) -> str:
+    if objective:
+        return objective
+
+    add_note(
+        notes,
+        "objective was not provided; ranking_query_used falls back to joined search queries.",
+    )
+    return " ".join(queries)
+
+
+def _parse_domain_filters(kwargs: Dict[str, Any]) -> _DomainFilters | str:
+    allowed_or_error = _parse_domain_filter_list(
+        kwargs.get("allowed_domains"),
+        field_name="allowed_domains",
+        max_items=10,
+    )
+    if isinstance(allowed_or_error, str):
+        return allowed_or_error
+
+    blocked_or_error = _parse_domain_filter_list(
+        kwargs.get("blocked_domains"),
+        field_name="blocked_domains",
+        max_items=20,
+    )
+    if isinstance(blocked_or_error, str):
+        return blocked_or_error
+
+    overlap = set(allowed_or_error) & set(blocked_or_error)
+    if overlap:
+        return (
+            "[Tool Error] allowed_domains and blocked_domains must not overlap: "
+            + ", ".join(sorted(overlap))
+            + "."
+        )
+
+    return _DomainFilters(
+        allowed_domains=allowed_or_error,
+        blocked_domains=blocked_or_error,
+    )
+
+
+def _parse_domain_filter_list(
+    value: Any,
+    *,
+    field_name: str,
+    max_items: int,
+) -> Tuple[str, ...] | str:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        return f"[Tool Error] {field_name} must be a list of domain strings."
+    if not value:
+        return f"[Tool Error] {field_name} must not be empty when provided."
+    if len(value) > max_items:
+        return f"[Tool Error] {field_name} accepts at most {max_items} domains."
+
+    domains: List[str] = []
+    seen: Set[str] = set()
+    for item in value:
+        if type(item) is not str:
+            return f"[Tool Error] {field_name} items must be strings."
+        if item.strip() != item:
+            return (
+                f"[Tool Error] {field_name} items must not contain leading or "
+                "trailing whitespace."
+            )
+
+        domain = _normalize_filter_domain(item)
+        if not domain:
+            return (
+                f"[Tool Error] {field_name} items must be bare domains such as "
+                "example.com."
+            )
+        if domain in seen:
+            return f"[Tool Error] {field_name} items must be distinct."
+
+        seen.add(domain)
+        domains.append(domain)
+
+    return tuple(domains)
+
+
+def _normalize_filter_domain(value: str) -> str:
+    candidate = value.strip().lower().rstrip(".")
+    if not candidate:
+        return ""
+
+    if "://" in candidate:
+        host = urlparse(candidate).hostname or ""
+    else:
+        if "/" in candidate or "?" in candidate or "#" in candidate:
+            return ""
+        host = candidate
+
+    host = host.lower().rstrip(".")
+    if not host or "*" in host or any(char.isspace() for char in host):
+        return ""
+    return host.removeprefix("www.")
+
+
+def _apply_domain_filters(
+    response: SearchResponse,
+    *,
+    filters: _DomainFilters,
+    notes: List[str],
+) -> SearchResponse:
+    if not filters.allowed_domains and not filters.blocked_domains:
+        return response
+
+    filtered_results = tuple(
+        result
+        for result in response.results
+        if _result_matches_domain_filters(result, filters)
+    )
+    removed_count = len(response.results) - len(filtered_results)
+
+    if removed_count:
+        allowed = ", ".join(filters.allowed_domains) or "(none)"
+        blocked = ", ".join(filters.blocked_domains) or "(none)"
+        add_note(
+            notes,
+            "Domain filters removed "
+            f"{removed_count} search results "
+            f"(allowed_domains={allowed}; blocked_domains={blocked}).",
+        )
+    if response.results and not filtered_results:
+        add_note(notes, "Domain filters removed all search results.")
+
+    metadata = dict(response.metadata)
+    metadata["domain_filters"] = {
+        "allowed_domains": list(filters.allowed_domains),
+        "blocked_domains": list(filters.blocked_domains),
+        "removed_result_count": removed_count,
+    }
+    return SearchResponse(
+        query=response.query,
+        results=filtered_results,
+        images=response.images,
+        metadata=metadata,
+        source=response.source,
+    )
+
+
+def _result_matches_domain_filters(
+    result: SearchResult,
+    filters: _DomainFilters,
+) -> bool:
+    domain = _normalize_filter_domain(extract_domain(result.url))
+    if not domain:
+        return False
+
+    if filters.allowed_domains and not any(
+        _domain_matches_filter(domain, allowed)
+        for allowed in filters.allowed_domains
+    ):
+        return False
+
+    if filters.blocked_domains and any(
+        _domain_matches_filter(domain, blocked)
+        for blocked in filters.blocked_domains
+    ):
+        return False
+
+    return True
+
+
+def _domain_matches_filter(domain: str, filter_domain: str) -> bool:
+    return domain == filter_domain or domain.endswith("." + filter_domain)
 
 
 class WebSearchTool(BaseTool):
@@ -198,11 +475,21 @@ class WebSearchTool(BaseTool):
         if not isinstance(raw_queries, list):
             return "[Tool Error] queries must be a list of strings."
 
-        if (
-            len(raw_queries) < _SEARCH_QUERY_MIN_COUNT
-            or len(raw_queries) > _SEARCH_QUERY_LIMIT
-        ):
-            return "[Tool Error] web_search requires 2-4 search queries."
+        mode = kwargs.get("mode")
+        if type(mode) is not str:
+            return (
+                "[Tool Error] mode is required and must be one of: fast, normal, "
+                "deep."
+            )
+        if mode not in _SEARCH_QUERY_BUDGETS:
+            return "[Tool Error] mode must be one of: fast, normal, deep."
+
+        query_count_error = _validate_query_count_for_mode(
+            mode=mode,
+            query_count=len(raw_queries),
+        )
+        if query_count_error:
+            return query_count_error
 
         for query in raw_queries:
             if type(query) is not str:
@@ -235,19 +522,25 @@ class WebSearchTool(BaseTool):
                 "You MUST call web_search again immediately. Do not proceed without searching."
             )
 
-        mode = kwargs.get("mode")
-        if type(mode) is not str:
-            return (
-                "[Tool Error] mode is required and must be one of: fast, normal, "
-                "deep."
-            )
-        if mode not in {"fast", "normal", "deep"}:
-            return "[Tool Error] mode must be one of: fast, normal, deep."
-
         output = _get_output_budget(mode)
         with_images = kwargs.get("with_images", False)
         if type(with_images) is not bool:
             return "[Tool Error] with_images must be a boolean."
+        objective = kwargs.get("objective")
+        if objective is not None:
+            if type(objective) is not str:
+                return "[Tool Error] objective must be a string."
+            if not objective.strip():
+                return "[Tool Error] objective must be a non-empty string."
+            if objective.strip() != objective:
+                return (
+                    "[Tool Error] objective must not contain leading or trailing "
+                    "whitespace."
+                )
+        domain_filters_or_error = _parse_domain_filters(kwargs)
+        if isinstance(domain_filters_or_error, str):
+            return domain_filters_or_error
+        domain_filters = domain_filters_or_error
 
         runtime_context = get_runtime_context(context)
         language = kwargs.get("language")
@@ -322,7 +615,11 @@ class WebSearchTool(BaseTool):
                 wikipedia_keywords=wikipedia_keywords,
             )
             many_result = await self._coordinator.search_many(request)
-            response = many_result.response
+            response = _apply_domain_filters(
+                many_result.response,
+                filters=domain_filters,
+                notes=notes,
+            )
             grounding = many_result.grounding
         except CustomSearchProviderUnavailableError as e:
             await _record_custom_provider_failure(
@@ -378,20 +675,16 @@ class WebSearchTool(BaseTool):
             candidate_pages=len(candidate_pages),
             notes=len(notes),
             language=language,
+            allowed_domains=domain_filters.allowed_domains,
+            blocked_domains=domain_filters.blocked_domains,
         )
 
-        if mode == "fast":
-            return _format_response(
-                response,
-                mode=mode,
-                queries=queries,
-                notes=notes,
-                candidate_pages=candidate_pages,
-                source_display_limit=output.source_display_limit,
-                grounding=grounding,
-            )
-
         citations = _build_citations(response)
+        ranking_query_used = _resolve_ranking_query(
+            objective=objective,
+            queries=queries,
+            notes=notes,
+        )
         artifact_text = _build_web_search_artifact_json(
             response=response,
             mode=mode,
@@ -414,7 +707,7 @@ class WebSearchTool(BaseTool):
             "citations": citations,
         }
 
-        return cache_artifact_and_format_receipt(
+        receipt = tool_content_store.put_receipt(
             session_id=session_id,
             tool_name="web_search",
             source="; ".join(queries),
@@ -422,9 +715,227 @@ class WebSearchTool(BaseTool):
             content_type="application/json",
             metadata=metadata,
         )
+        if receipt is None:
+            return "[Tool Error] Failed to cache tool artifact."
+
+        try:
+            ranking_result = await _rank_cached_search_evidence(
+                session_id=session_id,
+                search_content_id=receipt.content_id,
+                ranking_query_used=ranking_query_used,
+                mode=mode,
+            )
+        except Exception as e:
+            log_fail(
+                "web_search evidence ranking",
+                repr(e),
+                session_id=session_id,
+                mode=mode,
+                content_id=receipt.content_id,
+            )
+            ranking_result = EvidenceRankResult(
+                query=ranking_query_used,
+                content_ids_found=(receipt.content_id,),
+                notes=("Internal web_search evidence ranking failed.",),
+            )
+        ranking_lines = _format_search_ranking_lines(
+            search_content_id=receipt.content_id,
+            response=response,
+            ranking_query_used=ranking_query_used,
+            ranking_result=ranking_result,
+            mode=mode,
+            notes=notes,
+        )
+
+        if mode == "fast":
+            visible_result = _format_response(
+                response,
+                mode=mode,
+                queries=queries,
+                notes=notes,
+                candidate_pages=candidate_pages,
+                source_display_limit=output.source_display_limit,
+                grounding=grounding,
+            )
+            return visible_result + "\n\n" + "\n".join(ranking_lines)
+
+        return format_tool_content_receipt(receipt) + "\n\n" + "\n".join(
+            ranking_lines
+        )
 
     async def close(self) -> None:
         await self._coordinator.close()
+
+
+async def _rank_cached_search_evidence(
+    *,
+    session_id: str,
+    search_content_id: str,
+    ranking_query_used: str,
+    mode: str,
+) -> EvidenceRankResult:
+    return await asyncio.to_thread(
+        rank_evidence,
+        query=ranking_query_used,
+        content_ids=[search_content_id],
+        session_id=session_id,
+        max_evidence=_get_ranked_evidence_limit(mode),
+    )
+
+
+def _format_search_ranking_lines(
+    *,
+    search_content_id: str,
+    response: SearchResponse,
+    ranking_query_used: str,
+    ranking_result: EvidenceRankResult,
+    mode: str,
+    notes: List[str],
+) -> List[str]:
+    ranked_payload = _build_ranked_search_evidence_payload(ranking_result)
+    suggested_source_ids, suggested_urls = _build_suggested_fetch_targets(
+        ranked_payload,
+        mode=mode,
+    )
+    output_notes = _deduplicate_notes([*notes, *ranking_result.notes])
+    provider_source = response.source or ""
+
+    lines = [
+        "[WebSearch Ranking]",
+        f"search_content_id: {search_content_id}",
+        f"ranking_query_used: {ranking_query_used}",
+        f"result_count: {len(response.results)}",
+        f"unique_domain_count: {count_unique_domains(tuple(response.results))}",
+    ]
+    if provider_source:
+        lines.append(f"provider_source: {provider_source}")
+
+    if suggested_source_ids:
+        lines.append(
+            "suggested_fetch_source_ids: "
+            + json.dumps(suggested_source_ids, ensure_ascii=False)
+        )
+    else:
+        lines.append("suggested_fetch_source_ids: []")
+
+    if suggested_urls:
+        lines.append("suggested_fetch_urls:")
+        for url in suggested_urls:
+            lines.append(f"- {url}")
+    else:
+        lines.append("suggested_fetch_urls: []")
+
+    lines.append(
+        "next_step: ranked search evidence is already included. "
+        "For page-level verification or direct quotes, call web_fetch with "
+        "from_search_content_id and suggested source_ids. web_search has not fetched page bodies."
+    )
+
+    if output_notes:
+        lines.append("notes:")
+        for note in output_notes:
+            lines.append(f"- {note}")
+
+    if ranked_payload:
+        lines.append("ranked_search_evidence:")
+        for index, item in enumerate(ranked_payload, 1):
+            lines.append(f"- rank: {index}")
+            lines.append(f"  source_id: {item['source_id']}")
+            lines.append(f"  title: {item['title']}")
+            lines.append(f"  domain: {item['domain']}")
+            lines.append(f"  url: {item['url']}")
+            lines.append(f"  snippet: {item['snippet']}")
+            lines.append(f"  lexical_score: {item['lexical_score']}")
+            lines.append(f"  matched_reason: {item['matched_reason']}")
+            if item["term_hit_stats"]:
+                lines.append(
+                    "  term_hit_stats: "
+                    + json.dumps(item["term_hit_stats"], ensure_ascii=False)
+                )
+            lines.append("  suggested_next_action: web_fetch_by_source_id")
+    else:
+        lines.append("ranked_search_evidence: []")
+
+    return lines
+
+
+def _build_ranked_search_evidence_payload(
+    ranking_result: EvidenceRankResult,
+) -> List[Dict[str, Any]]:
+    payload: List[Dict[str, Any]] = []
+    for evidence in ranking_result.evidence:
+        if evidence.evidence_type != "web_search_result":
+            continue
+        if not evidence.source_id:
+            continue
+
+        payload.append(_ranked_evidence_to_dict(evidence))
+
+    return payload
+
+
+def _ranked_evidence_to_dict(evidence: RankedEvidence) -> Dict[str, Any]:
+    return {
+        "source_id": evidence.source_id,
+        "title": evidence.title,
+        "domain": evidence.domain,
+        "url": evidence.url,
+        "snippet": evidence.excerpt,
+        "lexical_score": round(evidence.score, 4),
+        "matched_reason": evidence.matched_reason,
+        "term_hit_stats": _format_term_hit_stats(evidence),
+        "suggested_next_action": "web_fetch_by_source_id",
+    }
+
+
+def _format_term_hit_stats(evidence: RankedEvidence) -> List[Dict[str, Any]]:
+    stats: List[Dict[str, Any]] = []
+    for stat in evidence.term_hit_stats:
+        field_stats = [
+            {"field": field_stat.field, "count": field_stat.count}
+            for field_stat in stat.field_stats
+        ]
+        stats.append(
+            {
+                "term": stat.term,
+                "total_count": stat.total_count,
+                "field_stats": field_stats,
+            }
+        )
+
+    return stats
+
+
+def _build_suggested_fetch_targets(
+    ranked_payload: List[Dict[str, Any]],
+    *,
+    mode: str,
+) -> Tuple[List[str], List[str]]:
+    limit = _get_suggested_fetch_limit(mode)
+    source_ids: List[str] = []
+    urls: List[str] = []
+    seen_source_ids: Set[str] = set()
+    seen_urls: Set[str] = set()
+
+    for item in ranked_payload:
+        source_id = item.get("source_id")
+        url = item.get("url")
+        if not isinstance(source_id, str) or not source_id:
+            continue
+        if source_id in seen_source_ids:
+            continue
+
+        seen_source_ids.add(source_id)
+        source_ids.append(source_id)
+
+        if isinstance(url, str) and url and url not in seen_urls:
+            seen_urls.add(url)
+            urls.append(url)
+
+        if len(source_ids) >= limit:
+            break
+
+    return source_ids, urls
 
 
 def _format_response(
@@ -637,6 +1148,7 @@ def _build_web_search_artifact_json(
             "unique_domain_count": count_unique_domains(tuple(response.results)),
             "candidate_page_count": len(candidate_pages),
             "source": response.source,
+            "domain_filters": response.metadata.get("domain_filters"),
         },
         "results": [],
         "candidate_pages": [],
