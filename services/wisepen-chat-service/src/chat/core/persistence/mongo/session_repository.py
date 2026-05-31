@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Tuple
 
 from beanie import PydanticObjectId
+
 from chat.domain.entities import ChatSession
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import SessionRepository

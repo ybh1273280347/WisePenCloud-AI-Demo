@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Tuple
 
-from chat.application.tools.runtime.tool_scope import ToolScope
+from chat.application.tool_scope import ToolScope
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider

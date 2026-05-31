@@ -1,40 +1,35 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {deleteChatFile, extractGeneratedFilesFromToolOutput, listChatFiles, uploadChatFile,} from "../api/file";
+import {flattenModels, listModels} from "../api/model";
 import {
-  deleteChatFile,
-  extractGeneratedFilesFromToolOutput,
-  listChatFiles,
-  uploadChatFile,
-} from "../api/file";
-import { flattenModels, listModels } from "../api/model";
-import {
-  createSession,
-  deleteSession,
-  listHistoryMessages,
-  listSessions,
-  pinSession,
-  renameSession,
-  ApiStatusError,
-  rollbackSessionToMessage,
+    ApiStatusError,
+    createSession,
+    deleteSession,
+    listHistoryMessages,
+    listSessions,
+    pinSession,
+    renameSession,
+    rollbackSessionToMessage,
 } from "../api/session";
-import { streamChat } from "../api/streamChat";
+import {streamChat} from "../api/streamChat";
 import type {
-  AssistantMessage,
-  AssistantPart,
-  ChatFileItem,
-  ChatMessage,
-  ChatModel,
-  ChatSession,
-  ConnectionStatus,
-  ModelGroups,
-  UserMessage,
+    AssistantMessage,
+    AssistantPart,
+    ChatFileItem,
+    ChatMessage,
+    ChatModel,
+    ChatSession,
+    ConnectionStatus,
+    ModelGroups,
+    UserMessage,
 } from "../types/chat";
-import type { SseEvent } from "../types/sse";
-import { asOutputText } from "../utils/safeJson";
-import { ChatHeader } from "./ChatHeader";
-import { ChatInput } from "./ChatInput";
-import { FilePreviewPanel } from "./FilePreviewPanel";
-import { MessageList } from "./MessageList";
-import { Sidebar } from "./Sidebar";
+import type {SseEvent} from "../types/sse";
+import {asOutputText} from "../utils/safeJson";
+import {ChatHeader} from "./ChatHeader";
+import {ChatInput} from "./ChatInput";
+import {FilePreviewPanel} from "./FilePreviewPanel";
+import {MessageList} from "./MessageList";
+import {Sidebar} from "./Sidebar";
 
 function id(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "")}`;

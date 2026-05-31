@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { extractGeneratedFilesFromToolOutput, fetchFileBlob } from "../api/file";
-import type { AssistantPart, ChatFileItem } from "../types/chat";
-import { formatDuration } from "../utils/formatDuration";
-import { Badge } from "./Badge";
-import { JsonBlock } from "./JsonBlock";
-import { ToolMascotPopup } from "./ToolMascotPopup";
+import {useState} from "react";
+import {extractGeneratedFilesFromToolOutput, fetchFileBlob} from "../api/file";
+import type {AssistantPart, ChatFileItem} from "../types/chat";
+import {formatDuration} from "../utils/formatDuration";
+import {Badge} from "./Badge";
+import {JsonBlock} from "./JsonBlock";
+import {ToolMascotPopup} from "./ToolMascotPopup";
 
 type ToolCallPart = Extract<AssistantPart, { type: "tool_call" }>;
 

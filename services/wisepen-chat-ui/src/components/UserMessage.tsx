@@ -1,8 +1,8 @@
-import { KeyboardEvent, useEffect, useRef, useState } from "react";
-import type { UserMessage as UserMessageType } from "../types/chat";
-import { copyTextToClipboard } from "../utils/clipboard";
-import { MessageActionButton } from "./MessageActionButton";
-import { MarkdownContent } from "./MarkdownContent";
+import {KeyboardEvent, useEffect, useRef, useState} from "react";
+import type {UserMessage as UserMessageType} from "../types/chat";
+import {copyTextToClipboard} from "../utils/clipboard";
+import {MessageActionButton} from "./MessageActionButton";
+import {MarkdownContent} from "./MarkdownContent";
 
 type UserMessageProps = {
   message: UserMessageType;

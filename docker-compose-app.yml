@@ -32,97 +32,99 @@ services:
       # document temp file protocol
       - DOCUMENT_TEMP_FILE_ROOT=/tmp/wisepen-chat-upload-files
 
-      # math_compute Sage backend
-      - MATH_SAGE_ENABLED=true
-
       # web_search / web_fetch external services
-      - SEARXNG_BASE_URL=http://searxng:8080
+      - FOURGET_BASE_URL=http://fourget:80
+      - FOURGET_WEB_SCRAPER=ddg
       - STEEL_BASE_URL=http://steel-browser:3000
 
     volumes:
       - ../logs/chat:/logs
       - wisepen-document-temp:/tmp/wisepen-chat-upload-files
+
     ports:
       - "${CHAT_SERVICE_PORT:-9200}:9200"
+
     networks:
       wisepen-net:
         aliases:
           - chat-service
+
     depends_on:
-      searxng:
-        condition: service_healthy
+      fourget:
+        condition: service_started
       steel-browser:
         condition: service_healthy
       sage-math-worker:
         condition: service_healthy
 
-  searxng:
-    image: ghcr.io/searxng/searxng:latest
-    container_name: searxng
-    restart: always
+  fourget:
+    image: luuul/4get:latest
+    container_name: fourget
+    restart: unless-stopped
+
     environment:
-      - TZ=Asia/Shanghai
-      - SEARXNG_BASE_URL=http://searxng:8080/
-    volumes:
-      - ./services/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - FOURGET_PROTO=http
+      - FOURGET_SERVER_NAME=fourget
+
+    ports:
+      - "8088:80"
+
     networks:
       wisepen-net:
         aliases:
-          - searxng
+          - fourget
+
+  steel-browser:
+    image: ghcr.io/steel-dev/steel-browser-api:latest
+    container_name: steel-browser
+    restart: always
+
+    environment:
+      - TZ=Asia/Shanghai
+      - DOMAIN=steel-browser:3000
+      - CDP_DOMAIN=steel-browser:9223
+      - CHROME_HEADLESS=true
+      - LOG_LEVEL=warn
+      - LOG_STORAGE_ENABLED=true
+      - LOG_STORAGE_PATH=/data/logs/browser-logs.duckdb
+
+    volumes:
+      - steel-logs:/data/logs
+      - steel-exports:/tmp/steel-browser-exports
+
+    networks:
+      wisepen-net:
+        aliases:
+          - steel-browser
+
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=5).read()\""
+          "curl --fail --silent --show-error http://localhost:3000/v1/health >/dev/null || exit 1"
         ]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 30s
-
-  steel-browser:
-      image: ghcr.io/steel-dev/steel-browser-api:latest
-      container_name: steel-browser
-      restart: always
-      environment:
-        - TZ=Asia/Shanghai
-        - DOMAIN=steel-browser:3000
-        - CDP_DOMAIN=steel-browser:9223
-        - CHROME_HEADLESS=true
-        - LOG_LEVEL=warn
-        - LOG_STORAGE_ENABLED=true
-        - LOG_STORAGE_PATH=/data/logs/browser-logs.duckdb
-      volumes:
-        - steel-logs:/data/logs
-        - steel-exports:/tmp/steel-browser-exports
-      networks:
-        wisepen-net:
-          aliases:
-            - steel-browser
-      healthcheck:
-        test:
-          [
-            "CMD-SHELL",
-            "curl --fail --silent --show-error http://localhost:3000/v1/health >/dev/null || exit 1"
-          ]
-        interval: 30s
-        timeout: 10s
-        retries: 10
-        start_period: 90s
+      retries: 10
+      start_period: 90s
 
   sage-math-worker:
     image: ${DOCKER_REGISTRY}/wisepencloud-sage-math-worker:${APP_VERSION}
     container_name: sage-math-worker
     restart: always
+
     environment:
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
+
     cpus: "2.0"
     mem_limit: 4g
+
     networks:
       wisepen-net:
         aliases:
           - sage-math-worker
+
     healthcheck:
       test:
         [

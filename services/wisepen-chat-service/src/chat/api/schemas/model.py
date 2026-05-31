@@ -1,7 +1,9 @@
 from typing import List
 
-from chat.domain.entities import ModelType
 from pydantic import BaseModel, Field
+
+from chat.domain.entities import ModelType
+
 
 # =============================================================================
 # Response Models

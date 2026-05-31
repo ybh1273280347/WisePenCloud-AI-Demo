@@ -6,7 +6,6 @@ Java RemoteStorageService Feign 接口
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 
-
 _DEFAULT_SERVICE_NAME = "wisepen-file-storage-service"
 _DEFAULT_DOWNLOAD_DURATION_SECONDS = 900
 

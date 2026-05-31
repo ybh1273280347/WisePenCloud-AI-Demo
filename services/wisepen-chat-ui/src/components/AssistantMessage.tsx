@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react";
-import type { AssistantMessage as AssistantMessageType } from "../types/chat";
-import type { UserMessage as UserMessageType } from "../types/chat";
-import { copyTextToClipboard } from "../utils/clipboard";
-import { Badge } from "./Badge";
-import { MarkdownContent } from "./MarkdownContent";
-import { MessageActionButton } from "./MessageActionButton";
-import { ToolTraceCard } from "./ToolTraceCard";
+import {useMemo, useState} from "react";
+import type {AssistantMessage as AssistantMessageType, UserMessage as UserMessageType} from "../types/chat";
+import {copyTextToClipboard} from "../utils/clipboard";
+import {Badge} from "./Badge";
+import {MarkdownContent} from "./MarkdownContent";
+import {MessageActionButton} from "./MessageActionButton";
+import {ToolTraceCard} from "./ToolTraceCard";
 
 type AssistantMessageProps = {
   message: AssistantMessageType;

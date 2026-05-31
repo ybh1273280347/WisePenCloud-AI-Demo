@@ -1,6 +1,10 @@
 import asyncio
 import uuid
 
+from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi.responses import StreamingResponse
+
 from chat.api.schemas.chat import ChatRequest
 from chat.api.vercel_formats import (
     abort,
@@ -15,14 +19,11 @@ from chat.core.config.app_settings import settings
 from chat.domain.repositories import SessionRepository
 from common.logger import log_error, log_event
 from common.security import require_login
-from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 
 router = APIRouter()
 
 
-async def _vercel_generator(chat_gen, model_name: str):
+async def _vercel_generator(chat_gen):
     """将 coordinator 的 AsyncGenerator 包装成 AI SDK 6.x SSE 格式"""
     message_id = f"msg_{uuid.uuid4().hex}"
     try:
@@ -74,12 +75,6 @@ async def chat_completions(
     """
     resolved_model_id = req.model if req.model is not None else settings.DEFAULT_MODEL_ID
 
-    if not req.query:
-        raise HTTPException(status_code=400, detail="缺少查询内容")
-
-    if not req.session_id:
-        raise HTTPException(status_code=400, detail="缺少 session_id")
-
     await session_repo.get_by_id_and_user(req.session_id, user_id)
 
     chat_gen = coordinator.handle_chat(
@@ -92,7 +87,7 @@ async def chat_completions(
     )
 
     return StreamingResponse(
-        _vercel_generator(chat_gen, str(resolved_model_id)),
+        _vercel_generator(chat_gen),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

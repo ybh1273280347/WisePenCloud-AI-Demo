@@ -1,6 +1,6 @@
-import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import type { ChatSession } from "../types/chat";
+import {FormEvent, MouseEvent, useEffect, useMemo, useRef, useState} from "react";
+import {createPortal} from "react-dom";
+import type {ChatSession} from "../types/chat";
 
 type SidebarProps = {
   currentId: string | null;

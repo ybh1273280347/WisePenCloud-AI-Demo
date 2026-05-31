@@ -1,15 +1,15 @@
-import type { CSSProperties } from "react";
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import type {CSSProperties} from "react";
+import {useEffect, useRef, useState} from "react";
+import {createPortal} from "react-dom";
 
+import type {UserLocale, UserPreferences} from "../api/userPreferences";
 import {
-  allowedLocales,
-  allowedTimezones,
-  getUserPreferences,
-  updateUserLocale,
-  updateUserTimezone,
+    allowedLocales,
+    allowedTimezones,
+    getUserPreferences,
+    updateUserLocale,
+    updateUserTimezone,
 } from "../api/userPreferences";
-import type { UserLocale, UserPreferences } from "../api/userPreferences";
 
 type UserPreferencesSelectorProps = {
   disabled?: boolean;

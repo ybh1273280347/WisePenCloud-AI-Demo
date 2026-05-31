@@ -1,4 +1,4 @@
-import type { SseEvent } from "../types/sse";
+import type {SseEvent} from "../types/sse";
 
 export function parseSseBlock(raw: string): SseEvent[] {
   const events: SseEvent[] = [];

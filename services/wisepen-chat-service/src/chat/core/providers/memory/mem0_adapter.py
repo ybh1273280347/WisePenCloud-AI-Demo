@@ -1,13 +1,14 @@
 import asyncio
 from typing import Any, Dict, List, Optional
 
+from mem0 import Memory
+
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import MemoryProvider
 from common.core.exceptions import ServiceException
 from common.logger import log_debug, log_fail
-from mem0 import Memory
 
 
 class Mem0Adapter(MemoryProvider):
@@ -41,7 +42,7 @@ class Mem0Adapter(MemoryProvider):
                 "provider": "qdrant",
                 "config": {
                     "collection_name": "wisepen_memories",
-                    "url": f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}",
+                    "urls": f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}",
                     "api_key": settings.QDRANT_PASSWORD,
                 },
             },
@@ -73,7 +74,7 @@ class Mem0Adapter(MemoryProvider):
             except TypeError:
                 raw_results = self.client.search(query, user_id=user_id, limit=limit)
             log_debug(
-                f"Raw Results from Mem0",
+                "Raw Results from Mem0",
                 query=query,
                 user_id=user_id,
                 raw_results=raw_results,

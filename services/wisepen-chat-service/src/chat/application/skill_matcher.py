@@ -5,8 +5,6 @@ from chat.domain.entities.skill import SkillMeta
 from chat.domain.repositories import SkillRepository
 from common.logger import log_error, log_event, log_fail
 
-SKILL_MATCH_TOP_K = 2
-
 
 class SkillMatcher(ABC):
     """
@@ -73,5 +71,5 @@ class KeywordSkillMatcher(SkillMatcher):
 
         # 先按命中数降序；命中数相同时按 skill_id 字典序稳定
         scored.sort(key=lambda x: (-x[0], x[1].skill_id))
-        top_k = max(1, SKILL_MATCH_TOP_K)
+        top_k = max(1, app_settings.SKILL_MATCH_TOP_K)
         return [m for _, m in scored[:top_k]]

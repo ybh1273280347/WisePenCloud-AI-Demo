@@ -1,9 +1,10 @@
+from fastapi import APIRouter
+
 from chat.api.schemas.model import ModelInfo, ModelsResponse
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ModelType
 from chat.domain.entities.model import Model
 from common.core.domain import R
-from fastapi import APIRouter
 
 router = APIRouter()
 

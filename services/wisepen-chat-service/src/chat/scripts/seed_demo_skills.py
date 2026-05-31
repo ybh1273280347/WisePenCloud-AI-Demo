@@ -32,9 +32,10 @@ from typing import List, Tuple
 
 import yaml
 from beanie import init_beanie
+from pymongo import AsyncMongoClient
+
 from chat.domain.entities.skill import Skill, SkillAssetMeta
 from common.logger import log_error, log_event
-from pymongo import AsyncMongoClient
 
 # 把 MD 文件归类成 SkillAssetMeta.kind 的简单启发式；Java 服务会按更正式的 schema 填。
 _KIND_BY_FIRST_SEGMENT = {

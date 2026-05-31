@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import threading
 import time
@@ -7,48 +5,87 @@ from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
-from chat.application.algorithms.ranking.models import Bm25RankResult, RankedDocument
-from chat.application.algorithms.ranking.tokenizer import tokenize_for_bm25
 from rank_bm25 import BM25Okapi
 
-_BM25_INDEX_CACHE_MAXSIZE = 32
+from .tokenizer import tokenize_for_bm25
+
+# 全局常量与线程安全缓存骨架
+BM25_INDEX_CACHE_MAXSIZE = 32
+
+BM25_INDEX_CACHE: OrderedDict[str, "CachedBm25Index"] = OrderedDict()
+BM25_INDEX_CACHE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True, slots=True)
-class _CachedBm25Index:
+class Bm25RankedItem:
+    """
+    在特定检索通道中的打分与排名表现
+    - id: 唯一标识符（如知识库中的 doc_id）
+    - score: Bm25 算法计算出的原始得分
+    - rank: 在当前通道结果集中的绝对排名（从 0 开始的索引）
+    """
+    id: str
+    score: float
+    rank: int
+
+@dataclass(frozen=True, slots=True)
+class Bm25RankResult:
+    """
+    BM25 传统关键词检索通道的完整返回包
+    - ranked: 已排序的命中非变动文档元组，使用 Tuple 确保刚性只读
+    - cache_hit: 缓存命中状态，True 表示直接走内存/Redis，未击中底层存储
+    - build_index_elapsed_ms: 动态构建倒排索引的耗时（毫秒），常用于性能监控
+    """
+    ranked: Tuple[Bm25RankedItem, ...]
+    cache_hit: bool = False
+    build_index_elapsed_ms: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class CachedBm25Index:
+    """
+    内存中缓存的 BM25 预编译索引实体
+    - doc_ids: 索引中包含的文档唯一标识符元组
+    - bm25: rank_bm25 库的核心计算实例
+    - fingerprint: 由文档内容生成的 SHA-256 数据指纹，用于校验数据是否过期
+    """
     doc_ids: Tuple[str, ...]
     bm25: Optional[BM25Okapi]
     fingerprint: str
 
 
-_bm25_index_cache: OrderedDict[str, _CachedBm25Index] = OrderedDict()
-_bm25_index_cache_lock = threading.Lock()
-
-
 def rank_documents_by_bm25(
-    query: str,
-    documents: Sequence[Tuple[str, str]],
-    cache_key: Optional[str] = None,
+        query: str,
+        documents: Sequence[Tuple[str, str]],
+        cache_key: Optional[str] = None,
 ) -> Bm25RankResult:
+    """
+    利用 BM25 算法对输入的文档集进行关键词匹配计算与降序重排
+    - query: 用户输入的原始查询文本
+    - documents: 待检索的原始文档对队列，结构为 [(doc_id, text), ...]
+    - cache_key: 缓存的唯一标识键（如 session_id），传入时开启 LRU 缓存
+    """
     if not documents:
         return Bm25RankResult(ranked=())
 
     doc_ids = tuple(doc_id for doc_id, _ in documents)
     tokenized_query = tokenize_for_bm25(query)
 
+    # 如果查询文本切分后为空，直接均分返回零分榜单
     if not tokenized_query:
         return Bm25RankResult(
             ranked=tuple(
-                RankedDocument(id=doc_id, score=0.0, rank=rank)
+                Bm25RankedItem(id=doc_id, score=0.0, rank=rank)
                 for rank, doc_id in enumerate(doc_ids)
             )
         )
 
+    # 如果只有一条文档，无需构建全量倒排索引，走单流捷径加速
     if len(documents) < 2:
         doc_id, text = documents[0]
         return Bm25RankResult(
             ranked=(
-                RankedDocument(
+                Bm25RankedItem(
                     id=doc_id,
                     score=_score_single_document(text, tokenized_query),
                     rank=0,
@@ -59,29 +96,65 @@ def rank_documents_by_bm25(
     started = time.monotonic()
     cache_hit = False
     build_index_elapsed_ms = 0
+    bm25: Optional[BM25Okapi] = None
 
+    # 主循环：命中缓存或动态构建索引
     if cache_key:
-        fingerprint = _documents_fingerprint(documents)
-        cached = _get_cached_bm25_index(cache_key, fingerprint)
-        if cached is not None:
-            bm25 = cached.bm25
-            cache_hit = True
-        else:
-            bm25 = _build_bm25_index(documents)
+        # 计算数据指纹
+        digest = hashlib.sha256()
+        for d_id, text in documents:
+            digest.update(d_id.encode("utf-8", errors="ignore"))
+            digest.update(b"\0")
+            digest.update((text or "").encode("utf-8", errors="ignore"))
+            digest.update(b"\0")
+        fingerprint = digest.hexdigest()
+
+        # 线程安全地从 LRU 中提取缓存
+        with BM25_INDEX_CACHE_LOCK:
+            cached = BM25_INDEX_CACHE.get(cache_key)
+            if cached is not None and cached.fingerprint == fingerprint:
+                bm25 = cached.bm25
+                cache_hit = True
+                BM25_INDEX_CACHE.move_to_end(cache_key)
+
+        if not cache_hit:
+            # 构建 BM25 倒排索引
+            tokenized_docs = [tokenize_for_bm25(txt) for _, txt in documents]
+            bm25 = BM25Okapi(tokenized_docs) if any(tokenized_docs) else None
             build_index_elapsed_ms = int((time.monotonic() - started) * 1000)
-            _set_cached_bm25_index(
-                cache_key,
-                _CachedBm25Index(
-                    doc_ids=doc_ids,
-                    bm25=bm25,
-                    fingerprint=fingerprint,
-                ),
-            )
+
+            # 线程安全地写入 LRU 缓存
+            with BM25_INDEX_CACHE_LOCK:
+                BM25_INDEX_CACHE[cache_key] = CachedBm25Index(
+                    doc_ids=doc_ids, bm25=bm25, fingerprint=fingerprint
+                )
+                BM25_INDEX_CACHE.move_to_end(cache_key)
+                while len(BM25_INDEX_CACHE) > BM25_INDEX_CACHE_MAXSIZE:
+                    BM25_INDEX_CACHE.popitem(last=False)
     else:
-        bm25 = _build_bm25_index(documents)
+        # 无缓存模式下，原地构建索引
+        tokenized_docs = [tokenize_for_bm25(txt) for _, txt in documents]
+        bm25 = BM25Okapi(tokenized_docs) if any(tokenized_docs) else None
         build_index_elapsed_ms = int((time.monotonic() - started) * 1000)
 
-    ranked = _score_documents(doc_ids, bm25, tokenized_query)
+    # 批量算分与稳定排序
+    if bm25 is None:
+        ranked = tuple(
+            Bm25RankedItem(id=doc_id, score=0.0, rank=rank)
+            for rank, doc_id in enumerate(doc_ids)
+        )
+    else:
+        scores = bm25.get_scores(tokenized_query)
+        # 优先分数降序，分数持平按输入物理顺序升序
+        ordered = sorted(
+            enumerate(zip(doc_ids, scores)),
+            key=lambda item: (-item[1][1], item[0]),
+        )
+        ranked = tuple(
+            Bm25RankedItem(id=doc_id, score=float(score), rank=rank)
+            for rank, (_, (doc_id, score)) in enumerate(ordered)
+        )
+
     return Bm25RankResult(
         ranked=ranked,
         cache_hit=cache_hit,
@@ -89,36 +162,12 @@ def rank_documents_by_bm25(
     )
 
 
-def _build_bm25_index(documents: Sequence[Tuple[str, str]]) -> Optional[BM25Okapi]:
-    tokenized_docs = [tokenize_for_bm25(text) for _, text in documents]
-    if not any(tokenized_docs):
-        return None
-    return BM25Okapi(tokenized_docs)
-
-
-def _score_documents(
-    doc_ids: Tuple[str, ...],
-    bm25: Optional[BM25Okapi],
-    tokenized_query: List[str],
-) -> Tuple[RankedDocument, ...]:
-    if bm25 is None:
-        return tuple(
-            RankedDocument(id=doc_id, score=0.0, rank=rank)
-            for rank, doc_id in enumerate(doc_ids)
-        )
-
-    scores = bm25.get_scores(tokenized_query)
-    ordered = sorted(
-        enumerate(zip(doc_ids, scores)),
-        key=lambda item: (-item[1][1], item[0]),
-    )
-    return tuple(
-        RankedDocument(id=doc_id, score=float(score), rank=rank)
-        for rank, (_, (doc_id, score)) in enumerate(ordered)
-    )
-
-
 def _score_single_document(text: str, tokenized_query: List[str]) -> float:
+    """
+    单条文档检索时加速算分的降级算法
+    - text: 待计算的单条文档正文
+    - tokenized_query: 已分词的查询 Token 列表
+    """
     tokenized_document = tokenize_for_bm25(text)
     if not tokenized_document:
         return 0.0
@@ -140,34 +189,3 @@ def _score_single_document(text: str, tokenized_query: List[str]) -> float:
     )
 
 
-def _documents_fingerprint(documents: Sequence[Tuple[str, str]]) -> str:
-    digest = hashlib.sha256()
-    for doc_id, text in documents:
-        digest.update(doc_id.encode("utf-8", errors="ignore"))
-        digest.update(b"\0")
-        digest.update((text or "").encode("utf-8", errors="ignore"))
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def _get_cached_bm25_index(
-    cache_key: str,
-    fingerprint: str,
-) -> Optional[_CachedBm25Index]:
-    with _bm25_index_cache_lock:
-        cached = _bm25_index_cache.get(cache_key)
-        if cached is None or cached.fingerprint != fingerprint:
-            return None
-        _bm25_index_cache.move_to_end(cache_key)
-        return cached
-
-
-def _set_cached_bm25_index(
-    cache_key: str,
-    value: _CachedBm25Index,
-) -> None:
-    with _bm25_index_cache_lock:
-        _bm25_index_cache[cache_key] = value
-        _bm25_index_cache.move_to_end(cache_key)
-        while len(_bm25_index_cache) > _BM25_INDEX_CACHE_MAXSIZE:
-            _bm25_index_cache.popitem(last=False)

@@ -3,11 +3,11 @@ from functools import reduce
 from typing import Any, Callable, Dict, List, Optional
 
 from sage.all import (
-    CRT_list,
     GF,
     QQ,
     SR,
     ZZ,
+    CRT_list,
     Integer,
     PolynomialRing,
     binomial,
@@ -33,7 +33,6 @@ from sage.all import (
 from sage.all import is_prime as sage_is_prime
 
 from models import SageComputeRequest, SageComputeResponse
-
 
 _SUPPORTED_TASKS = {
     # Symbolic algebra
@@ -206,11 +205,11 @@ def compute_sage(request: SageComputeRequest) -> SageComputeResponse:
 
     try:
         return handlers[request.task](request)
-    except Exception as exc:
+    except Exception as e:
         return SageComputeResponse(
             status="error",
             task=request.task,
-            error=f"Sage task failed: {exc}",
+            error=f"Sage task failed: {e}",
         )
 
 

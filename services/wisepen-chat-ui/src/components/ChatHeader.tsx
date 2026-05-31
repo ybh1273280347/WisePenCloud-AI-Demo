@@ -1,7 +1,7 @@
-import type { ConnectionStatus, ModelGroups } from "../types/chat";
-import { ModelSelector } from "./ModelSelector";
-import { SearchProviderSelector } from "./SearchProviderSelector";
-import { UserPreferencesSelector } from "./UserPreferencesSelector";
+import type {ConnectionStatus, ModelGroups} from "../types/chat";
+import {ModelSelector} from "./ModelSelector";
+import {SearchProviderSelector} from "./SearchProviderSelector";
+import {UserPreferencesSelector} from "./UserPreferencesSelector";
 
 type ChatHeaderProps = {
   title: string;

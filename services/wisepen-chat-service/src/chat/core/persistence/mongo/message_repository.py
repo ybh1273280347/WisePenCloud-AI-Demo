@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 
 from beanie import PydanticObjectId
 from beanie.odm.operators.find.evaluation import Text
+
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.repositories import MessageRepository
 
@@ -147,6 +148,27 @@ class MongoMessageRepository(MessageRepository):
         return (
             await ChatMessage.find(*conditions)
             .sort("+created_at")
+            .limit(limit)
+            .to_list()
+        )
+
+    async def get_recent_by_session(
+        self,
+        session_id: str,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 200,
+    ) -> List[ChatMessage]:
+        """按时间倒序读取会话消息，用于内部纯文本筛选。"""
+        conditions = [ChatMessage.session_id == session_id]
+        if start_time:
+            conditions.append(ChatMessage.created_at >= start_time)
+        if end_time:
+            conditions.append(ChatMessage.created_at <= end_time)
+
+        return (
+            await ChatMessage.find(*conditions)
+            .sort("-created_at")
             .limit(limit)
             .to_list()
         )

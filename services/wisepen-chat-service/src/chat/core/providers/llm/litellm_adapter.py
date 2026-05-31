@@ -1,6 +1,7 @@
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 import litellm
+
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.domain.entities import ChatMessage
@@ -144,5 +145,5 @@ class LiteLLMAdapter(LLMProvider):
     async def count_tokens(self, text: str, model_name: str = "gpt-4o") -> int:
         try:
             return litellm.token_counter(model=model_name, text=text)
-        except:
+        except Exception:
             return len(text)

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchFileBlob } from "../api/file";
-import type { ChatFileItem } from "../types/chat";
+import {useEffect, useMemo, useState} from "react";
+import {fetchFileBlob} from "../api/file";
+import type {ChatFileItem} from "../types/chat";
 
 type PreviewState =
   | { status: "idle" }

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import httpx
+
 from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
 from common.clients.file_storage import FileStorageClient
 from common.logger import log_error, log_event, log_fail

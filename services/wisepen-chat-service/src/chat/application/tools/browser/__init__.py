@@ -1,5 +1,3 @@
-from .browse_interact_tool import BrowseInteractTool
+from typing import List
 
-__all__ = [
-    "BrowseInteractTool",
-]
+__all__: List[str] = []

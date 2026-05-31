@@ -1,10 +1,10 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from common.logger import log_fail, log_error
+from fastapi.responses import JSONResponse
 
-from common.core.domain import ResultCode, R
+from common.core.domain import R, ResultCode
 from common.core.exceptions import ServiceException
+from common.logger import log_error, log_fail
 
 
 def setup_global_exception_handlers(app: FastAPI, is_dev: bool = False):

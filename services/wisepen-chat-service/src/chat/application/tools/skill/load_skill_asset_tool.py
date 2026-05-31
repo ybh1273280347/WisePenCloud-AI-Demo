@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from chat.application.tools.config import TOOL_RESULT_MAX_CHARS
+from chat.core.config.app_settings import settings as app_settings
 from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
 from chat.domain.interfaces.tool import BaseTool
 from chat.domain.repositories import SkillRepository
@@ -153,8 +153,8 @@ class LoadSkillAssetTool(BaseTool):
             )
 
         # 字符截断，防止超长资产撑爆上下文水位
-        if len(content) > TOOL_RESULT_MAX_CHARS:
-            content = content[:TOOL_RESULT_MAX_CHARS] + "\n...[truncated]"
+        if len(content) > app_settings.TOOL_RESULT_MAX_CHARS:
+            content = content[:app_settings.TOOL_RESULT_MAX_CHARS] + "\n...[truncated]"
 
         return (
             f"[Loaded Asset] skill_id={skill_id} version={skill.version} path={path}\n"

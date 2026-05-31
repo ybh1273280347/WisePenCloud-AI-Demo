@@ -1,5 +1,5 @@
-import type { ChatFileItem } from "../types/chat";
-import { apiFetch, ensureApiOk, readApiData } from "./client";
+import type {ChatFileItem} from "../types/chat";
+import {apiFetch, ensureApiOk, readApiData} from "./client";
 
 type UploadedChatFileDto = {
   file_id: string;

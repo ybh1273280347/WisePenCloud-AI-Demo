@@ -6,7 +6,7 @@ from typing import Any, Dict, Mapping, Optional, Set
 
 import httpx
 
-from common.cloud.service_discovery import ServiceDiscovery, LoadBalancingStrategy
+from common.cloud.service_discovery import LoadBalancingStrategy, ServiceDiscovery
 from common.core.constants import SecurityConstants
 from common.core.exceptions import RpcError, ServiceUnavailableError
 from common.logger import log_error, log_fail

@@ -1,12 +1,13 @@
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 import tiktoken
+from openai import AsyncOpenAI, BadRequestError
+
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
 from common.core.exceptions import ServiceException
-from openai import AsyncOpenAI, BadRequestError
 
 _DISABLE_PARALLEL_TOOL_CALL_NAMES: Tuple[str, ...] = ("browse_interact", "web_search")
 

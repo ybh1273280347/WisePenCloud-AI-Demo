@@ -1,5 +1,5 @@
-import type { ChatModel, ModelGroups } from "../types/chat";
-import { apiFetch, readApiData } from "./client";
+import type {ChatModel, ModelGroups} from "../types/chat";
+import {apiFetch, readApiData} from "./client";
 
 type ModelDto = {
   id: number;

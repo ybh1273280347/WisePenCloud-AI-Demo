@@ -1,4 +1,4 @@
-import { apiFetch, readApiData } from "./client";
+import {apiFetch, readApiData} from "./client";
 
 export type SearchProviderMode = "default" | "custom";
 

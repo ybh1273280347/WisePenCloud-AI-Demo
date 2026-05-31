@@ -1,17 +1,18 @@
 import socket
 from typing import Callable, Optional
-from common.logger import log_ok, log_error
+
 from v2.nacos import (
+    ClientConfigBuilder,
+    ConfigParam,
+    DeregisterInstanceParam,
+    GRPCConfig,
     NacosConfigService,
     NacosNamingService,
-    ClientConfigBuilder,
-    GRPCConfig,
-    ConfigParam,
     RegisterInstanceParam,
-    DeregisterInstanceParam,
 )
 
 from chat.core.config.bootstrap_settings import bootstrap_settings
+from common.logger import log_error, log_ok
 
 _config_client: Optional[NacosConfigService] = None
 _naming_client: Optional[NacosNamingService] = None

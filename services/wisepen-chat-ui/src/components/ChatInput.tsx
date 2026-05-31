@@ -1,5 +1,5 @@
-import { ChangeEvent, KeyboardEvent, useRef, useState } from "react";
-import type { ChatFileItem } from "../types/chat";
+import {ChangeEvent, KeyboardEvent, useRef, useState} from "react";
+import type {ChatFileItem} from "../types/chat";
 
 type ChatInputProps = {
   disabled: boolean;

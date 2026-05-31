@@ -1,6 +1,6 @@
-import { apiBaseUrl, makeHeaders } from "./client";
-import { parseSseBlock, splitSseBuffer } from "./sseParser";
-import type { SseEvent } from "../types/sse";
+import {apiBaseUrl, makeHeaders} from "./client";
+import {parseSseBlock, splitSseBuffer} from "./sseParser";
+import type {SseEvent} from "../types/sse";
 
 type StreamChatOptions = {
   sessionId: string;

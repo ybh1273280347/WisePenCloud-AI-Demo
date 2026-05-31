@@ -49,6 +49,17 @@ class MessageRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_recent_by_session(
+        self,
+        session_id: str,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 200,
+    ) -> List[ChatMessage]:
+        """按时间倒序读取会话消息，用于内部纯文本筛选。"""
+        pass
+
+    @abstractmethod
     async def get_after_time(
         self,
         session_id: str,

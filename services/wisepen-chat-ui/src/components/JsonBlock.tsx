@@ -1,4 +1,4 @@
-import { formatJson } from "../utils/safeJson";
+import {formatJson} from "../utils/safeJson";
 
 type JsonBlockProps = {
   value: unknown;

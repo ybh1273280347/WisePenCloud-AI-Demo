@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { extractGeneratedFilesFromToolOutput } from "../api/file";
-import { ToolTraceCard } from "./ToolTraceCard";
+import {render, screen} from "@testing-library/react";
+import {describe, expect, it} from "vitest";
+import {extractGeneratedFilesFromToolOutput} from "../api/file";
+import {ToolTraceCard} from "./ToolTraceCard";
 
 const generatedDocumentOutput = [
   "[Generated Document]",

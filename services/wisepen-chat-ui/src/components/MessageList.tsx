@@ -1,7 +1,11 @@
-import type { AssistantMessage as AssistantMessageType, ChatMessage, UserMessage as UserMessageType } from "../types/chat";
-import { AssistantMessage } from "./AssistantMessage";
-import { DailyMascot } from "./DailyMascot";
-import { UserMessage } from "./UserMessage";
+import type {
+    AssistantMessage as AssistantMessageType,
+    ChatMessage,
+    UserMessage as UserMessageType
+} from "../types/chat";
+import {AssistantMessage} from "./AssistantMessage";
+import {DailyMascot} from "./DailyMascot";
+import {UserMessage} from "./UserMessage";
 
 type MessageListProps = {
   messages: ChatMessage[];

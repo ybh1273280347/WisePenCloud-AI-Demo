@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from "react";
-import type { CSSProperties } from "react";
-import { createPortal } from "react-dom";
-import type { ModelGroups, ChatModel } from "../types/chat";
+import type {CSSProperties} from "react";
+import {useEffect, useRef, useState} from "react";
+import {createPortal} from "react-dom";
+import type {ChatModel, ModelGroups} from "../types/chat";
 
 type ModelSelectorProps = {
   modelName?: string;

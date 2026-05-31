@@ -1,9 +1,9 @@
-import sys
 import logging
+import sys
 import warnings
 from typing import Any
-from loguru import logger
 
+from loguru import logger
 
 # 全局 Loguru Sink 配置（整个进程只注册一次）
 logger.remove()  # 移除默认 sink

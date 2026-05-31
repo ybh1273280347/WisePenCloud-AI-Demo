@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "WisePen Python Microservices Monorepo"
 requires-python = ">=3.9"
 dependencies = [
+    "langchain-text-splitters>=1.1.2",
     "wisepen-chat-service",
     "wisepen-common",
 ]

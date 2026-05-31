@@ -1,21 +1,18 @@
 from typing import Any, Dict
 
-from pydantic import ValidationError
-
-from chat.application.tools.services.math_solver.errors import MathSolverError
-from chat.application.tools.services.math_solver.formatting import (
+from chat.application.tools.math_solver.services.errors import MathSolverError
+from chat.application.tools.math_solver.services.formatting import (
     format_math_solver_error,
     format_math_solver_result,
 )
-from chat.application.tools.services.math_solver.sage_runtime import SageMathSolverService
-from chat.application.tools.math_solver.schemas import (
-    PYTHON_MATH_TASKS,
+from chat.application.tools.math_solver.services.models import (
+    MathSolverRequest,
     SAGE_MATH_TASKS,
-    SageMathSolverInput,
 )
-from chat.domain.interfaces.tool import BaseTool
-from common.logger import log_event
+from chat.application.tools.math_solver.services.python_runtime.enums import PYTHON_MATH_TASKS
+from chat.application.tools.math_solver.services.sage_runtime.service import SageMathSolverService
 
+from chat.domain.interfaces.tool import BaseTool
 
 _DESCRIPTION = (
     "Performs deterministic advanced exact math through the SageMath worker. Use this only "
@@ -25,10 +22,68 @@ _DESCRIPTION = (
     "or numeric tasks; use python_math_solver for ordinary computation."
 )
 
+_REQUEST_FIELDS = (
+    "task",
+    "integer",
+    "integers",
+    "base",
+    "exponent",
+    "modulus",
+    "residues",
+    "moduli",
+    "polynomial",
+    "polynomial_a",
+    "polynomial_b",
+    "variable",
+    "field",
+    "ring",
+    "matrix",
+    "operation",
+    "element",
+    "element_a",
+    "element_b",
+)
+
+_MATRIX_ENTRY_SCHEMA = {"type": ["integer", "number", "string"]}
+
+_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "task": {
+            "type": "string",
+            "enum": sorted(SAGE_MATH_TASKS),
+            "description": "SageMath task to execute.",
+        },
+        "integer": {"type": "integer"},
+        "integers": {"type": "array", "items": {"type": "integer"}},
+        "base": {"type": "integer"},
+        "exponent": {"type": "integer"},
+        "modulus": {"type": "integer"},
+        "residues": {"type": "array", "items": {"type": "integer"}},
+        "moduli": {"type": "array", "items": {"type": "integer"}},
+        "polynomial": {"type": "string"},
+        "polynomial_a": {"type": "string"},
+        "polynomial_b": {"type": "string"},
+        "variable": {"type": "string"},
+        "field": {"type": "string"},
+        "ring": {"type": "string"},
+        "matrix": {
+            "type": "array",
+            "items": {"type": "array", "items": _MATRIX_ENTRY_SCHEMA},
+        },
+        "operation": {"type": "string"},
+        "element": {"type": "string"},
+        "element_a": {"type": "string"},
+        "element_b": {"type": "string"},
+    },
+    "required": ["task"],
+    "additionalProperties": False,
+}
+
 
 class SageMathSolverTool(BaseTool):
-    def __init__(self, service: SageMathSolverService | None = None) -> None:
-        self._service = service or SageMathSolverService()
+    def __init__(self, service: SageMathSolverService) -> None:
+        self._service = service
 
     @property
     def name(self) -> str:
@@ -40,11 +95,14 @@ class SageMathSolverTool(BaseTool):
 
     @property
     def parameters_schema(self) -> Dict[str, Any]:
-        return SageMathSolverInput.model_json_schema()
+        return _TOOL_SCHEMA
 
     async def execute(self, context: Dict[str, Any], **kwargs: Any) -> str:
-        task = kwargs.get("task") if isinstance(kwargs.get("task"), str) else "unknown"
+        session_id = context.get("session_id")
+        if not session_id:
+            return "[Tool Error] Missing session_id in execution context."
 
+        task = kwargs["task"]
         if task in PYTHON_MATH_TASKS:
             return format_math_solver_error(
                 self.name,
@@ -53,47 +111,17 @@ class SageMathSolverTool(BaseTool):
                 False,
             )
 
-        try:
-            request = SageMathSolverInput.model_validate(kwargs)
-        except ValidationError as exc:
-            return format_math_solver_error(
-                self.name,
-                task,
-                _validation_reason(exc),
-                True,
-            )
+        request = MathSolverRequest(
+            **{field: kwargs.get(field) for field in _REQUEST_FIELDS}
+        )
 
-        if request.task not in SAGE_MATH_TASKS:
-            return format_math_solver_error(
-                self.name,
-                request.task,
-                f"unsupported sage math task: {request.task}",
-                False,
-            )
-
-        log_event("sage_math_solver_tool", task=request.task)
         try:
             result = await self._service.solve(request)
             return format_math_solver_result(self.name, result)
-        except MathSolverError as exc:
+        except MathSolverError as e:
             return format_math_solver_error(
                 self.name,
                 request.task,
-                exc.message,
-                exc.retryable,
+                e.message,
+                e.retryable,
             )
-
-    async def close(self) -> None:
-        await self._service.close()
-
-
-def _validation_reason(exc: ValidationError) -> str:
-    first = exc.errors()[0]
-    loc = ".".join(str(item) for item in first.get("loc", ()))
-    message = first.get("msg", "invalid arguments")
-    if loc:
-        return f"{loc}: {message}"
-    return str(message)
-
-
-__all__ = ["SageMathSolverTool", "SAGE_MATH_TASKS"]

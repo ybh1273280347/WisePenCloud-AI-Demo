@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from chat.application.tools.services.translation import (
-    TranslationAssistError,
-    TranslationAssistService,
-)
-from chat.application.tools.services.translation.formatting import (
+from chat.application.tools.language.services.translation.errors import TranslationAssistError
+from chat.application.tools.language.services.translation.runtime.formatting import (
     format_translation_error,
     format_translation_result,
 )
+from chat.application.tools.language.services.translation.service import (
+    TranslationAssistService,
+)
 from chat.domain.interfaces.tool import BaseTool
+from common.logger import log_fail
 
 _TOOL_DESCRIPTION = (
     "Provides open-source Chinese-English translation assistance using OPUS-MT / MarianMT. "
     "Use this tool for Chinese-English machine-translation baseline, bilingual comparison, "
-    "long-text segmentation, and terminology consistency checks.\n\n"
+    "and long-text segmentation.\n\n"
     "This tool only supports zh <-> en in v1.\n"
-    "Use the result as translation assistance, bilingual segmentation, or terminology-check evidence."
+    "Use the result as baseline translation evidence; the assistant must polish the final answer."
 )
 
 _TOOL_SCHEMA = {
@@ -26,6 +27,7 @@ _TOOL_SCHEMA = {
         "text": {
             "type": "string",
             "minLength": 1,
+            "maxLength": 8192,
             "description": "Text to translate or check.",
         },
         "source_language": {
@@ -38,25 +40,6 @@ _TOOL_SCHEMA = {
             "enum": ["zh", "en"],
             "description": "Target language. Supported in v1: zh, en.",
         },
-        "mode": {
-            "type": "string",
-            "enum": ["baseline", "bilingual_segments", "terminology_check"],
-            "default": "bilingual_segments",
-            "description": "Translation assistance mode.",
-        },
-        "glossary": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "source": {"type": "string"},
-                    "target": {"type": "string"},
-                },
-                "required": ["source", "target"],
-                "additionalProperties": False,
-            },
-            "description": "Optional terminology mapping.",
-        },
     },
     "required": ["text", "source_language", "target_language"],
     "additionalProperties": False,
@@ -64,8 +47,8 @@ _TOOL_SCHEMA = {
 
 
 class TranslationAssistTool(BaseTool):
-    def __init__(self, service: Optional[TranslationAssistService] = None) -> None:
-        self._service = service or TranslationAssistService()
+    def __init__(self, service: TranslationAssistService) -> None:
+        self._service = service
 
     @property
     def name(self) -> str:
@@ -80,19 +63,27 @@ class TranslationAssistTool(BaseTool):
         return _TOOL_SCHEMA
 
     async def execute(self, context: Dict[str, Any], **kwargs: Any) -> str:
+        session_id = context.get("session_id")
+        if not session_id:
+            return "[Tool Error] Missing session_id in execution context."
+
+        source_language = kwargs["source_language"]
+        target_language = kwargs["target_language"]
+        if source_language == target_language:
+            return format_translation_error("source_language and target_language must be different.")
+
         try:
             result = await self._service.assist_async(
-                text=kwargs.get("text"),
-                source_language=kwargs.get("source_language"),
-                target_language=kwargs.get("target_language"),
-                mode=kwargs.get("mode", "bilingual_segments"),
-                glossary=kwargs.get("glossary"),
+                text=kwargs["text"],
+                source_language=source_language,
+                target_language=target_language,
             )
             return format_translation_result(result)
         except TranslationAssistError as e:
             return format_translation_error(str(e))
         except Exception as e:
-            return format_translation_error(f"runtime error: {e}")
+            log_fail("translation_assist", repr(e))
+            return format_translation_error("An unexpected error occurred during translation.")
 
     async def close(self) -> None:
         await self._service.close()

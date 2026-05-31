@@ -3,7 +3,7 @@ from .message import ChatMessage, Role
 from .model import Model, ModelType
 from .model_provider_mapping import ModelProviderMapping
 from .provider import Provider
-from .search_provider_config import UserSearchProviderConfig
+from chat.application.tools.web.services.web_search.provider_policy.persistence import UserSearchProviderConfig
 from .session import ChatSession
 from .skill import Skill, SkillAssetMeta, SkillMeta
 

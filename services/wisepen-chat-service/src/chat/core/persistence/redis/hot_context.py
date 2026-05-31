@@ -2,6 +2,7 @@ import json
 from typing import List
 
 import redis.asyncio as redis
+
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage
 from chat.domain.repositories import HotContextRepository

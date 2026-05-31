@@ -1,33 +1,31 @@
-from typing import Optional
+from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, Depends
 
 from chat.api.schemas.search_provider import (
     SearchProviderConfigResponse,
     SetCustomSearchProviderRequest,
     SetSearchProviderModeRequest,
 )
-from chat.application.web_search.search_provider_config import (
-    SearchProviderConfigService,
+from chat.application.api_service.search_provider import (
+    SearchProviderConfigApiService,
+    SearchProviderConfigView,
 )
 from chat.container import Container
-from chat.domain.entities.search_provider_config import UserSearchProviderConfig
 from common.core.domain import R
 from common.security import require_login
-from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends
 
 router = APIRouter()
 
 
-@router.get("/get", response_model=R[SearchProviderConfigResponse])
+@router.get("/getConfig", response_model=R[SearchProviderConfigResponse])
 @inject
 async def get_search_provider_config(
     user_id: str = Depends(require_login),
-    service: SearchProviderConfigService = Depends(
-        Provide[Container.search_provider_config_service]
+    service: SearchProviderConfigApiService = Depends(
+        Provide[Container.search_provider_config_api_service]
     ),
 ):
-    config = await service.get_config(user_id=user_id)
-    return R.success(data=_to_response(config))
+    return R.success(data=_to_response(await service.get_config(user_id=user_id)))
 
 
 @router.post("/setMode", response_model=R[SearchProviderConfigResponse])
@@ -35,8 +33,8 @@ async def get_search_provider_config(
 async def set_search_provider_mode(
     req: SetSearchProviderModeRequest,
     user_id: str = Depends(require_login),
-    service: SearchProviderConfigService = Depends(
-        Provide[Container.search_provider_config_service]
+    service: SearchProviderConfigApiService = Depends(
+        Provide[Container.search_provider_config_api_service]
     ),
 ):
     config = await service.set_mode(user_id=user_id, mode=req.mode)
@@ -48,8 +46,8 @@ async def set_search_provider_mode(
 async def set_custom_search_provider(
     req: SetCustomSearchProviderRequest,
     user_id: str = Depends(require_login),
-    service: SearchProviderConfigService = Depends(
-        Provide[Container.search_provider_config_service]
+    service: SearchProviderConfigApiService = Depends(
+        Provide[Container.search_provider_config_api_service]
     ),
 ):
     config = await service.set_custom_provider(
@@ -64,48 +62,30 @@ async def set_custom_search_provider(
 @inject
 async def clear_custom_search_provider(
     user_id: str = Depends(require_login),
-    service: SearchProviderConfigService = Depends(
-        Provide[Container.search_provider_config_service]
+    service: SearchProviderConfigApiService = Depends(
+        Provide[Container.search_provider_config_api_service]
     ),
 ):
     config = await service.clear_custom_provider(user_id=user_id)
     return R.success(data=_to_response(config))
 
 
-@router.post("/verify", response_model=R[SearchProviderConfigResponse])
+@router.post("/verifyProvider", response_model=R[SearchProviderConfigResponse])
 @inject
 async def verify_custom_search_provider(
     user_id: str = Depends(require_login),
-    service: SearchProviderConfigService = Depends(
-        Provide[Container.search_provider_config_service]
+    service: SearchProviderConfigApiService = Depends(
+        Provide[Container.search_provider_config_api_service]
     ),
 ):
     config = await service.verify(user_id=user_id)
     return R.success(data=_to_response(config))
 
 
-def _to_response(
-    config: Optional[UserSearchProviderConfig],
-) -> SearchProviderConfigResponse:
-    if config is None:
-        return SearchProviderConfigResponse(
-            mode="default",
-            provider=None,
-            key_prefix4=None,
-            key_last4=None,
-            status="unset",
-            last_verified_at=None,
-            last_error_code=None,
-        )
-
+def _to_response(config: SearchProviderConfigView) -> SearchProviderConfigResponse:
     return SearchProviderConfigResponse(
-        mode=config.mode,
+        provider_mode=config.provider_mode,
         provider=config.provider,
-        key_prefix4=config.key_prefix4,
-        key_last4=config.key_last4,
-        status=config.status,
-        last_verified_at=(
-            config.last_verified_at.isoformat() if config.last_verified_at else None
-        ),
-        last_error_code=config.last_error_code,
+        masked_key=config.masked_key,
+        is_valid=config.is_valid,
     )

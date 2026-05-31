@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional
 
+from fastapi import BackgroundTasks
+
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
@@ -10,15 +12,13 @@ from chat.application.query_loop_runtime import (
     StepStartEvent,
     TextDeltaEvent,
 )
-from chat.application.runtime_context import RUNTIME_CONTEXT_KEY, RuntimeContext
 from chat.application.skill_matcher import SkillMatcher
-from chat.application.tools.runtime.tool_registry import ToolRegistry
-from chat.application.web_search.search_provider_config import (
-    MODE_DEFAULT,
-    RuntimeSearchProviderContext,
+from chat.application.tool_registry import ToolRegistry
+from chat.application.tools.web.services.web_search.enums import ProviderMode
+from chat.application.tools.web.services.web_search.provider_policy.service import (
+    SearchProviderConfig,
     SearchProviderConfigService,
 )
-from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
@@ -30,7 +30,6 @@ from chat.domain.repositories import (
 from common.core.exceptions import ServiceException
 from common.kafka.producer import KafkaProducerClient
 from common.logger import log_error
-from fastapi import BackgroundTasks
 
 # Skill 脚手架工具的名字集合：Registry 内部它们 reserved=True 默认隐藏
 # 只有 skill 命中时 Coordinator 把本集合作为 `expose` 传入 derive()，从而解禁 schema
@@ -54,7 +53,7 @@ class ChatTurnCoordinator:
         tool_registry: ToolRegistry,
         kafka_producer: KafkaProducerClient,
         skill_matcher: SkillMatcher,
-        search_provider_config_service: Optional[SearchProviderConfigService] = None,
+        search_provider_config_service: SearchProviderConfigService | None = None,
     ):
         self._memory = memory
         self._model_resolver = model_resolver
@@ -88,10 +87,6 @@ class ChatTurnCoordinator:
         model_id: Optional[int] = None,
         states: Optional[List[Dict[str, Any]]] = None,
     ):
-        if model_id is None:
-            model_id = settings.DEFAULT_MODEL_ID
-
-        # [Model Resolve] 通过映射表查找首选供应商，获取实际模型名和 API 凭证
         resolved = await self._model_resolver.resolve(model_id)
 
         # [Retrieval - 短期记忆] 从 Redis 读取最近对话, 如果 Redis 缓存失效（Cache Miss），会自动从 MongoDB 回填最近的 N 条历史 （可配置），确保对话连贯性。
@@ -117,11 +112,17 @@ class ChatTurnCoordinator:
         ) = await self._context_assembler.build_context_window(recent_messages)
         windowed_messages = messages_compress_candidates + messages_keep
 
-        runtime_context = await self._build_runtime_context(user_id=user_id)
-        tool_context: Dict[str, Any] = self._build_tool_context(
-            session_id=session_id,
-            runtime_context=runtime_context,
-        )
+        search_config = SearchProviderConfig(provider_mode=ProviderMode.DEFAULT)
+        if self._search_provider_config_service is not None:
+            search_config = await self._search_provider_config_service.runtime_context(
+                user_id=user_id,
+            )
+
+        tool_context: Dict[str, Any] = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "search_config": search_config,
+        }
 
         # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills
         candidate_skills = self._skill_matcher.match(user_query)
@@ -132,7 +133,7 @@ class ChatTurnCoordinator:
             tool_context["allowed_skill_ids"] = [s.skill_id for s in candidate_skills]
 
         # [Tool Scope] 派生本请求的工具视图快照
-        # expose_tool_name_set 仅在 skill 命中时解禁 load_skill 系列，未命中时它们保持隐藏
+        # expose_tool_name_set 仅在 skill 命中时解禁 load_skill系列，未命中时它们保持隐藏
         # runtime_discovered_tools 预留给"运行时动态发现的工具"（如 Skill bundle 自带 tools），暂时留空
         # allow_tool_name_set/deny_tool_name_set 预留给未来"用户级工具偏好"接入，暂时留空
         tool_scope = self._tool_registry.derive(
@@ -232,46 +233,3 @@ class ChatTurnCoordinator:
                     messages_compress_candidates,
                     session_summary,
                 )
-
-    async def _build_runtime_context(self, *, user_id: str) -> RuntimeContext:
-        if self._search_provider_config_service is None:
-            search_config = RuntimeSearchProviderContext(mode=MODE_DEFAULT)
-        else:
-            search_config = await self._search_provider_config_service.runtime_context(
-                user_id=user_id,
-                require_custom=False,
-            )
-
-        return RuntimeContext(
-            user_id=user_id,
-            search_config=search_config,
-        )
-
-    def _build_tool_context(
-        self,
-        *,
-        session_id: str,
-        runtime_context: RuntimeContext,
-    ) -> Dict[str, Any]:
-        tool_context: Dict[str, Any] = {
-            "session_id": session_id,
-            "user_id": runtime_context.user_id,
-            RUNTIME_CONTEXT_KEY: runtime_context,
-        }
-        if self._search_provider_config_service is not None:
-
-            async def record_custom_provider_failure(
-                status: str,
-                last_error_code: str,
-            ) -> None:
-                assert self._search_provider_config_service is not None
-                await self._search_provider_config_service.record_runtime_failure(
-                    user_id=runtime_context.user_id,
-                    status=status,
-                    last_error_code=last_error_code,
-                )
-
-            tool_context["search_provider_failure_handler"] = (
-                record_custom_provider_failure
-            )
-        return tool_context

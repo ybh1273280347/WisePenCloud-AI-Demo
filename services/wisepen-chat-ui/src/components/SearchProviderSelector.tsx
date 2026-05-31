@@ -1,19 +1,15 @@
-import type { CSSProperties } from "react";
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import type {CSSProperties} from "react";
+import {useEffect, useRef, useState} from "react";
+import {createPortal} from "react-dom";
 
-import type {
-  SearchProviderConfig,
-  SearchProviderMode,
-  SearchProviderName,
-} from "../api/searchProvider";
+import type {SearchProviderConfig, SearchProviderMode, SearchProviderName,} from "../api/searchProvider";
 import {
-  clearCustomSearchProvider,
-  getSearchProviderConfig,
-  searchProviders,
-  setCustomSearchProvider,
-  setSearchProviderMode,
-  verifyCustomSearchProvider,
+    clearCustomSearchProvider,
+    getSearchProviderConfig,
+    searchProviders,
+    setCustomSearchProvider,
+    setSearchProviderMode,
+    verifyCustomSearchProvider,
 } from "../api/searchProvider";
 
 type SearchProviderSelectorProps = {

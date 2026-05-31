@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
 
+from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, Depends, HTTPException, Query
+
 from chat.api.converters import convert_to_ui_messages
 from chat.api.schemas.session import (
     CreateSessionRequest,
@@ -18,8 +21,6 @@ from chat.domain.repositories import (
 )
 from common.core.domain import PageResult, R
 from common.security import require_login
-from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, HTTPException, Query
 
 router = APIRouter()
 

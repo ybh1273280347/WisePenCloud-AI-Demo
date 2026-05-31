@@ -1,5 +1,8 @@
 from typing import List
 
+from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, Depends
+
 from chat.api.schemas.memory import MemoryItemResponse
 from chat.container import Container
 from chat.domain.error_codes import ChatErrorCode
@@ -7,8 +10,6 @@ from chat.domain.interfaces import MemoryProvider
 from common.core.domain import R
 from common.core.exceptions import ServiceException
 from common.security import require_login
-from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends
 
 router = APIRouter()
 

@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from chat.application.prompt_context import build_current_date_context
+from chat.application.prompt_context.current_date import build_current_date_context
 from chat.domain.entities import ChatMessage, ChatSession, Role
 from chat.domain.entities.skill import SkillMeta
 from chat.domain.repositories import (

@@ -1,5 +1,5 @@
-import type { AssistantPart, ChatMessage, ChatSession } from "../types/chat";
-import { apiFetch, ensureApiOk, readApiData, readJson } from "./client";
+import type {AssistantPart, ChatMessage, ChatSession} from "../types/chat";
+import {apiFetch, ensureApiOk, readApiData, readJson} from "./client";
 
 type SessionDto = {
   id: string;

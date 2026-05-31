@@ -115,7 +115,7 @@ def step_finish() -> str:
 
 
 def source_url(source_id: str, url: str) -> str:
-    return _sse({"type": "source-url", "sourceId": source_id, "url": url})
+    return _sse({"type": "source-urls", "sourceId": source_id, "urls": url})
 
 
 # =============================================================================
