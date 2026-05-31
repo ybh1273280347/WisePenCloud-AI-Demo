@@ -9,9 +9,7 @@ from chat.application.tools.common.evidence_ranking.models import (
     EvidenceRankResult,
 )
 from chat.application.tools.common.evidence_ranking.ranking import rank_evidence
-from chat.application.tools.tool_content_store import (
-    tool_content_store,
-)
+from chat.application.tools.tool_content_store import ToolContentStore
 from chat.application.tools.web.services.web_search.coordinator import SearchCoordinator
 from chat.application.tools.web.services.web_search.enums import ProviderMode, SearchMode
 from chat.application.tools.web.services.web_search.errors import (
@@ -187,10 +185,11 @@ TOOL_SCHEMA = {
 
 
 class WebSearchTool(BaseTool):
-    """表示当前组件。"""
-    def __init__(self, coordinator: SearchCoordinator):
+
+    def __init__(self, coordinator: SearchCoordinator, content_store: ToolContentStore):
         """初始化对象依赖。"""
         self._coordinator = coordinator
+        self._content_store = content_store
 
     @property
     def name(self) -> str:
@@ -358,7 +357,7 @@ class WebSearchTool(BaseTool):
             metadata["objective"] = objective
 
         # 将内容放入缓存，不直接交给模型
-        receipt: ContentReceipt = tool_content_store.put_receipt(
+        receipt: ContentReceipt = self._content_store.put_receipt(
             session_id=session_id,
             tool_name="web_search",
             source="; ".join(queries),
@@ -377,6 +376,7 @@ class WebSearchTool(BaseTool):
                 content_ids=[receipt.content_id],
                 session_id=session_id,  # type: ignore
                 max_evidence=budget.ranked_evidence_limit,
+                content_store=self._content_store,
             )
         except Exception as e:
             log_fail(

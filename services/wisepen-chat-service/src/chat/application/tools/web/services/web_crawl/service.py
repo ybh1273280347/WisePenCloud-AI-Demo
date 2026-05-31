@@ -12,7 +12,6 @@ from chat.application.security.url_security import (
     UrlSecurityError,
     validate_public_http_url,
 )
-from chat.application.tools.tool_content_store import cache_and_format
 from chat.application.tools.web.services.common.file_handoff.store import TemporaryFileHandoffStore
 from chat.application.tools.web.services.web_crawl.domain.fetch_execution import (
     DiscoveryResult,
@@ -30,13 +29,13 @@ from chat.application.tools.web.services.web_crawl.enums import (
     CrawlItemKind,
     CrawlSkipReason,
 )
-from chat.application.tools.web.services.web_crawl.runtime.frontier import CrawlFrontier
-from chat.application.tools.web.services.web_crawl.runtime.link_extractor import LinkExtractor
 from chat.application.tools.web.services.web_crawl.models import (
     CrawlRequest,
     CrawlResult,
     CrawlResultItem,
 )
+from chat.application.tools.web.services.web_crawl.runtime.frontier import CrawlFrontier
+from chat.application.tools.web.services.web_crawl.runtime.link_extractor import LinkExtractor
 from chat.application.tools.web.services.web_crawl.runtime.politeness import PerHostPoliteness
 from chat.application.tools.web.services.web_crawl.runtime.robots import RobotsPolicy
 from chat.application.tools.web.services.web_fetch.coordinator import (
@@ -50,7 +49,6 @@ from chat.application.tools.web.services.web_fetch.models import (
 from chat.application.tools.web.utils.domains import extract_domain
 from chat.application.tools.web.utils.markdown import extract_markdown_title
 from chat.application.tools.web.utils.urls import canonicalize_url
-from chat.core.config.app_settings import settings as app_settings
 
 _BLOCKED_SCHEMES = {
     "mailto",
@@ -357,22 +355,8 @@ class WebCrawlService:
                 documents_found=1,
             )
 
-        # 页面类型结果：缓存内容，并发现下一级链接
+        # 页面类型结果：保留原始 Markdown，最终工具输出由统一切面缓存和窗口化
         markdown = fetch_item.content or ""
-        content_block = cache_and_format(
-            session_id=request.session_id,
-            tool_name="web_crawl",
-            source=fetch_item.url,
-            text=markdown,
-            content_type="text/markdown",
-            metadata={
-                "urls": fetch_item.url,
-                "kind": "web_crawl_page",
-                "depth": str(frontier_item.depth),
-                "source_url": frontier_item.source_url or "",
-            },
-            limit=app_settings.TOOL_RESULT_MAX_CHARS,
-        )
 
         result_item = CrawlResultItem(
             url=fetch_item.url,
@@ -380,7 +364,7 @@ class WebCrawlService:
             depth=frontier_item.depth,
             success=True,
             source_url=frontier_item.source_url,
-            content_block=content_block,
+            content_block=markdown,
         )
 
         discovery = DiscoveryResult(items=[])
@@ -721,8 +705,6 @@ def _map_fetch_error_to_skip_reason(error: Optional[str]) -> str:
     if "spa" in text:
         return CrawlSkipReason.SPA_SHELL.value
     return CrawlSkipReason.FETCH_FAILED.value
-
-
 
 
 def _skipped_item(

@@ -4,18 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
-from chat.application.infra.content_store.formatting import format_tool_content_window
-from chat.application.infra.content_store.models import ContentWindow
 from chat.application.security.url_security import (
     UrlSecurityError,
     validate_public_http_url,
 )
 from chat.application.tools.common.evidence_ranking.models import RankedEvidence
 from chat.application.tools.common.evidence_ranking.ranking import rank_evidence
-from chat.application.tools.tool_content_store import (
-    cache_and_window,
-    tool_content_store,
-)
+from chat.application.tools.tool_content_store import ToolContentStore
 from chat.application.tools.web.services.common.file_handoff.store import TemporaryFileHandoffStore
 from chat.application.tools.web.services.web_fetch import FetchCoordinator
 from chat.application.tools.web.services.web_fetch.enums import FetcherName
@@ -25,7 +20,6 @@ from chat.application.tools.web.services.web_fetch.models import (
 )
 from chat.application.tools.web.utils.domains import extract_domain
 from chat.application.tools.web.utils.markdown import extract_markdown_title
-from chat.core.config.app_settings import settings as app_settings
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_fail
 
@@ -42,9 +36,12 @@ _TOOL_DESCRIPTION = (
     "web_fetch has two input modes: direct URL mode via urls, and web_search source "
     "mode via from_search_content_id plus source_ids. Use exactly one mode per call, "
     "and batch multiple URLs or source_ids in one call.\n\n"
-    "HTML and text pages return readable Markdown. When objective is provided, "
-    "web_fetch still fetches and caches the full page, but returns objective-relevant "
-    "evidence snippets instead of the whole page body.\n\n"
+    "HTML and text pages return readable Markdown in the raw tool result. When "
+    "objective is provided, web_fetch also returns objective-relevant evidence snippets "
+    "extracted from the fetched Markdown.\n\n"
+    "Large web_fetch outputs may be cached by the runtime as ToolContent. If the "
+    "runtime returns ToolContent metadata, use evidence_rank to locate relevant "
+    "passages or tool_content_read to continue a known window by next_offset.\n\n"
     "Direct document links such as PDF, DOCX, PPTX, EPUB, XLSX, XLSM, XLS, or ODS "
     "are returned as file_ref handoffs instead of being parsed by web_fetch.\n"
     "After web_fetch returns file_ref values, pass all file_refs together to document_parse in one call."
@@ -94,8 +91,7 @@ _TOOL_SCHEMA = {
             "minLength": 1,
             "description": (
                 "Optional evidence extraction goal. When provided, web_fetch returns "
-                "page evidence relevant to this goal from the fetched and cached raw "
-                "Markdown, rather than returning the full page body."
+                "page evidence relevant to this goal from the fetched Markdown."
             ),
         },
     },
@@ -131,10 +127,12 @@ class WebFetchTool(BaseTool):
             self,
             fetcher: FetchCoordinator,
             file_handoff_store: TemporaryFileHandoffStore,
+            content_store: ToolContentStore,
     ):
         """初始化对象依赖。"""
         self._fetcher = fetcher
         self._file_handoff_store = file_handoff_store
+        self._content_store = content_store
 
     @property
     def name(self) -> str:
@@ -163,6 +161,7 @@ class WebFetchTool(BaseTool):
         targets_or_error = _resolve_fetch_targets(
             session_id=session_id,
             kwargs=kwargs,
+            content_store=self._content_store,
         )
         if isinstance(targets_or_error, str):
             return targets_or_error
@@ -223,7 +222,7 @@ class WebFetchTool(BaseTool):
                     provenance = _build_page_metadata(
                         item=item,
                         source_context=source_context,
-                        objective=None,
+                        objective=objective,
                     )
                     for key in (
                             "source_id",
@@ -242,30 +241,44 @@ class WebFetchTool(BaseTool):
                             value = str(value).lower()
                         lines.append(f"{key}: {value}")
 
-                    raw_window = cache_and_window(
-                        session_id=session_id,
-                        tool_name=self.name,
-                        source=item.url,
-                        text=item.content,
-                        content_type="text/markdown",
-                        metadata=_build_page_metadata(
-                            item=item,
-                            source_context=source_context,
-                            objective=objective,
-                        ),
-                        limit=app_settings.TOOL_RESULT_MAX_CHARS,
-                    )
-                    lines.append(format_tool_content_window(raw_window))
+                    page_content_id: Optional[str] = None
+                    page_cache_error: Optional[str] = None
 
-                    # 如果提供了检索目标，提取与其内容相关的片段线索
                     if objective:
+                        page_receipt = self._content_store.put_receipt(
+                            session_id=session_id,
+                            tool_name=self.name,
+                            source=item.url,
+                            text=item.content,
+                            content_type="text/markdown",
+                            metadata=provenance,
+                        )
+                        if page_receipt is not None and page_receipt.cached:
+                            page_content_id = page_receipt.content_id
+                        else:
+                            page_cache_error = (
+                                page_receipt.cache_error
+                                if page_receipt is not None
+                                else "failed_to_cache_page_content"
+                            )
+
                         lines.extend(
                             _format_page_evidence_lines(
                                 session_id=session_id,
-                                raw_window=raw_window,
+                                raw_content_id=page_content_id,
+                                cache_error=page_cache_error,
                                 objective=objective,
+                                content_store=self._content_store,
                             )
                         )
+
+                    lines.extend(
+                        [
+                            "",
+                            "[Fetched Markdown]",
+                            item.content,
+                        ]
+                    )
             else:
                 lines.append("")
                 lines.append(f"--- URL: {item.url} ---")
@@ -333,6 +346,7 @@ def _resolve_fetch_targets(
         *,
         session_id: str,
         kwargs: Dict[str, Any],
+        content_store: ToolContentStore,
 ) -> Union[List[FetchTarget], str]:
     """两路输入路由统一解析器。"""
     if "urls" in kwargs:
@@ -342,6 +356,7 @@ def _resolve_fetch_targets(
         session_id=session_id,
         from_search_content_id=kwargs["from_search_content_id"],
         source_ids=kwargs["source_ids"],
+        content_store=content_store,
     )
     if isinstance(resolved_or_error, str):
         return resolved_or_error
@@ -362,9 +377,10 @@ def _resolve_source_id_targets(
         session_id: str,
         from_search_content_id: str,
         source_ids: List[str],
+        content_store: ToolContentStore,
 ) -> Union[List[FetchTarget], str]:
     """从内容存贮区中读取先前的搜索凭据包，依 source_ids 检索恢复原始 URL。"""
-    stored = tool_content_store.get(
+    stored = content_store.get(
         content_id=from_search_content_id,
         session_id=session_id,
     )
@@ -494,29 +510,31 @@ def _build_page_metadata(
 
 
 def _format_page_evidence_lines(
-        *,
-        session_id: str,
-        raw_window: ContentWindow,
-        objective: str,
+    *,
+    session_id: str,
+    raw_content_id: Optional[str],
+    cache_error: Optional[str],
+    objective: str,
+    content_store: ToolContentStore,
 ) -> List[str]:
     """通过词法分块机制提取出网页中与目标意图最具匹配度的线索片段。"""
     lines = [
         "",
         "[Page Evidence]",
-        f"raw_content_id: {raw_window.content_id}",
+        f"raw_content_id: {raw_content_id or ''}",
         f"objective: {objective}",
         "extraction_method: lexical_chunk_ranking",
         "final_answer_generated: false",
-        "note: Evidence snippets are extracted from cached raw Markdown; web_fetch does not answer the user directly.",
+        "note: Evidence snippets are extracted from fetched raw Markdown; web_fetch does not answer the user directly.",
     ]
 
-    if not raw_window.cached or not raw_window.content_id:
+    if not raw_content_id:
         lines.extend(
             [
                 "needs_more_context: true",
                 "extracted_evidence: []",
                 "notes:",
-                f"- Raw page content was not cached: {raw_window.cache_error or 'unknown cache error'}.",
+                f"- Raw page content was not cached: {cache_error or 'unknown cache error'}.",
             ]
         )
         return lines
@@ -524,16 +542,17 @@ def _format_page_evidence_lines(
     try:
         ranking_result = rank_evidence(
             query=objective,
-            content_ids=[raw_window.content_id],
+            content_ids=[raw_content_id],
             session_id=session_id,
             max_evidence=_PAGE_EVIDENCE_LIMIT_PER_PAGE,
+            content_store=content_store,
         )
     except Exception as e:
         log_fail(
             "web_fetch page evidence extraction",
             repr(e),
             session_id=session_id,
-            content_id=raw_window.content_id,
+            content_id=raw_content_id,
         )
         lines.extend(
             [
@@ -548,7 +567,7 @@ def _format_page_evidence_lines(
     evidence_items = [
         evidence
         for evidence in ranking_result.evidence
-        if evidence.content_id == raw_window.content_id and evidence.chunk_index >= 0
+        if evidence.content_id == raw_content_id and evidence.chunk_index >= 0
     ]
     needs_more_context = not evidence_items
     lines.append(f"needs_more_context: {str(needs_more_context).lower()}")

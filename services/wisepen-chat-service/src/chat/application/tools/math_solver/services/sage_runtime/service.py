@@ -8,7 +8,6 @@ from chat.application.tools.math_solver.services.models import MathSolverResult
 from chat.application.tools.math_solver.services.sage_runtime.client import SageRuntimeClient
 
 
-
 class SageMathSolverService:
     def __init__(self, client: SageRuntimeClient) -> None:
         self._client = client

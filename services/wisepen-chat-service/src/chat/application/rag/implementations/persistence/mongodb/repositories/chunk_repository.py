@@ -2,6 +2,11 @@ import asyncio
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
+from chat.application.rag.implementations.persistence.mongodb.documents.chunk_documents import (
+    RetrieveChunkDocument,
+    SearchChunkDocument,
+)
+
 from chat.application.rag.domain.index_chunks import (
     IndexingTextPair,
     SearchChunkContext,
@@ -15,10 +20,6 @@ from chat.application.rag.domain.ports import (
     RagSearchChunkRecord,
 )
 from chat.application.rag.enums import ResourceKind
-from chat.application.rag.implementations.persistence.mongodb.documents.chunk_documents import (
-    RetrieveChunkDocument,
-    SearchChunkDocument,
-)
 
 
 def _merge_intervals(ranges):

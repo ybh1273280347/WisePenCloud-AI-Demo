@@ -9,9 +9,8 @@ from chat.application.tools.math_solver.services.models import (
     MathSolverRequest,
     SAGE_MATH_TASKS,
 )
-from chat.application.tools.math_solver.services.python_runtime.service import PythonMathSolverService
-
 from chat.application.tools.math_solver.services.python_runtime.enums import PYTHON_MATH_TASKS
+from chat.application.tools.math_solver.services.python_runtime.service import PythonMathSolverService
 from chat.domain.interfaces.tool import BaseTool
 
 _DESCRIPTION = (

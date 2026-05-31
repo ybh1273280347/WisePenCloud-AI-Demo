@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from chat.application.tools.web.services.web_search.enums import ProviderMode, SearcherName
+from chat.application.tools.web.services.web_search.provider_policy.persistence import UserSearchProviderConfig
 from chat.application.tools.web.services.web_search.provider_policy.service import (
     SearchProviderConfigService,
 )
-from chat.application.tools.web.services.web_search.provider_policy.persistence import UserSearchProviderConfig
 
 
 @dataclass(frozen=True, slots=True)

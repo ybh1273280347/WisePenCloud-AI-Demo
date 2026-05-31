@@ -10,8 +10,6 @@ from chat.application.tools.document.services.document_parse import (
     DocumentParseService,
 )
 from chat.application.tools.document.services.document_parse.models import DocumentParseResultItem
-from chat.application.tools.tool_content_store import cache_and_format
-from chat.core.config.app_settings import settings as app_settings
 from chat.domain.interfaces.tool import BaseTool
 
 _TOOL_DESCRIPTION = (
@@ -25,9 +23,11 @@ _TOOL_DESCRIPTION = (
     "Never pass URLs to document_parse.\n\n"
     "Supported formats: PDF, DOCX, DOCM, PPTX, PPTM, EPUB, XLSX, XLS, XLSM, and ODS. "
     "Unsupported: HTML, TXT, MD, CSV, JSON, XML, images, audio, and video.\n\n"
-    "When document_parse returns content_id, the parsed document is available as "
-    "cached ToolContent. Use evidence_rank to locate relevant passages, or "
-    "tool_content_read to continue a known window by next_offset.\n"
+    "document_parse returns complete parsed Markdown as the raw tool result. "
+    "When the result is large, the runtime may cache the tool output as ToolContent "
+    "and expose a content_id in the returned ToolContent metadata. Use evidence_rank "
+    "to locate relevant passages, or tool_content_read to continue a known window "
+    "by next_offset.\n"
     "Do not pass file_ref values to evidence_rank or tool_content_read."
 )
 
@@ -50,6 +50,7 @@ _TOOL_SCHEMA = {
 
 class DocumentParseTool(BaseTool):
     """表示当前组件。"""
+
     def __init__(
         self,
         *,
@@ -124,7 +125,6 @@ class DocumentParseTool(BaseTool):
                 )
 
         return self._format_batch_result(
-            session_id=session_id,
             results=results,
             failed_resolutions=failed_resolutions,
         )
@@ -132,7 +132,6 @@ class DocumentParseTool(BaseTool):
     def _format_batch_result(
         self,
         *,
-        session_id: str,
         results: List[DocumentParseResultItem],
         failed_resolutions: List[tuple],
     ) -> str:
@@ -153,38 +152,34 @@ class DocumentParseTool(BaseTool):
             lines.append("[Parse Error] Document file not found.")
 
         for item in results:
+            lines.append("")
+            display_name = (
+                item.file_ref.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "document"
+            )
+            lines.append(f"--- File: {display_name} ---")
+
             if item.success and item.result is not None:
                 result = item.result
-                metadata: Dict[str, Any] = {
-                    **result.metadata,
-                    "tool": self.name,
-                    "file_type": result.file_type,
-                    "source": result.source,
-                    "page_count": len(result.pages),
-                    "table_count": len(result.tables),
-                    "warnings": result.warnings,
-                }
+                lines.append("[Parse Success]")
+                lines.append(f"Source: {result.source}")
+                lines.append(f"File type: {result.file_type}")
+                lines.append(f"Pages: {len(result.pages)}")
+                lines.append(f"Tables: {len(result.tables)}")
+
+                if result.warnings:
+                    lines.append(
+                        f"Warnings: {result.warnings}"
+                    )
+
+                if result.metadata:
+                    lines.append(
+                        f"Metadata: {result.metadata}"
+                    )
+
                 lines.append("")
-                display_name = (
-                    item.file_ref.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "document"
-                )
-                lines.append(f"--- File: {display_name} ---")
-                cached = cache_and_format(
-                    session_id=session_id,
-                    tool_name=self.name,
-                    source=result.source,
-                    text=result.text,
-                    content_type="text/markdown",
-                    metadata=metadata,
-                    limit=app_settings.TOOL_RESULT_MAX_CHARS,
-                )
-                lines.append(cached)
+                lines.append("[Parsed Markdown]")
+                lines.append(result.text)
             else:
-                lines.append("")
-                display_name = (
-                    item.file_ref.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "document"
-                )
-                lines.append(f"--- File: {display_name} ---")
                 lines.append(f"[Parse Error] {item.error}")
 
         return "\n".join(lines)

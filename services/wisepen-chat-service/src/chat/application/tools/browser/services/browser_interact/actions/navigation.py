@@ -1,33 +1,33 @@
 from typing import Dict, Optional
 from urllib.parse import urlparse
 
-from chat.application.tools.browser.services.browser_interact.runtime.action_runtime import (
-    action_error_response,
-    action_success_response,
-    get_existing_page_or_error,
-    get_or_create_page_or_error,
-)
 from chat.application.tools.browser.services.browser_interact.actions.ref import _SETTLE_WAIT_MS
-from chat.application.tools.browser.services.browser_interact.response.build_response import (
-    get_page_state,
-)
-from chat.application.tools.browser.services.browser_interact.runtime.content import BrowserContentExtractor
 from chat.application.tools.browser.services.browser_interact.enums import (
     ActionStatus,
     BrowserActionType,
     DiagnosticCode,
     WaitUntil,
 )
+from chat.application.tools.browser.services.browser_interact.models import (
+    ActionResult,
+)
+from chat.application.tools.browser.services.browser_interact.response.build_response import (
+    get_page_state,
+)
 from chat.application.tools.browser.services.browser_interact.response.error_factory import (
     make_action_failed_error,
     make_schema_error,
     make_user_intervention_error_from_signal,
 )
+from chat.application.tools.browser.services.browser_interact.runtime.action_runtime import (
+    action_error_response,
+    action_success_response,
+    get_existing_page_or_error,
+    get_or_create_page_or_error,
+)
+from chat.application.tools.browser.services.browser_interact.runtime.content import BrowserContentExtractor
 from chat.application.tools.browser.services.browser_interact.runtime.intervention import (
     UserInterventionDetector,
-)
-from chat.application.tools.browser.services.browser_interact.models import (
-    ActionResult,
 )
 from chat.application.tools.browser.services.browser_interact.runtime.session import BrowserSessionManager
 from chat.application.tools.browser.services.browser_interact.snapshot.manager import SnapshotManager

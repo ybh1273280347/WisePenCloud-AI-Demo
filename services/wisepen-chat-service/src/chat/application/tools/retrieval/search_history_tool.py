@@ -1,14 +1,12 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from chat.application.tools.common.plaintext_ranking import (
     PlainTextDocument,
     PlainTextRankRequest,
     rank_plain_text,
 )
-from chat.application.tools.tool_content_store import cache_and_format
-from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage
 from chat.domain.interfaces.tool import BaseTool
 from chat.domain.repositories import MessageRepository
@@ -43,7 +41,10 @@ class KeywordExactCandidate:
 class SearchHistoricalMessagesTool(BaseTool):
     """历史消息检索工具，按 keywords 召回并按 objective 做纯文本重排。"""
 
-    def __init__(self, message_repo: MessageRepository) -> None:
+    def __init__(
+        self,
+        message_repo: MessageRepository,
+    ) -> None:
         """初始化历史消息仓储依赖。"""
         self._message_repo = message_repo
 
@@ -59,8 +60,9 @@ class SearchHistoricalMessagesTool(BaseTool):
             "Search historical chat messages with exact keyword recall and objective-based ranking. "
             "Use objective for BM25 lexical ranking, and keywords for exact recall. "
             "If relevance scores are tied, newer messages are returned first. "
-            "Long results are returned as ToolContent windows; continue with tool_content_read "
-            "using content_id and next_offset when truncated=true."
+            "The tool returns complete ranked message results as raw tool output. "
+            "When the result is large, the runtime may cache the tool output as ToolContent "
+            "and expose content_id, next_offset, and chunk metadata for follow-up reading."
         )
 
     @property
@@ -126,7 +128,7 @@ class SearchHistoricalMessagesTool(BaseTool):
                       end_time、limit、scan_limit。
 
         Returns:
-            格式化后的历史消息文本，超长时自动截断为 ToolContent window。
+            格式化后的历史消息文本；长结果由统一工具输出切面缓存为 ToolContent window。
         """
         # --- 1. 校验会话 ---
         session_id: Optional[str] = context.get("session_id")
@@ -228,37 +230,73 @@ class SearchHistoricalMessagesTool(BaseTool):
             if item.document_id in messages_by_id
         ]
 
-        # --- 8. 格式化输出：角色 + 时间戳 + 内容 ---
-        lines = [
-            f"[{message.role.value}] ({message.created_at.isoformat()}): {message.content or ''}"
-            for message in selected
-        ]
-        raw = "\n".join(lines)
-
-        # --- 9. 附加元数据，方便溯源调试 ---
-        metadata: Dict[str, Any] = {
-            "objective": objective,
-            "keywords": keywords,
-            "ranking_queries": ranking_queries,
-            "result_count": len(selected),
-            "candidate_count": len(candidates),
-            "scanned_message_count": len(scanned_messages),
-            "freshness_tiebreak": "created_at_desc",
-            "keyword_exact_match": "raw_substring_case_insensitive_or",
-            "start_time": start_time.isoformat() if start_time else None,
-            "end_time": end_time.isoformat() if end_time else None,
-        }
-
-        # 缓存并返回格式化后的结果（超长时自动截断为 ToolContent window）
-        return cache_and_format(
-            session_id=session_id,
-            tool_name=self.name,
-            source=f"objective:{objective}",
-            text=raw,
-            content_type="text/plain",
-            metadata=metadata,
-            limit=settings.TOOL_RESULT_MAX_CHARS,
+        # --- 8. 格式化输出：附加检索元信息 + 角色 + 时间戳 + 内容 ---
+        return _format_history_search_result(
+            objective=objective,
+            keywords=keywords,
+            ranking_queries=ranking_queries,
+            selected=selected,
+            candidate_count=len(candidates),
+            scanned_message_count=len(scanned_messages),
+            start_time=start_time,
+            end_time=end_time,
         )
+
+
+def _format_history_search_result(
+    *,
+    objective: str,
+    keywords: List[str],
+    ranking_queries: List[str],
+    selected: List[ChatMessage],
+    candidate_count: int,
+    scanned_message_count: int,
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+) -> str:
+    """格式化历史消息检索结果。
+
+    Args:
+        objective: 排序目标。
+        keywords: exact 召回关键词。
+        ranking_queries: 排序 query 列表。
+        selected: 最终选中的消息列表。
+        candidate_count: keyword exact 召回候选数量。
+        scanned_message_count: 扫描消息数量。
+        start_time: 可选起始时间。
+        end_time: 可选结束时间。
+
+    Returns:
+        完整历史消息检索结果文本。
+    """
+    lines = [
+        "[Tool Result] Historical message search results",
+        f"Objective: {objective}",
+        f"Keywords: {', '.join(keywords)}",
+        f"Ranking queries: {', '.join(ranking_queries)}",
+        f"Result count: {len(selected)}",
+        f"Candidate count: {candidate_count}",
+        f"Scanned message count: {scanned_message_count}",
+        "Freshness tiebreak: created_at_desc",
+        "Keyword exact match: raw_substring_case_insensitive_or",
+    ]
+
+    if start_time:
+        lines.append(f"Start time: {start_time.isoformat()}")
+    if end_time:
+        lines.append(f"End time: {end_time.isoformat()}")
+
+    lines.extend(["", "[Ranked Historical Messages]"])
+
+    if not selected:
+        lines.append("(none)")
+        return "\n".join(lines)
+
+    lines.extend(
+        f"[{message.role.value}] ({message.created_at.isoformat()}): {message.content or ''}"
+        for message in selected
+    )
+    return "\n".join(lines)
 
 
 def _normalize_plain_terms(values: List[str], *, limit: int) -> List[str]:
@@ -284,7 +322,7 @@ def _normalize_plain_terms(values: List[str], *, limit: int) -> List[str]:
     return terms
 
 
-def _parse_optional_time(value: Optional[str], field_name: str) -> Union[Optional[datetime], str]:
+def _parse_optional_time(value: Optional[str], field_name: str) -> Optional[datetime] | str:
     """解析可选的 ISO 8601 时间参数字符串。
 
     Args:

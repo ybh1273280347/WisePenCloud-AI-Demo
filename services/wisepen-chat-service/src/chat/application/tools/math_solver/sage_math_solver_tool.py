@@ -11,7 +11,6 @@ from chat.application.tools.math_solver.services.models import (
 )
 from chat.application.tools.math_solver.services.python_runtime.enums import PYTHON_MATH_TASKS
 from chat.application.tools.math_solver.services.sage_runtime.service import SageMathSolverService
-
 from chat.domain.interfaces.tool import BaseTool
 
 _DESCRIPTION = (

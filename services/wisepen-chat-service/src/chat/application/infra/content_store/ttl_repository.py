@@ -10,6 +10,8 @@ class TTLContentRepository:
     """
     基于字符预算的 TTL 内容缓存仓库。
     StoredContent 以引用形式返回，调用方不应修改其内容。
+
+    Tool Content Store 目前已经 Redis 化，此处为后续可能的调用方保留
     """
 
     def __init__(self, *, ttl_seconds: int, max_total_chars: int) -> None:

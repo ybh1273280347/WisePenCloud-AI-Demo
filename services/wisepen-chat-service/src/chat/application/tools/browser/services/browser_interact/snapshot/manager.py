@@ -5,13 +5,13 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from playwright.async_api import ElementHandle, Frame, Page
 
-from chat.application.tools.browser.services.browser_interact.response.error_factory import (
-    make_snapshot_required_error,
-    make_stale_ref_error,
-)
 from chat.application.tools.browser.services.browser_interact.models import (
     SnapshotPayload,
     ToolError,
+)
+from chat.application.tools.browser.services.browser_interact.response.error_factory import (
+    make_snapshot_required_error,
+    make_stale_ref_error,
 )
 from common.logger import log_fail
 

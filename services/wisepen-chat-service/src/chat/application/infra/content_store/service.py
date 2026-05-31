@@ -1,18 +1,37 @@
 import hashlib
 import uuid
+from enum import StrEnum
 from typing import Any, Dict, Optional
 
+from chat.application.infra.content_store.chunking import (
+    create_content_chunks,
+    find_chunk_by_offset,
+)
+from chat.application.infra.content_store.models import (
+    ContentReceipt,
+    ContentWindow,
+    StoredContent,
+)
 from common.logger import log_event
-from .chunking import create_content_chunks, find_chunk_by_offset
-from .models import ContentReceipt, ContentWindow, StoredContent
-from .repository import TTLContentRepository
+
+
+class ContentWindowError(StrEnum):
+    OFFSET_OUT_OF_RANGE = "offset_out_of_range"
+    CHUNK_NOT_FOUND = "chunk_not_found"
+    CHUNK_INDEX_OUT_OF_RANGE = "chunk_index_out_of_range"
+    EMPTY_CONTENT = "empty_content"
+
+
+class ContentCacheError(StrEnum):
+    CONTENT_TOO_LARGE = "content_too_large"
+    EMPTY_CONTENT = "empty_content"
 
 
 class ContentStore:
     """
     通用基础设施层的内容存储门面控制器。
 
-    - _repository: 基于进程内字符预算的本地高速缓存仓库
+    - _repository: 由容器注入的内容仓储，可落地到 Redis 等后端
     - _default_chunk_size: 系统默认单分块最大字符跨度
     - _max_item_chars: 单条资产允许存入的字符长度上限
     - _normalize_text: 是否在入库前自动裁剪头尾空白符
@@ -21,7 +40,7 @@ class ContentStore:
     def __init__(
             self,
             *,
-            repository: TTLContentRepository,
+            repository: Any,
             default_chunk_size: int,
             max_item_chars: int,
             normalize_text: bool = True,
@@ -29,7 +48,7 @@ class ContentStore:
         """初始化 ContentStore。
 
         Args:
-            repository: 基于进程内字符预算的本地高速缓存仓库实例。
+            repository: 由容器注入的内容仓储实例。
             default_chunk_size: 系统默认单分块最大字符跨度。
             max_item_chars: 单条内容允许存入的最大字符数。
             normalize_text: 是否在入库前自动裁剪头尾空白符，默认为 True。
@@ -68,6 +87,8 @@ class ContentStore:
         """
         if self._normalize_text:
             text = text.strip()
+
+        # 空文本或超长文本不进入缓存；调用方会按未缓存路径降级。
         if not text or len(text) > self._max_item_chars:
             return None
 
@@ -138,6 +159,8 @@ class ContentStore:
             找到内容时返回 StoredContent 对象，未找到或作用域不匹配时返回 None。
         """
         item = self._repository.get(content_id)
+
+        # 内容不存在、TTL 过期或 scope 不匹配时视为不可读取，避免跨作用域读取缓存内容。
         if item is None or item.scope_id != scope_id:
             return None
         return item
@@ -186,7 +209,7 @@ class ContentStore:
             metadata=dict(stored.metadata),
         )
 
-    def read_window(
+    def read_chunk_window_by_offset(
             self,
             *,
             content_id: str,
@@ -216,13 +239,14 @@ class ContentStore:
         offset = max(0, offset)
         effective_limit = max(1, limit if limit is not None else self._default_chunk_size)
 
+        # offset 超出正文范围属于读取参数错误；内容仍存在，因此返回 error window 而不是 None。
         if offset >= original_length:
             return ContentWindow(
                 content_id=content_id, producer=item.producer, source=item.source,
                 content_type=item.content_type, original_length=original_length,
                 chunk_count=len(item.chunks), offset=offset,
                 returned_length=0, truncated=False, next_offset=None,
-                text="", error="offset_out_of_range",
+                text="", error=ContentWindowError.OFFSET_OUT_OF_RANGE.value,
             )
 
         chunks = (
@@ -232,13 +256,14 @@ class ContentStore:
         chunk_count = len(chunks)
         chunk = find_chunk_by_offset(chunks, offset)
 
+        # offset 合法但无法定位 chunk，说明缓存分块与正文不一致，返回 error window 保护读取链路。
         if chunk is None:
             return ContentWindow(
                 content_id=content_id, producer=item.producer, source=item.source,
                 content_type=item.content_type, original_length=original_length,
                 chunk_count=chunk_count, offset=offset,
                 returned_length=0, truncated=False, next_offset=None,
-                text="", error="chunk_not_found",
+                text="", error=ContentWindowError.CHUNK_NOT_FOUND.value,
             )
 
         truncated = chunk.index < chunk_count - 1
@@ -289,6 +314,8 @@ class ContentStore:
         先缓存文本内容，然后根据偏移量和限制长度读取对应的内容窗口。
         如果内容因过大等原因未能缓存，会返回一个包含截断内容的未缓存窗口，并附上缓存失败的警告。
 
+        常用场景：工具产出长文本后需要缓存全文，同时立即返回首个可读窗口；首个窗口承担内容预览与后续读取导航。
+
         Args:
             scope_id: 作用域 ID。
             producer: 产生内容的来源标识。
@@ -311,12 +338,13 @@ class ContentStore:
             metadata=metadata,
         )
         if content_id:
-            window = self.read_window(
+            window = self.read_chunk_window_by_offset(
                 content_id=content_id, scope_id=scope_id, offset=offset, limit=limit,
             )
             if window is not None:
                 return window
 
+        # 缓存失败不应阻断当前响应；直接基于原文返回一个未缓存窗口。
         return _create_uncached_window(
             text=text,
             producer=producer,
@@ -324,11 +352,11 @@ class ContentStore:
             content_type=content_type,
             offset=offset,
             limit=limit if limit is not None else self._default_chunk_size,
-            cache_error="content_too_large",
+            cache_error=ContentCacheError.CONTENT_TOO_LARGE.value,
             normalize_text=self._normalize_text,
         )
 
-    def read_chunk_window(
+    def read_chunk_window_by_index(
             self,
             *,
             content_id: str,
@@ -360,6 +388,7 @@ class ContentStore:
         chunk_count = len(chunks)
         text_length = len(item.text)
 
+        # chunk_index 越界属于读取参数错误；内容仍存在，因此返回 error window。
         if chunk_index < 0 or chunk_index >= chunk_count:
             return ContentWindow(
                 content_id=content_id,
@@ -369,7 +398,7 @@ class ContentStore:
                 original_length=text_length,
                 chunk_index=chunk_index,
                 chunk_count=chunk_count,
-                error="chunk_index_out_of_range",
+                error=ContentWindowError.CHUNK_INDEX_OUT_OF_RANGE.value,
             )
 
         start_chunk = max(0, chunk_index - max(0, before_chunks))
@@ -405,7 +434,7 @@ def _create_uncached_window(
         content_type: str = "text/markdown",
         offset: int = 0,
         limit: int = 4000,
-        cache_error: str = "content_too_large",
+        cache_error: str = ContentCacheError.CONTENT_TOO_LARGE.value,
         normalize_text: bool = True,
 ) -> ContentWindow:
     """创建未缓存的内容窗口。
@@ -431,6 +460,7 @@ def _create_uncached_window(
 
     original_length = len(text)
 
+    # 原文本身为空时没有可降级读取的内容，返回 empty_content window。
     if not text:
         return ContentWindow(
             content_id="",
@@ -439,15 +469,16 @@ def _create_uncached_window(
             content_type=content_type,
             original_length=0,
             truncated=False, text="",
-            error="empty_content",
+            error=ContentWindowError.EMPTY_CONTENT.value,
             cached=False,
-            cache_error="empty_content",
+            cache_error=ContentCacheError.EMPTY_CONTENT.value,
         )
 
     chunks = create_content_chunks(text, limit, content_type=content_type)
     chunk_count = len(chunks)
     chunk = find_chunk_by_offset(chunks, offset)
 
+    # 未缓存路径下 offset 仍然越界时，返回 error window 而不是抛异常。
     if chunk is None:
         return ContentWindow(
             content_id="",
@@ -458,7 +489,7 @@ def _create_uncached_window(
             chunk_count=chunk_count,
             offset=offset,
             truncated=False, text="",
-            error="offset_out_of_range",
+            error=ContentWindowError.OFFSET_OUT_OF_RANGE.value,
             cached=False,
             cache_error=cache_error,
         )

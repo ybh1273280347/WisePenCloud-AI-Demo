@@ -2,7 +2,6 @@ from typing import Any, Dict, Optional
 
 from chat.application.infra.content_store import ContentStore
 from chat.application.infra.content_store.formatting import (
-    format_tool_content_receipt,
     format_tool_content_window,
 )
 from chat.application.infra.content_store.models import (
@@ -10,49 +9,25 @@ from chat.application.infra.content_store.models import (
     ContentWindow,
     StoredContent,
 )
-from chat.application.infra.content_store.repository import TTLContentRepository
-from chat.core.config.app_settings import settings as app_settings
+from chat.core.config.app_settings import settings
 
 _TOOL_CONTENT_STORE_TTL_SECONDS = 30 * 60
-_TOOL_CONTENT_STORE_MAX_TOTAL_CHARS = 20_000_000
 _TOOL_CONTENT_STORE_MAX_ITEM_CHARS = 20_000_000
 
 
 class ToolContentStore:
     def __init__(
         self,
-        ttl_seconds: Optional[int] = None,
-        max_total_chars: Optional[int] = None,
-        default_chunk_size: Optional[int] = None,
-        max_item_chars: Optional[int] = None,
+        *,
+        content_store: ContentStore,
     ):
         """初始化 ToolContentStore。
 
-        使用 ContentStore 和 TTLContentRepository 构建工具内容存储实例。
-
         Args:
-            ttl_seconds: 缓存项的存活时间（秒），默认 30 分钟。
-            max_total_chars: 缓存仓库允许存储的最大总字符数。
-            default_chunk_size: 默认单分块最大字符跨度。
-            max_item_chars: 单条内容允许存入的最大字符数。
+            content_store: 由容器注入的基础内容存储。
         """
-        self._store = ContentStore(
-            repository=TTLContentRepository(
-                ttl_seconds=ttl_seconds
-                if ttl_seconds is not None
-                else _TOOL_CONTENT_STORE_TTL_SECONDS,
-                max_total_chars=max_total_chars
-                if max_total_chars is not None
-                else _TOOL_CONTENT_STORE_MAX_TOTAL_CHARS,
-            ),
-            default_chunk_size=default_chunk_size
-            if default_chunk_size is not None
-            else app_settings.TOOL_RESULT_MAX_CHARS,
-            max_item_chars=max_item_chars
-            if max_item_chars is not None
-            else _TOOL_CONTENT_STORE_MAX_ITEM_CHARS,
-            normalize_text=True,
-        )
+        self._store = content_store
+
 
     def put(
         self,
@@ -139,7 +114,7 @@ class ToolContentStore:
             metadata=metadata,
         )
 
-    def read_window(
+    def read_chunk_window_by_offset(
         self,
         *,
         content_id: str,
@@ -158,7 +133,7 @@ class ToolContentStore:
         Returns:
             成功时返回 ContentWindow 窗口对象，内容不存在或已过期时返回 None。
         """
-        return self._store.read_window(
+        return self._store.read_chunk_window_by_offset(
             content_id=content_id,
             scope_id=session_id,
             offset=offset,
@@ -206,7 +181,7 @@ class ToolContentStore:
             limit=limit,
         )
 
-    def read_chunk_window(
+    def read_chunk_window_by_index(
         self,
         *,
         content_id: str,
@@ -229,7 +204,7 @@ class ToolContentStore:
         Returns:
             成功时返回合并后的 ContentWindow 对象，内容不存在时返回 None。
         """
-        return self._store.read_chunk_window(
+        return self._store.read_chunk_window_by_index(
             content_id=content_id,
             scope_id=session_id,
             chunk_index=chunk_index,
@@ -238,132 +213,13 @@ class ToolContentStore:
         )
 
 
-def cache_and_window(
-    *,
-    session_id: str,
-    tool_name: str,
-    source: str,
-    text: str,
-    content_type: str = "text/markdown",
-    metadata: Optional[Dict[str, Any]] = None,
-    offset: int = 0,
-    limit: Optional[int] = None,
-) -> ContentWindow:
-    """缓存工具输出并返回可读的内容窗口。
-
-    先将工具输出的文本内容缓存，然后按指定的偏移量和限制长度返回内容窗口。
-
-    Args:
-        session_id: 会话 ID。
-        tool_name: 产生内容的工具名称。
-        source: 内容来源标识。
-        text: 要缓存的内容文本。
-        content_type: 内容的 MIME 类型，默认为 text/markdown。
-        metadata: 可选的键值对元数据。
-        offset: 读取起始位置的字符偏移量，默认为 0。
-        limit: 返回内容的最大字符数。
-
-    Returns:
-        包含请求内容片段的 ContentWindow 对象。
-    """
-    return tool_content_store.put_and_read_window(
-        session_id=session_id,
-        tool_name=tool_name,
-        source=source,
-        text=text,
-        content_type=content_type,
-        metadata=metadata,
-        offset=offset,
-        limit=limit,
-    )
-
-
-def cache_and_format(
-    *,
-    session_id: str,
-    tool_name: str,
-    source: str,
-    text: str,
-    content_type: str = "text/markdown",
-    metadata: Optional[Dict[str, Any]] = None,
-    offset: int = 0,
-    limit: Optional[int] = None,
-) -> str:
-    """缓存工具输出并返回格式化后的内容窗口字符串。
-
-    将工具输出的文本内容缓存，按指定偏移量和限制长度读取内容窗口，然后格式化为可读的字符串。
-
-    Args:
-        session_id: 会话 ID。
-        tool_name: 产生内容的工具名称。
-        source: 内容来源标识。
-        text: 要缓存的内容文本。
-        content_type: 内容的 MIME 类型，默认为 text/markdown。
-        metadata: 可选的键值对元数据。
-        offset: 读取起始位置的字符偏移量，默认为 0。
-        limit: 返回内容的最大字符数。
-
-    Returns:
-        格式化后的内容窗口字符串。
-    """
-    window = cache_and_window(
-        session_id=session_id,
-        tool_name=tool_name,
-        source=source,
-        text=text,
-        content_type=content_type,
-        metadata=metadata,
-        offset=offset,
-        limit=limit,
-    )
-    return format_tool_content_window(window)
-
-
-def cache_artifact_and_format_receipt(
-    *,
-    session_id: str,
-    tool_name: str,
-    source: str,
-    text: str,
-    content_type: str = "application/json",
-    metadata: Optional[Dict[str, Any]] = None,
-) -> str:
-    """缓存工具产物并返回格式化后的回执字符串。
-
-    将工具产出的结构化数据（如 JSON）缓存，并返回包含内容 ID、长度、分块数等详情的格式化回执。
-
-    Args:
-        session_id: 会话 ID。
-        tool_name: 产生内容的工具名称。
-        source: 内容来源标识。
-        text: 要缓存的内容文本。
-        content_type: 内容的 MIME 类型，默认为 application/json。
-        metadata: 可选的键值对元数据。
-
-    Returns:
-        格式化后的回执字符串。缓存失败时返回错误提示信息。
-    """
-    receipt = tool_content_store.put_receipt(
-        session_id=session_id,
-        tool_name=tool_name,
-        source=source,
-        text=text,
-        content_type=content_type,
-        metadata=metadata,
-    )
-
-    if receipt is None:
-        return "[Tool Error] Failed to cache tool artifact."
-
-    return format_tool_content_receipt(receipt)
-
-
-def read_tool_content_window(
+def read_tool_content_window_by_offset(
     *,
     session_id: str,
     content_id: str,
     offset: int = 0,
     limit: Optional[int] = None,
+    content_store: ToolContentStore,
 ) -> str:
     """读取已缓存的工具内容并返回格式化后的窗口字符串。
 
@@ -380,9 +236,9 @@ def read_tool_content_window(
         格式化后的内容窗口字符串。内容不可用时返回错误提示信息。
     """
     if limit is None:
-        limit = TOOL_RESULT_MAX_CHARS
+        limit = settings.TOOL_RESULT_MAX_CHARS
 
-    window = tool_content_store.read_window(
+    window = content_store.read_chunk_window_by_offset(
         content_id=content_id,
         session_id=session_id,
         offset=offset,
@@ -395,13 +251,14 @@ def read_tool_content_window(
     return format_tool_content_window(window)
 
 
-def read_tool_content_chunk_window(
+def read_tool_content_window_by_index(
     *,
     session_id: str,
     content_id: str,
     chunk_index: int,
     before_chunks: int = 1,
     after_chunks: int = 1,
+    content_store: ToolContentStore,
 ) -> str:
     """以指定分块为中心读取已缓存的工具内容并返回格式化后的窗口字符串。
 
@@ -417,7 +274,7 @@ def read_tool_content_chunk_window(
     Returns:
         格式化后的内容窗口字符串。内容不可用时返回错误提示信息。
     """
-    window = tool_content_store.read_chunk_window(
+    window = content_store.read_chunk_window_by_index(
         content_id=content_id,
         session_id=session_id,
         chunk_index=chunk_index,
@@ -429,5 +286,3 @@ def read_tool_content_chunk_window(
         return "[Tool Result] Cached tool content not found, expired, or inaccessible."
 
     return format_tool_content_window(window)
-
-tool_content_store = ToolContentStore()

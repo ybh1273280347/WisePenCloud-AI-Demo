@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Dict, Optional
 from uuid import uuid4
 
-from common.logger import log_event
 from chat.application.tools.document.services.document_export.enums import (
     ExportFormat,
     ExportSourceFormat,
@@ -29,6 +28,7 @@ from chat.application.tools.document.services.document_export.utils.path import 
     sanitize_path_segment,
     storage_stem_for_download_ref,
 )
+from common.logger import log_event
 
 
 class DocumentExportService:

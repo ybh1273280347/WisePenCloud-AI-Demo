@@ -109,12 +109,12 @@ from chat.core.persistence import (
     RedisHotContext,
 )
 from chat.core.providers import LiteLLMAdapter, LocalFSSkillAssetLoader, Mem0Adapter, OssSkillAssetLoader
+from chat.tool_container import register_tools
+from common.clients.file_storage import FileStorageClient
 from common.cloud.nacos_client import nacos_client_manager
 from common.cloud.service_discovery import ServiceDiscovery
-from common.clients.file_storage import FileStorageClient
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
-from chat.tool_container import register_tools
 
 
 class Container(containers.DeclarativeContainer):
@@ -594,6 +594,7 @@ def _register_application(container_cls: Any) -> None:
         tool_registry=container_cls.tool_registry,
         kafka_producer=container_cls.kafka_producer,
         skill_matcher=container_cls.skill_matcher,
+        tool_output_aspect=container_cls.tool_output_aspect,
         search_provider_config_service=container_cls.search_provider_config_service,
     )
 

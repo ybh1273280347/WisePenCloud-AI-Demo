@@ -4,6 +4,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Dict, List, Optional
 
 from beanie.odm.operators.update.general import Set
+from chat.application.rag.implementations.persistence.mongodb.documents.cache_documents import (
+    RagChunkContextCacheDocument,
+    RagDenseEmbeddingCacheDocument,
+    RagQueryEmbeddingCacheDocument,
+)
 
 from chat.application.rag.domain.index_chunks import DenseVector
 from chat.application.rag.domain.ports import (
@@ -16,11 +21,6 @@ from chat.application.rag.domain.ports import (
     RagQueryEmbeddingCacheLookup,
     RagQueryEmbeddingCacheRepository,
     RagQueryEmbeddingCacheWrite,
-)
-from chat.application.rag.implementations.persistence.mongodb.documents.cache_documents import (
-    RagChunkContextCacheDocument,
-    RagDenseEmbeddingCacheDocument,
-    RagQueryEmbeddingCacheDocument,
 )
 
 _CACHE_WRITE_CONCURRENCY = 16

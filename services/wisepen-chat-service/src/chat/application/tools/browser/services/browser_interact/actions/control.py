@@ -1,13 +1,6 @@
 import asyncio
 from typing import Dict, List, Optional
 
-from chat.application.tools.browser.services.browser_interact.runtime.action_runtime import (
-    action_error_response,
-    action_success_response,
-    get_existing_page_or_error,
-    get_page_state,
-)
-from chat.application.tools.browser.services.browser_interact.runtime.content import BrowserContentExtractor
 from chat.application.tools.browser.services.browser_interact.enums import (
     ActionStatus,
     BrowserActionType,
@@ -16,15 +9,22 @@ from chat.application.tools.browser.services.browser_interact.enums import (
     ScrollDirection,
     WaitForState,
 )
+from chat.application.tools.browser.services.browser_interact.models import ActionResult
 from chat.application.tools.browser.services.browser_interact.response.error_factory import (
     make_action_failed_error,
     make_schema_error,
     make_user_intervention_error_from_signal,
 )
+from chat.application.tools.browser.services.browser_interact.runtime.action_runtime import (
+    action_error_response,
+    action_success_response,
+    get_existing_page_or_error,
+    get_page_state,
+)
+from chat.application.tools.browser.services.browser_interact.runtime.content import BrowserContentExtractor
 from chat.application.tools.browser.services.browser_interact.runtime.intervention import (
     UserInterventionDetector,
 )
-from chat.application.tools.browser.services.browser_interact.models import ActionResult
 from chat.application.tools.browser.services.browser_interact.runtime.session import BrowserSessionManager
 from chat.application.tools.browser.services.browser_interact.snapshot.manager import SnapshotManager
 from common.logger import log_fail

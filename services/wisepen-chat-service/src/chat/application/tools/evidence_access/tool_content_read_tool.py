@@ -1,8 +1,9 @@
 from typing import Any, Dict, Optional
 
 from chat.application.tools.tool_content_store import (
-    read_tool_content_chunk_window,
-    read_tool_content_window,
+    ToolContentStore,
+    read_tool_content_window_by_index,
+    read_tool_content_window_by_offset,
 )
 from chat.core.config.app_settings import settings as app_settings
 from chat.domain.interfaces.tool import BaseTool
@@ -69,6 +70,10 @@ class ToolContentReadTool(BaseTool):
     长工具输出续读的门面网关运行时适配器。
     """
 
+    def __init__(self, *, content_store: ToolContentStore) -> None:
+        """初始化工具内容读取工具。"""
+        self._content_store = content_store
+
     @property
     def name(self) -> str:
         return "tool_content_read"
@@ -129,12 +134,13 @@ class ToolContentReadTool(BaseTool):
                 after_chunks=after_chunks,
             )
 
-            return read_tool_content_chunk_window(
+            return read_tool_content_window_by_index(
                 session_id=session_id,
                 content_id=content_id,
                 chunk_index=chunk_index,
                 before_chunks=before_chunks,
                 after_chunks=after_chunks,
+                content_store=self._content_store,
             )
 
         # ----------------------------------------------------------------
@@ -158,9 +164,10 @@ class ToolContentReadTool(BaseTool):
             limit=limit,
         )
 
-        return read_tool_content_window(
+        return read_tool_content_window_by_offset(
             session_id=session_id,
             content_id=content_id,
             offset=offset,
             limit=limit,
+            content_store=self._content_store,
         )

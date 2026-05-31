@@ -37,18 +37,21 @@ from chat.application.tools.browser.services.browser_interact.actions.tabs impor
     handle_new_tab,
     handle_switch_tab,
 )
-from chat.application.tools.browser.services.browser_interact.response.build_response import (
-    build_error_response,
-    get_page_state,
-    get_runtime_state,
-    get_session_state,
-)
-from chat.application.tools.browser.services.browser_interact.runtime.content import BrowserContentExtractor
 from chat.application.tools.browser.services.browser_interact.enums import (
     BrowserActionType,
     BrowserToolName,
     ControllerLogStage,
     DiagnosticCode,
+)
+from chat.application.tools.browser.services.browser_interact.models import (
+    BrowserLaunchOptions,
+    ToolError,
+)
+from chat.application.tools.browser.services.browser_interact.response.build_response import (
+    build_error_response,
+    get_page_state,
+    get_runtime_state,
+    get_session_state,
 )
 from chat.application.tools.browser.services.browser_interact.response.error_factory import (
     make_internal_error,
@@ -56,12 +59,9 @@ from chat.application.tools.browser.services.browser_interact.response.error_fac
     make_schema_error,
     make_unknown_action_error,
 )
+from chat.application.tools.browser.services.browser_interact.runtime.content import BrowserContentExtractor
 from chat.application.tools.browser.services.browser_interact.runtime.intervention import (
     UserInterventionDetector,
-)
-from chat.application.tools.browser.services.browser_interact.models import (
-    BrowserLaunchOptions,
-    ToolError,
 )
 from chat.application.tools.browser.services.browser_interact.runtime.session import BrowserSessionManager
 from chat.application.tools.browser.services.browser_interact.snapshot.manager import SnapshotManager

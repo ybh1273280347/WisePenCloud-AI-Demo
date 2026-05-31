@@ -13,6 +13,7 @@ from chat.application.query_loop_runtime import (
     TextDeltaEvent,
 )
 from chat.application.skill_matcher import SkillMatcher
+from chat.application.tool_output_aspect import ToolOutputAspect
 from chat.application.tool_registry import ToolRegistry
 from chat.application.tools.web.services.web_search.enums import ProviderMode
 from chat.application.tools.web.services.web_search.provider_policy.service import (
@@ -53,6 +54,7 @@ class ChatTurnCoordinator:
         tool_registry: ToolRegistry,
         kafka_producer: KafkaProducerClient,
         skill_matcher: SkillMatcher,
+        tool_output_aspect: ToolOutputAspect,
         search_provider_config_service: SearchProviderConfigService | None = None,
     ):
         self._memory = memory
@@ -63,7 +65,10 @@ class ChatTurnCoordinator:
             hot_context_repo=hot_context_repo,
         )
         self._tool_registry = tool_registry
-        self._query_loop_runtime = QueryLoopRuntime(llm=llm)
+        self._query_loop_runtime = QueryLoopRuntime(
+            llm=llm,
+            tool_output_aspect=tool_output_aspect,
+        )
         self._turn_finalizer = ChatTurnFinalizer(
             llm=llm,
             memory=memory,

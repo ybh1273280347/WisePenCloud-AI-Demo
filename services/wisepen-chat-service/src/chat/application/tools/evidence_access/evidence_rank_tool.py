@@ -5,7 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
 
 from chat.application.tools.common.evidence_ranking.formatting import format_evidence_result
-from chat.application.tools.common.evidence_ranking.ranking import rank_evidence
+from chat.application.tools.common.evidence_ranking.ranking import (
+    MAX_CHUNKS_PER_CONTENT,
+    rank_evidence,
+)
+from chat.application.tools.tool_content_store import ToolContentStore
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_fail
 
@@ -63,6 +67,10 @@ TOOL_SCHEMA = {
 
 
 class EvidenceRankTool(BaseTool):
+    def __init__(self, *, content_store: ToolContentStore) -> None:
+        """初始化证据精排工具。"""
+        self._content_store = content_store
+
     @property
     def name(self) -> str:
         return "evidence_rank"
@@ -104,7 +112,9 @@ class EvidenceRankTool(BaseTool):
                 query,
                 content_ids,
                 session_id,
+                self._content_store,
                 max_evidence,
+                MAX_CHUNKS_PER_CONTENT,
             )
 
             return format_evidence_result(result)

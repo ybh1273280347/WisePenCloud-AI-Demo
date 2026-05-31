@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from chat.application.infra.content_store.models import ContentWindow, StoredContent
-from chat.application.tools.tool_content_store import tool_content_store
+from chat.application.tools.tool_content_store import ToolContentStore
 from chat.domain.interfaces.tool import BaseTool
 
 TOOL_DESCRIPTION = (
@@ -79,6 +79,9 @@ class TargetChunkStructure:
 
 
 class ToolContentBatchReadTool(BaseTool):
+    def __init__(self, *, content_store: ToolContentStore) -> None:
+        """初始化批量 ToolContent 读取工具。"""
+        self._content_store = content_store
 
     @property
     def name(self) -> str:
@@ -110,11 +113,14 @@ class ToolContentBatchReadTool(BaseTool):
         total_chars = 0
 
         for index, item in enumerate(validated_items, 1):
-            stored = tool_content_store.get_content(content_id=item.content_id, scope_id=session_id)
+            stored = self._content_store.get(
+                content_id=item.content_id,
+                session_id=session_id,
+            )
             window = (
-                tool_content_store.read_chunk_window(
+                self._content_store.read_chunk_window_by_index(
                     content_id=item.content_id,
-                    scope_id=session_id,
+                    session_id=session_id,
                     chunk_index=item.chunk_index,
                     before_chunks=item.before_chunks,
                     after_chunks=item.after_chunks,

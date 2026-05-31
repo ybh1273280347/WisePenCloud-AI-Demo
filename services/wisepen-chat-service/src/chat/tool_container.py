@@ -11,10 +11,15 @@ from typing import Any, AsyncIterator, Dict, List
 import httpx
 from dependency_injector import providers
 from docling.document_converter import DocumentConverter
+from marker.converters.pdf import PdfConverter as MarkerPdfConverter
+from marker.models import create_model_dict
 from markitdown import MarkItDown
+from paddleocr import PPStructure
 from steel import AsyncSteel
 
 from chat.application.api_service.document_export import DocumentExportDownloadService
+from chat.application.infra.content_store import ContentStore
+from chat.application.infra.content_store.redis_repository import RedisContentRepository
 from chat.application.infra.document_temp_files.cleanup import (
     DOCUMENT_TEMP_FILE_TTL_SECONDS,
     DocumentTempFileCleanupService,
@@ -23,6 +28,7 @@ from chat.application.infra.document_temp_files.resolver import DocumentTempFile
 from chat.application.infra.document_temp_files.scheduler import (
     DocumentTempFileCleanupScheduler,
 )
+from chat.application.tool_output_aspect import ToolOutputAspect
 from chat.application.tool_registry import ToolRegistry
 from chat.application.tools.browser.browse_interact_tool import BrowseInteractTool
 from chat.application.tools.document.document_convert_tool import DocumentConvertTool
@@ -30,15 +36,6 @@ from chat.application.tools.document.document_export_tool import DocumentExportT
 from chat.application.tools.document.document_parse_tool import DocumentParseTool
 from chat.application.tools.document.services.document_convert import DocumentConvertService
 from chat.application.tools.document.services.document_convert.converter import MarkdownConverter
-from chat.application.tools.document.services.document_export.runtime.atomic_writer import (
-    AtomicExportWriter,
-)
-from chat.application.tools.document.services.document_export.runtime.download_resolver import (
-    DocumentDownloadResolver,
-)
-from chat.application.tools.document.services.document_export.runtime.playwright_pool import (
-    PlaywrightBrowserPool,
-)
 from chat.application.tools.document.services.document_export.renderers.docx_renderer import (
     DocxRenderer,
 )
@@ -53,6 +50,15 @@ from chat.application.tools.document.services.document_export.renderers.pdf_rend
 )
 from chat.application.tools.document.services.document_export.renderers.txt_renderer import (
     TxtRenderer,
+)
+from chat.application.tools.document.services.document_export.runtime.atomic_writer import (
+    AtomicExportWriter,
+)
+from chat.application.tools.document.services.document_export.runtime.download_resolver import (
+    DocumentDownloadResolver,
+)
+from chat.application.tools.document.services.document_export.runtime.playwright_pool import (
+    PlaywrightBrowserPool,
 )
 from chat.application.tools.document.services.document_export.service import DocumentExportService
 from chat.application.tools.document.services.document_export.utils.path import (
@@ -115,7 +121,11 @@ from chat.application.tools.retrieval.rag_search_tool import RagSearchTool
 from chat.application.tools.retrieval.search_history_tool import SearchHistoricalMessagesTool
 from chat.application.tools.skill.load_skill_asset_tool import LoadSkillAssetTool
 from chat.application.tools.skill.load_skill_tool import LoadSkillTool
-from chat.application.tools.tool_content_store import tool_content_store
+from chat.application.tools.tool_content_store import (
+    ToolContentStore,
+    _TOOL_CONTENT_STORE_MAX_ITEM_CHARS,
+    _TOOL_CONTENT_STORE_TTL_SECONDS,
+)
 from chat.application.tools.web.services.common.file_handoff.store import (
     DEFAULT_HANDOFF_ROOT,
     TemporaryFileHandoffStore,
@@ -146,9 +156,6 @@ from chat.application.tools.web.web_fetch_tool import WebFetchTool
 from chat.application.tools.web.web_search_tool import WebSearchTool
 from chat.core.config.app_settings import settings
 from chat.core.config.tool_settings import tool_settings
-from marker.converters.pdf import PdfConverter as MarkerPdfConverter
-from marker.models import create_model_dict
-from paddleocr import PPStructure
 
 
 @asynccontextmanager
@@ -206,6 +213,7 @@ def register_tools(container_cls: Any) -> None:
     _register_document_parse(container_cls)
     _register_document_export(container_cls)
     _register_document_convert(container_cls)
+    _register_tool_content(container_cls)
     _register_web(container_cls)
 
     tool_providers: List[providers.Provider] = []
@@ -240,6 +248,7 @@ def register_tools(container_cls: Any) -> None:
         "web_search_tool",
         WebSearchTool,
         coordinator=container_cls.web_search_coordinator,
+        content_store=container_cls.tool_content_store,
     )
 
     tool(
@@ -247,6 +256,7 @@ def register_tools(container_cls: Any) -> None:
         WebFetchTool,
         fetcher=container_cls.fetch_coordinator,
         file_handoff_store=container_cls.file_handoff_store,
+        content_store=container_cls.tool_content_store,
     )
 
     tool(
@@ -261,7 +271,11 @@ def register_tools(container_cls: Any) -> None:
         rag_service=container_cls.rag_service,
     )
 
-    tool("evidence_rank_tool", EvidenceRankTool)
+    tool(
+        "evidence_rank_tool",
+        EvidenceRankTool,
+        content_store=container_cls.tool_content_store,
+    )
 
     # ----- 数理计算工具 -----
     container_cls.python_math_engine = providers.Singleton(PythonMathEngine)
@@ -344,7 +358,7 @@ def register_tools(container_cls: Any) -> None:
         "document_export_tool",
         DocumentExportTool,
         export_service=container_cls.document_export_service,
-        content_store=providers.Object(tool_content_store),
+        content_store=container_cls.tool_content_store,
     )
 
     tool(
@@ -353,9 +367,17 @@ def register_tools(container_cls: Any) -> None:
         convert_service=container_cls.document_convert_service,
     )
 
-    tool("tool_content_read_tool", ToolContentReadTool)
+    tool(
+        "tool_content_read_tool",
+        ToolContentReadTool,
+        content_store=container_cls.tool_content_store,
+    )
 
-    tool("tool_content_batch_read_tool", ToolContentBatchReadTool)
+    tool(
+        "tool_content_batch_read_tool",
+        ToolContentBatchReadTool,
+        content_store=container_cls.tool_content_store,
+    )
 
     # 注册顺序即 tool_providers 追加顺序；ToolRegistry 保持原有遍历顺序。
     container_cls.tool_instances = providers.List(*tool_providers)
@@ -372,6 +394,33 @@ def _build_registry(tool_instances: List[Any]) -> ToolRegistry:
     for tool_instance in tool_instances:
         registry.register(tool_instance)
     return registry
+
+
+def _register_tool_content(container_cls: Any) -> None:
+    """注册 ToolContent 的 Redis 仓储、门面和统一输出切面。"""
+    container_cls.tool_content_repository = providers.Singleton(
+        RedisContentRepository,
+        redis_url=settings.REDIS_URL,
+        ttl_seconds=_TOOL_CONTENT_STORE_TTL_SECONDS,
+    )
+
+    container_cls.tool_content_base_store = providers.Singleton(
+        ContentStore,
+        repository=container_cls.tool_content_repository,
+        default_chunk_size=settings.TOOL_RESULT_MAX_CHARS,
+        max_item_chars=_TOOL_CONTENT_STORE_MAX_ITEM_CHARS,
+        normalize_text=True,
+    )
+
+    container_cls.tool_content_store = providers.Singleton(
+        ToolContentStore,
+        content_store=container_cls.tool_content_base_store,
+    )
+
+    container_cls.tool_output_aspect = providers.Singleton(
+        ToolOutputAspect,
+        content_store=container_cls.tool_content_store,
+    )
 
 
 def _register_document_parse(container_cls: Any) -> None:

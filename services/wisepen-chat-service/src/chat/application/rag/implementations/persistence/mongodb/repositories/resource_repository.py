@@ -4,16 +4,16 @@ from typing import Dict, Optional
 from beanie import Document
 from beanie.odm.operators.update.general import Inc, Set
 from beanie.odm.queries.update import UpdateResponse
+from chat.application.rag.implementations.persistence.mongodb.documents.resource_documents import (
+    DocumentResourceDocument,
+    NoteResourceDocument,
+)
 
 from chat.application.rag.domain.ports import (
     DocumentResourceRepository,
     NoteResourceRepository,
 )
 from chat.application.rag.domain.resource_lifecycle import RagResource
-from chat.application.rag.implementations.persistence.mongodb.documents.resource_documents import (
-    DocumentResourceDocument,
-    NoteResourceDocument,
-)
 
 
 class BaseMongoResourceRepository:

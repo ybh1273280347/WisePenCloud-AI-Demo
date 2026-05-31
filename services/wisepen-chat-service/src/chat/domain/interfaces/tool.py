@@ -40,6 +40,11 @@ class BaseTool(ABC):
         """
         return False
 
+    @property
+    @abstractmethod
+    def should_output_receipt(self) -> bool:
+        return False
+
     def get_tool_schema(self) -> Dict[str, Any]:
         """生成 LiteLLM/OpenAI 兼容的 tools 结构"""
         return {

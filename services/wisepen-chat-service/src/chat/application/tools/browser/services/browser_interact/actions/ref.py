@@ -2,20 +2,6 @@ from typing import Dict, Optional, Tuple
 
 from playwright.async_api import ElementHandle
 
-from chat.application.tools.browser.services.browser_interact.runtime.action_runtime import (
-    action_error_response,
-    action_success_response,
-    get_existing_page_or_error,
-    selector_or_error_response,
-)
-from chat.application.tools.browser.services.browser_interact.runtime.action_policy import (
-    detect_high_risk_click,
-    detect_secret_fill,
-)
-from chat.application.tools.browser.services.browser_interact.response.build_response import (
-    get_page_state,
-)
-from chat.application.tools.browser.services.browser_interact.runtime.content import BrowserContentExtractor
 from chat.application.tools.browser.services.browser_interact.enums import (
     ActionStatus,
     BrowserActionType,
@@ -23,18 +9,32 @@ from chat.application.tools.browser.services.browser_interact.enums import (
     RecoveryHintType,
     WaitUntil,
 )
+from chat.application.tools.browser.services.browser_interact.models import (
+    ActionResult,
+    RecoveryHint,
+)
+from chat.application.tools.browser.services.browser_interact.response.build_response import (
+    get_page_state,
+)
 from chat.application.tools.browser.services.browser_interact.response.error_factory import (
     make_action_failed_error,
     make_ref_not_found_error,
     make_schema_error,
     make_user_intervention_error_from_signal,
 )
+from chat.application.tools.browser.services.browser_interact.runtime.action_policy import (
+    detect_high_risk_click,
+    detect_secret_fill,
+)
+from chat.application.tools.browser.services.browser_interact.runtime.action_runtime import (
+    action_error_response,
+    action_success_response,
+    get_existing_page_or_error,
+    selector_or_error_response,
+)
+from chat.application.tools.browser.services.browser_interact.runtime.content import BrowserContentExtractor
 from chat.application.tools.browser.services.browser_interact.runtime.intervention import (
     UserInterventionDetector,
-)
-from chat.application.tools.browser.services.browser_interact.models import (
-    ActionResult,
-    RecoveryHint,
 )
 from chat.application.tools.browser.services.browser_interact.runtime.session import BrowserSessionManager
 from chat.application.tools.browser.services.browser_interact.snapshot.manager import SnapshotManager

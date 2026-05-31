@@ -4,8 +4,8 @@ from typing import List, Protocol
 
 from transformers import PreTrainedTokenizerBase
 
-from .models import TranslationAssistResult, TranslationSegment
 from chat.application.tools.language.services.translation.runtime.segmenter import split_text_for_translation
+from .models import TranslationAssistResult, TranslationSegment
 
 
 class TranslationEngine(Protocol):

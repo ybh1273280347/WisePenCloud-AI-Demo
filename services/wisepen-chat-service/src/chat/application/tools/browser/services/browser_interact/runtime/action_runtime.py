@@ -2,21 +2,9 @@ from typing import Optional, Tuple
 
 from playwright.async_api import Page
 
-from chat.application.tools.browser.services.browser_interact.response.build_response import (
-    build_error_response,
-    build_success_response,
-    get_page_state,
-    get_runtime_state,
-    get_session_state,
-)
 from chat.application.tools.browser.services.browser_interact.enums import (
     DiagnosticCode,
     ToolErrorCode,
-)
-from chat.application.tools.browser.services.browser_interact.response.error_factory import (
-    make_browser_unavailable_error,
-    make_schema_error,
-    make_session_error,
 )
 from chat.application.tools.browser.services.browser_interact.errors import BrowserSessionError
 from chat.application.tools.browser.services.browser_interact.models import (
@@ -24,6 +12,18 @@ from chat.application.tools.browser.services.browser_interact.models import (
     PageState,
     SnapshotPayload,
     ToolError,
+)
+from chat.application.tools.browser.services.browser_interact.response.build_response import (
+    build_error_response,
+    build_success_response,
+    get_page_state,
+    get_runtime_state,
+    get_session_state,
+)
+from chat.application.tools.browser.services.browser_interact.response.error_factory import (
+    make_browser_unavailable_error,
+    make_schema_error,
+    make_session_error,
 )
 from chat.application.tools.browser.services.browser_interact.runtime.session import BrowserSessionManager
 from chat.application.tools.browser.services.browser_interact.snapshot.manager import parse_ref

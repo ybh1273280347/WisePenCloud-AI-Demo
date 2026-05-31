@@ -12,7 +12,7 @@ from chat.application.infra.content_store.models import ContentChunk, StoredCont
 from chat.application.tools.common.evidence_ranking.models import (
     EvidenceRankResult, RankedEvidence, EvidenceTermHitStat, EvidenceFieldHitStat,
 )
-from chat.application.tools.tool_content_store import tool_content_store
+from chat.application.tools.tool_content_store import ToolContentStore
 from chat.application.tools.web.services.web_search.utils.notes import add_note
 from common.logger import log_event
 
@@ -81,12 +81,13 @@ def rank_evidence(
     query: str,
     content_ids: List[str],
     session_id: str,
+    content_store: ToolContentStore,
     max_evidence: int = 8,
     max_chunks_per_content: int = MAX_CHUNKS_PER_CONTENT,
 ) -> EvidenceRankResult:
     """我要用 query，在这些 content_ids 里找最多 max_evidence 条证据。"""
 
-    # ── Step 1: 从 tool_content_store 缓存里批量取内容 ──
+    # ── Step 1: 从注入的 ToolContentStore 缓存里批量取内容 ──
     found: Dict[str, StoredContent] = {}  # 成功取到的内容
     missing: List[str] = []  # 缓存里找不到的 id
     notes: List[str] = []  # 供调试用的备注，最终塞进结果
@@ -94,7 +95,7 @@ def rank_evidence(
     # 根据 content_id 从缓存里面获取内容
     # 如果取到，计入 found，否则计入 missing
     for cid in content_ids:
-        stored = tool_content_store.get_content(content_id=cid, scope_id=session_id)
+        stored = content_store.get(content_id=cid, session_id=session_id)
         if stored is not None:
             found[cid] = stored
         else:
@@ -554,4 +555,3 @@ def _extract_heading_path(chunk: Optional[ContentChunk], stored: StoredContent) 
     if isinstance(raw, str) and raw:
         return (raw,)
     return ()
-

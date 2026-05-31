@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Tuple
 
+from chat.application.tool_output_aspect import ToolOutputAspect
 from chat.application.tool_scope import ToolScope
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.error_codes import ChatErrorCode
@@ -237,8 +238,9 @@ class QueryLoopRuntime:
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm: LLMProvider) -> None:
+    def __init__(self, llm: LLMProvider, tool_output_aspect: ToolOutputAspect) -> None:
         self.llm = llm
+        self._tool_output_aspect = tool_output_aspect
 
     """
     ReAct 循环主入口 (QueryLoop)
@@ -461,9 +463,16 @@ class QueryLoopRuntime:
             else:
                 safe_result = result
 
+            # 缓存超过阈值的工具输出，返回首个可见窗口（多为引导窗口）
+            visible_result = self._tool_output_aspect.process(
+                session_id=session_id,
+                tool_name=tool_call.name,
+                output=safe_result,
+            )
+
             # 发 ToolOutputAvailableEvent
             events.append(
-                ToolOutputAvailableEvent(call_id=tool_call.id, output=safe_result)
+                ToolOutputAvailableEvent(call_id=tool_call.id, output=visible_result)
             )
             # 构造对话历史中的 Tool 消息
             tool_messages.append(
@@ -472,7 +481,7 @@ class QueryLoopRuntime:
                     role=Role.TOOL,
                     tool_call_id=tool_call.id,
                     name=tool_call.name,
-                    content=safe_result,
+                    content=visible_result,
                     ephemeral=is_ephemeral,
                 )
             )

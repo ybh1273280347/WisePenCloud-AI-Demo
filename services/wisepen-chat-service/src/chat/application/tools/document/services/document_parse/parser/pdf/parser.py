@@ -21,6 +21,7 @@ from chat.application.tools.document.services.document_parse.models import (
     ParsedPage,
     ParsedTable,
 )
+from chat.application.tools.document.services.document_parse.ocr.image_adapter import OcrImageAdapter
 from chat.application.tools.document.services.document_parse.parser.base import (
     BaseDocumentParser,
 )
@@ -37,7 +38,6 @@ from chat.application.tools.document.services.document_parse.parser.pdf.table_ex
 from chat.application.tools.document.services.document_parse.utils.text import (
     normalize_text,
 )
-from chat.application.tools.document.services.document_parse.ocr.image_adapter import OcrImageAdapter
 from common.logger import log_fail
 
 _BACKEND_MARKER = ParserName.MARKER_PDF

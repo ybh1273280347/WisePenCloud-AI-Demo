@@ -7,6 +7,17 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from beanie import init_beanie
+from chat.application.rag.implementations.persistence.mongodb.documents.chunk_documents import (
+    RetrieveChunkDocument,
+    SearchChunkDocument,
+)
+from chat.application.rag.implementations.persistence.mongodb.documents.manifest_documents import (
+    RagIndexManifestDocument,
+)
+from chat.application.rag.implementations.persistence.mongodb.documents.resource_documents import (
+    DocumentResourceDocument,
+    NoteResourceDocument,
+)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,17 +32,6 @@ from chat.api.endpoints import (
     session as session_endpoints,
 )
 from chat.api.router import api_router
-from chat.application.rag.implementations.persistence.mongodb.documents.chunk_documents import (
-    RetrieveChunkDocument,
-    SearchChunkDocument,
-)
-from chat.application.rag.implementations.persistence.mongodb.documents.manifest_documents import (
-    RagIndexManifestDocument,
-)
-from chat.application.rag.implementations.persistence.mongodb.documents.resource_documents import (
-    DocumentResourceDocument,
-    NoteResourceDocument,
-)
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
@@ -48,7 +48,6 @@ from common.cloud.nacos_client import nacos_client_manager
 from common.logger import log_error, log_event, setup_logging_intercept
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
-
 
 # ==============================================================================
 #   Bootstrap: 日志拦截 & 网络环境

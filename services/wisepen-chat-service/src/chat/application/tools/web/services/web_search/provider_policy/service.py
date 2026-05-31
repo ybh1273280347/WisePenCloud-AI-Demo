@@ -9,14 +9,14 @@ from chat.application.tools.web.services.web_search.provider_policy.encryption i
     CredentialDecryptionError,
     CredentialEncryptionError,
 )
-from chat.application.tools.web.services.web_search.provider_policy.validator import (
-    SearchProviderConfigValidator,
-)
-from chat.domain.error_codes import ChatErrorCode
 from chat.application.tools.web.services.web_search.provider_policy.persistence import (
     BaseSearchProviderConfigRepository,
     UserSearchProviderConfigUpsertDTO,
 )
+from chat.application.tools.web.services.web_search.provider_policy.validator import (
+    SearchProviderConfigValidator,
+)
+from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 
 _ANYSEARCH_ANONYMOUS_ENCRYPTED_KEY = "__anysearch_anonymous__"

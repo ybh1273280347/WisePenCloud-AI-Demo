@@ -2,12 +2,12 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from beanie.odm.operators.update.general import Set
+from chat.application.rag.implementations.persistence.mongodb.documents.manifest_documents import \
+    RagIndexManifestDocument
 
 from chat.application.rag.domain.index_publication import RagIndexManifest
 from chat.application.rag.domain.ports import RagManifestRepository
 from chat.application.rag.enums import ResourceKind
-from chat.application.rag.implementations.persistence.mongodb.documents.manifest_documents import \
-    RagIndexManifestDocument
 
 
 class MongoManifestRepository(RagManifestRepository):
