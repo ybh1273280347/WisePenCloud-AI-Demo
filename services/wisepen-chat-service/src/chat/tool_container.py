@@ -121,6 +121,12 @@ from chat.application.tools.retrieval.rag_search_tool import RagSearchTool
 from chat.application.tools.retrieval.search_history_tool import SearchHistoricalMessagesTool
 from chat.application.tools.skill.load_skill_asset_tool import LoadSkillAssetTool
 from chat.application.tools.skill.load_skill_tool import LoadSkillTool
+from chat.application.tools.skill.services.skill_create.service import (
+    DevSkillBundleArtifactStore,
+    SkillBundleService,
+    SkillMarkdownRenderer,
+)
+from chat.application.tools.skill.skill_create_tool import CreateSkillBundleTool
 from chat.application.tools.tool_content_store import (
     ToolContentStore,
     _TOOL_CONTENT_STORE_MAX_ITEM_CHARS,
@@ -215,6 +221,7 @@ def register_tools(container_cls: Any) -> None:
     _register_document_convert(container_cls)
     _register_tool_content(container_cls)
     _register_web(container_cls)
+    _register_skill_create(container_cls)
 
     tool_providers: List[providers.Provider] = []
 
@@ -377,6 +384,13 @@ def register_tools(container_cls: Any) -> None:
         "tool_content_batch_read_tool",
         ToolContentBatchReadTool,
         content_store=container_cls.tool_content_store,
+    )
+
+    # ----- Skill 创建工具 -----
+    tool(
+        "skill_create_tool",
+        CreateSkillBundleTool,
+        skill_bundle_service=container_cls.skill_bundle_service,
     )
 
     # 注册顺序即 tool_providers 追加顺序；ToolRegistry 保持原有遍历顺序。
@@ -634,6 +648,21 @@ def _register_web(container_cls: Any) -> None:
         WebCrawlService,
         fetch_coordinator=container_cls.fetch_coordinator,
         file_handoff_store=container_cls.file_handoff_store,
+    )
+
+
+def _register_skill_create(container_cls: Any) -> None:
+    container_cls.skill_markdown_renderer = providers.Singleton(SkillMarkdownRenderer)
+
+    container_cls.skill_bundle_artifact_store = providers.Singleton(
+        DevSkillBundleArtifactStore,
+        output_root=settings.SKILL_ASSETS_CACHE_PATH,
+    )
+
+    container_cls.skill_bundle_service = providers.Singleton(
+        SkillBundleService,
+        artifact_store=container_cls.skill_bundle_artifact_store,
+        renderer=container_cls.skill_markdown_renderer,
     )
 
 

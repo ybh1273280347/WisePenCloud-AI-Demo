@@ -152,9 +152,6 @@ class LoadSkillAssetTool(BaseTool):
                 f"If you need to reference it, ask the user to describe or preview the asset instead."
             )
 
-        # 字符截断，防止超长资产撑爆上下文水位
-        if len(content) > app_settings.TOOL_RESULT_MAX_CHARS:
-            content = content[:app_settings.TOOL_RESULT_MAX_CHARS] + "\n...[truncated]"
 
         return (
             f"[Loaded Asset] skill_id={skill_id} version={skill.version} path={path}\n"
