@@ -1,35 +1,37 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import {deleteChatFile, extractGeneratedFilesFromToolOutput, listChatFiles, uploadChatFile,} from "../api/file";
-import {flattenModels, listModels} from "../api/model";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { deleteChatFile, extractGeneratedFilesFromToolOutput, uploadChatFile, } from "../api/file";
+import { flattenModels, listModels } from "../api/model";
 import {
-    ApiStatusError,
-    createSession,
-    deleteSession,
-    listHistoryMessages,
-    listSessions,
-    pinSession,
-    renameSession,
-    rollbackSessionToMessage,
+  ApiStatusError,
+  createSession,
+  deleteSession,
+  listHistoryMessages,
+  listSessions,
+  pinSession,
+  renameSession,
+  rollbackSessionToMessage,
 } from "../api/session";
-import {streamChat} from "../api/streamChat";
+import { streamChat } from "../api/streamChat";
 import type {
-    AssistantMessage,
-    AssistantPart,
-    ChatFileItem,
-    ChatMessage,
-    ChatModel,
-    ChatSession,
-    ConnectionStatus,
-    ModelGroups,
-    UserMessage,
+  AssistantMessage,
+  AssistantPart,
+  ChatFileAttachment,
+  ChatFileItem,
+  ChatMessage,
+  ChatModel,
+  ChatResourceRef,
+  ChatSession,
+  ConnectionStatus,
+  ModelGroups,
+  UserMessage,
 } from "../types/chat";
-import type {SseEvent} from "../types/sse";
-import {asOutputText} from "../utils/safeJson";
-import {ChatHeader} from "./ChatHeader";
-import {ChatInput} from "./ChatInput";
-import {FilePreviewPanel} from "./FilePreviewPanel";
-import {MessageList} from "./MessageList";
-import {Sidebar} from "./Sidebar";
+import type { SseEvent } from "../types/sse";
+import { asOutputText } from "../utils/safeJson";
+import { ChatHeader } from "./ChatHeader";
+import { ChatInput } from "./ChatInput";
+import { FilePreviewPanel } from "./FilePreviewPanel";
+import { MessageList } from "./MessageList";
+import { Sidebar } from "./Sidebar";
 
 function id(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "")}`;
@@ -105,7 +107,7 @@ function extractGeneratedFilesFromMessages(messages: ChatMessage[]): ChatFileIte
 }
 
 function attachFileRefsToQuery(text: string, files: ChatFileItem[]): string {
-  const attachedFiles = files.filter((file) => file.source === "upload" && file.fileRef);
+  const attachedFiles = fileAttachmentsFromItems(files);
   if (attachedFiles.length === 0) {
     return text;
   }
@@ -119,6 +121,31 @@ function attachFileRefsToQuery(text: string, files: ChatFileItem[]): string {
   return `${text}\n\n[Attached files]\n${fileLines}\nInstruction: If these files are relevant, call document_parse with the listed file_ref values.`;
 }
 
+function fileAttachmentsFromItems(files: ChatFileItem[]): ChatFileAttachment[] {
+  return files
+    .filter((file) => file.source === "upload" && file.fileRef)
+    .map((file) => ({
+      fileName: file.fileName,
+      fileRef: file.fileRef || "",
+      contentType: file.contentType,
+      sizeBytes: file.sizeBytes,
+    }));
+}
+
+function attachResourceRefsToQuery(text: string, resources: ChatResourceRef[]): string {
+  if (resources.length === 0) {
+    return text;
+  }
+
+  const resourceLines = resources
+    .map(
+      (resource) =>
+        `- resource_id: ${resource.resourceId}\n  resource_type: ${resource.resourceType}\n  title: ${resource.title}`,
+    )
+    .join("\n");
+  return `${text}\n\n[Attached resources]\n${resourceLines}\nInstruction: If these resources are relevant, use their resource_id as source_ref.`;
+}
+
 function filesForMessages(uploadedFiles: ChatFileItem[], messages: ChatMessage[]): ChatFileItem[] {
   return mergeFileItems(uploadedFiles, extractGeneratedFilesFromMessages(messages));
 }
@@ -129,7 +156,7 @@ async function loadSessionState(nextSessionId: string): Promise<{
 }> {
   const [history, uploadedFiles] = await Promise.all([
     listHistoryMessages(nextSessionId),
-    listChatFiles(nextSessionId),
+    Promise.resolve([] as ChatFileItem[]),
   ]);
   return {
     history,
@@ -205,6 +232,7 @@ export function ChatPage() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [files, setFiles] = useState<ChatFileItem[]>([]);
+  const [resourceRefs, setResourceRefs] = useState<ChatResourceRef[]>([]);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [inputDraft, setInputDraft] = useState("");
@@ -443,6 +471,9 @@ export function ChatPage() {
         case "source-url": {
           break;
         }
+        case "source-urls": {
+          break;
+        }
         case "error": {
           const streamErrorText = typeof event.errorText === "string" ? event.errorText : "Stream error.";
           patchAssistant(assistantId, (message) => ({
@@ -482,6 +513,12 @@ export function ChatPage() {
       const assistantId = id("assistant");
       const controller = new AbortController();
       const messageFiles = options.baseFiles ?? files;
+      const fileAttachments = fileAttachmentsFromItems(messageFiles);
+      const messageResourceRefs = resourceRefs;
+      const outgoingQuery = attachResourceRefsToQuery(
+        attachFileRefsToQuery(text, messageFiles),
+        messageResourceRefs,
+      );
       abortRef.current = controller;
 
       if (options.baseFiles) {
@@ -492,7 +529,13 @@ export function ChatPage() {
         const baseMessages = options.baseMessages ?? current;
         return [
           ...baseMessages,
-          { id: id("user"), role: "user", content: text, createdAt: Date.now() },
+          {
+            id: id("user"),
+            role: "user",
+            content: text,
+            attachments: fileAttachments,
+            createdAt: Date.now(),
+          },
           {
             id: assistantId,
             role: "assistant",
@@ -502,15 +545,23 @@ export function ChatPage() {
           },
         ];
       });
+      setFiles((current) => current.filter((file) => file.source !== "upload"));
+      setSelectedFileId((current) => {
+        const selectedFile = messageFiles.find((file) => file.id === current);
+        return selectedFile?.source === "upload" ? null : current;
+      });
 
       try {
         await streamChat({
           sessionId,
-          query: attachFileRefsToQuery(text, messageFiles),
+          query: outgoingQuery,
           modelId: selectedModelId,
+          fileAttachments,
+          resourceRefs: messageResourceRefs,
           signal: controller.signal,
           onEvent: (event) => handleSseEvent(assistantId, event),
         });
+        setResourceRefs([]);
         patchAssistant(assistantId, (message) =>
           message.status === "streaming" ? { ...message, status: "completed" } : message,
         );
@@ -542,6 +593,7 @@ export function ChatPage() {
       patchAssistant,
       refreshCurrentMessages,
       refreshSessions,
+      resourceRefs,
       selectedModelId,
       sessionId,
       streaming,
@@ -784,6 +836,20 @@ export function ChatPage() {
     [sessionId],
   );
 
+  const handleAttachResource = useCallback((resource: ChatResourceRef) => {
+    setResourceRefs((current) => {
+      const exists = current.some((item) => item.resourceId === resource.resourceId);
+      if (exists) {
+        return current.map((item) => (item.resourceId === resource.resourceId ? resource : item));
+      }
+      return [...current, resource];
+    });
+  }, []);
+
+  const handleRemoveResource = useCallback((resourceId: string) => {
+    setResourceRefs((current) => current.filter((item) => item.resourceId !== resourceId));
+  }, []);
+
   return (
     <div className="app-shell">
       <div className="app-workbench">
@@ -804,6 +870,7 @@ export function ChatPage() {
             modelName={selectedModelName}
             modelGroups={modelGroups}
             selectedModelId={selectedModelId}
+            sessionId={sessionId}
             onModelChange={setSelectedModelId}
             connectionStatus={connectionStatus}
             streaming={streaming}
@@ -836,12 +903,15 @@ export function ChatPage() {
         streaming={streaming}
         selectedModelName={selectedModelName}
         files={files}
+        resourceRefs={resourceRefs}
         value={inputDraft}
         onValueChange={setInputDraft}
         onSend={sendMessage}
         onStop={stopStreaming}
         onUploadFile={handleUploadFile}
         onPreviewFile={setSelectedFileId}
+        onAttachResource={handleAttachResource}
+        onRemoveResource={handleRemoveResource}
       />
     </div>
   );

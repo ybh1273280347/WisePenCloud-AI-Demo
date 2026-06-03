@@ -117,6 +117,7 @@ async def upload_chat_file(
     return R.success(
         data=UploadedChatFileResponse(
             file_id=file_id,
+            file_ref=str(target_path.resolve(strict=False)),
             file_name=safe_file_name,
             content_type=content_type,
             size_bytes=size,

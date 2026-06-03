@@ -7,6 +7,7 @@ ARG HTTPS_PROXY
 ARG http_proxy
 ARG https_proxy
 ARG HF_TOKEN
+ARG PRELOAD_TRANSLATION_MODELS=true
 
 ENV UV_HTTP_TIMEOUT=1200
 ENV UV_LINK_MODE=copy
@@ -82,13 +83,28 @@ PY
 # Preload Docling-related models for existing non-PDF office parsing into HF_HOME.
 # PDF parsing/conversion must not depend on Docling.
 # Keep this before COPY services/ so normal source changes do not re-run model preload.
-RUN --mount=type=cache,target=/root/.cache/huggingface \
-    /app/.venv/bin/python -c "from docling.document_converter import DocumentConverter; DocumentConverter()"
+RUN --mount=type=cache,target=/root/.cache/huggingface <<'SH'
+set -e
+HF_HOME=/root/.cache/huggingface \
+  /app/.venv/bin/python -c "from docling.document_converter import DocumentConverter; DocumentConverter()"
+mkdir -p /opt/wisepen/models/huggingface
+cp -a /root/.cache/huggingface/. /opt/wisepen/models/huggingface/
+SH
 
 # Preload translation_assist Chinese-English OPUS-MT models into HF_HOME.
 # Keep this before COPY services/ so normal source changes do not re-run model preload.
-RUN --mount=type=cache,target=/root/.cache/huggingface \
-    /app/.venv/bin/python - <<'PY'
+RUN --mount=type=cache,target=/root/.cache/huggingface <<'SH'
+set -e
+if [ "${PRELOAD_TRANSLATION_MODELS}" != "true" ]; then
+  echo "skipping translation model preload"
+  exit 0
+fi
+
+HF_HOME=/root/.cache/huggingface \
+  /app/.venv/bin/python - <<'PY'
+from pathlib import Path
+import time
+
 from transformers import MarianMTModel, MarianTokenizer
 
 models = [
@@ -97,12 +113,19 @@ models = [
 ]
 
 for model_name in models:
-    print(f"preloading {model_name}")
+    start = time.monotonic()
+    print(f"preloading {model_name}", flush=True)
     MarianTokenizer.from_pretrained(model_name)
     MarianMTModel.from_pretrained(model_name)
+    print(f"preloaded {model_name} in {time.monotonic() - start:.1f}s", flush=True)
 
-print("translation models preloaded")
+cache_files = sum(1 for item in Path("/root/.cache/huggingface").rglob("*") if item.is_file())
+print(f"translation models preloaded; huggingface cache files: {cache_files}", flush=True)
 PY
+
+mkdir -p /opt/wisepen/models/huggingface
+cp -a /root/.cache/huggingface/. /opt/wisepen/models/huggingface/
+SH
 
 # Copy source code last.
 # Changing .py files should only invalidate layers after this point.
@@ -150,6 +173,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     ca-certificates \
     xz-utils \
     pandoc \
+    libgl1 \
     libglib2.0-0 \
     libnss3 \
     libnspr4 \
@@ -219,6 +243,82 @@ COPY --from=builder /ms-playwright /ms-playwright
 # Python document_export uses Python Playwright.
 # Browser binaries are already copied from builder; this layer only verifies runtime availability.
 RUN python -c "from pathlib import Path; from tempfile import TemporaryDirectory; from playwright.sync_api import sync_playwright; tmp = TemporaryDirectory(); out = Path(tmp.name) / 'playwright-smoke.pdf'; p = sync_playwright().start(); browser = p.chromium.launch(headless=True, args=['--disable-dev-shm-usage', '--disable-gpu', '--no-sandbox']); page = browser.new_page(java_script_enabled=False); page.set_content('<html><body><h1>ok</h1></body></html>'); page.pdf(path=str(out), print_background=True); browser.close(); p.stop(); assert out.is_file() and out.stat().st_size > 0, 'Python Playwright PDF smoke test did not create a PDF'; tmp.cleanup()"
+
+# Preload PaddleOCR and PPStructure models.
+# PaddleOCR downloads models to ~/.paddleocr on first use.
+# This must run in the app stage where OpenCV system dependencies are available.
+#
+# Uses a BuildKit cache mount to avoid re-downloading across rebuilds.
+# The restore-then-save pattern mirrors the Playwright and HuggingFace handling above.
+#
+# Retry logic handles transient network failures (ChunkedEncodingError / IncompleteRead).
+# Partial downloads are wiped before each retry because PaddleOCR does not resume incomplete files.
+RUN --mount=type=cache,target=/tmp/paddle-model-cache <<'SH'
+set -e
+
+# Restore from BuildKit cache if populated from a previous build
+if [ -n "$(ls -A /tmp/paddle-model-cache 2>/dev/null)" ]; then
+    echo "Restoring PaddleOCR models from BuildKit cache"
+    mkdir -p /root/.paddleocr
+    cp -a /tmp/paddle-model-cache/. /root/.paddleocr/
+fi
+
+python - <<'PY'
+import os
+import shutil
+import time
+from pathlib import Path
+
+os.environ["GLOG_minloglevel"] = "2"
+os.environ["FLAGS_eager_delete_tensor_gb"] = "0.0"
+
+
+def load_with_retry(loader, name, retries=3, delay=20):
+    for i in range(retries):
+        try:
+            loader()
+            print(f"{name} loaded", flush=True)
+            return
+        except Exception as e:
+            # Wipe partial downloads before retry;
+            # PaddleOCR does not support resuming incomplete file downloads.
+            paddle_dir = Path.home() / ".paddleocr"
+            if paddle_dir.exists():
+                shutil.rmtree(paddle_dir)
+            if i < retries - 1:
+                print(
+                    f"{name} attempt {i + 1} failed "
+                    f"({type(e).__name__}: {e}), retrying in {delay}s...",
+                    flush=True,
+                )
+                time.sleep(delay)
+            else:
+                raise
+
+
+start = time.monotonic()
+print("preloading PaddleOCR models", flush=True)
+
+import torch
+from paddleocr import PaddleOCR, PPStructure
+
+load_with_retry(
+    lambda: PaddleOCR(lang="ch", use_angle_cls=False, show_log=False),
+    "PaddleOCR",
+)
+load_with_retry(lambda: PPStructure(show_log=False), "PPStructure")
+print(f"PaddleOCR models preloaded in {time.monotonic() - start:.1f}s", flush=True)
+PY
+
+# Persist downloaded models into BuildKit cache for subsequent builds
+cp -a /root/.paddleocr/. /tmp/paddle-model-cache/
+SH
+
+# Move PaddleOCR models to persistent location and create symlink.
+RUN mkdir -p /opt/wisepen/models/paddleocr \
+    && cp -a /root/.paddleocr/. /opt/wisepen/models/paddleocr/ \
+    && rm -rf /root/.paddleocr \
+    && ln -s /opt/wisepen/models/paddleocr /root/.paddleocr
 
 COPY --from=builder /app/services /app/services
 

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import math
 import tempfile
 from dataclasses import dataclass, field
@@ -137,12 +138,22 @@ class PdfParser(BaseDocumentParser):
 
             reason = "empty_text" if not text else "text_too_short"
             warnings.append(
-                f"docling_failed: {reason}: length={len(text)}, "
-                f"min_text_chars={self._docling_min_text_chars}"
+                _format_docling_degraded_warning(
+                    reason=reason,
+                    detail=(
+                        f"length={len(text)}, "
+                        f"min_text_chars={self._docling_min_text_chars}"
+                    ),
+                )
             )
 
         except Exception as e:
-            warnings.append(f"docling_failed: {type(e).__name__}: {e}")
+            warnings.append(
+                _format_docling_degraded_warning(
+                    reason=type(e).__name__,
+                    detail=str(e),
+                )
+            )
 
         return await self._parse_with_pymupdf(
             path,
@@ -574,3 +585,18 @@ class PdfParser(BaseDocumentParser):
             backends.append(addition)
 
         return "+".join(backends)
+
+
+def _format_docling_degraded_warning(*, reason: str, detail: str) -> str:
+    payload = {
+        "code": "docling_failed",
+        "reason": reason,
+        "detail": detail,
+        "fallback": "pymupdf_paddleocr",
+        "severity": "degraded_not_failed",
+        "user_impact": (
+            "PDF parsing continued with PyMuPDF/OCR fallback; main text remains usable, "
+            "but Docling table-structure extraction may be incomplete."
+        ),
+    }
+    return "parse_warning: " + json.dumps(payload, ensure_ascii=False)

@@ -65,7 +65,7 @@ pipeline {
                         COMPOSE_FILES="\$COMPOSE_FILES -f docker-compose-app.legacy-net.yml"
                     fi
 
-                    docker-compose \$COMPOSE_FILES up -d --remove-orphans
+                    docker-compose \$COMPOSE_FILES up -d --force-recreate --remove-orphans
                     """
                 }
             }

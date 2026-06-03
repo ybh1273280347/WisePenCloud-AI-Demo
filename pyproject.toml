@@ -15,7 +15,6 @@ members = [
 ]
 exclude = [
     "services/sage_math_worker",
-    "services/searxng",
     "services/wisepen-chat-ui",
 ]
 

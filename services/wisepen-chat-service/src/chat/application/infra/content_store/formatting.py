@@ -3,7 +3,12 @@ from typing import Any, Set
 
 from .models import ContentReceipt, ContentWindow
 
-_METADATA_EXCLUDE_KEYS: Set[str] = {"content_kind"}
+_METADATA_EXCLUDE_KEYS: Set[str] = {
+    "content_kind",
+    "page_chunk_map",
+    "section_map",
+    "anchors",
+}
 
 
 def _fmt_value(value: Any) -> str:
@@ -90,5 +95,4 @@ def format_tool_content_receipt(receipt: ContentReceipt) -> str:
     ])
 
     return "\n".join(lines)
-
 

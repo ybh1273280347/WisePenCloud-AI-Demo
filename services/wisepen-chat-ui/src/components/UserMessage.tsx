@@ -1,5 +1,5 @@
 import {KeyboardEvent, useEffect, useRef, useState} from "react";
-import type {UserMessage as UserMessageType} from "../types/chat";
+import type {ChatFileAttachment, UserMessage as UserMessageType} from "../types/chat";
 import {copyTextToClipboard} from "../utils/clipboard";
 import {MessageActionButton} from "./MessageActionButton";
 import {MarkdownContent} from "./MarkdownContent";
@@ -101,6 +101,9 @@ export function UserMessage({ message, actionDisabled = false, onEdit }: UserMes
           </>
         ) : (
           <>
+            {message.attachments && message.attachments.length > 0 ? (
+              <AttachmentList attachments={message.attachments} />
+            ) : null}
             <div className="message-bubble user-bubble">
               <MarkdownContent content={message.content} className="user-markdown" />
             </div>
@@ -128,5 +131,21 @@ export function UserMessage({ message, actionDisabled = false, onEdit }: UserMes
         )}
       </div>
     </article>
+  );
+}
+
+function AttachmentList({ attachments }: { attachments: ChatFileAttachment[] }) {
+  return (
+    <div className="user-attachment-list" aria-label="本条消息附件">
+      {attachments.map((file) => (
+        <div className="user-attachment-item" key={file.fileRef}>
+          <div className="user-attachment-main">
+            <strong>{file.fileName}</strong>
+            <small>{file.contentType}</small>
+          </div>
+          <code title={file.fileRef}>{file.fileRef}</code>
+        </div>
+      ))}
+    </div>
   );
 }

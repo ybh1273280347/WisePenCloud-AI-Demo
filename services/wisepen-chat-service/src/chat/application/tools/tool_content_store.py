@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from chat.application.infra.content_store import ContentStore
 from chat.application.infra.content_store.formatting import (
@@ -13,6 +13,10 @@ from chat.core.config.app_settings import settings
 
 _TOOL_CONTENT_STORE_TTL_SECONDS = 30 * 60
 _TOOL_CONTENT_STORE_MAX_ITEM_CHARS = 20_000_000
+CONTENT_ROLE_WRAPPER = "wrapper"
+CONTENT_ROLE_PARSED = "parsed"
+CONTENT_ROLE_SEARCH_PACK = "search_pack"
+CONTENT_ROLE_WINDOW = "window"
 
 
 class ToolContentStore:
@@ -79,6 +83,60 @@ class ToolContentStore:
             content_id=content_id,
             scope_id=session_id,
         )
+
+    def resolve_canonical_content_id(
+        self,
+        *,
+        content_id: str,
+        session_id: str,
+    ) -> str:
+        """把 wrapper/window 等可跳转内容 ID 解析为 canonical 内容 ID。"""
+        stored = self.get(content_id=content_id, session_id=session_id)
+        if stored is None:
+            return content_id
+
+        canonical_content_id = stored.metadata.get("canonical_content_id")
+        if isinstance(canonical_content_id, str) and canonical_content_id:
+            return canonical_content_id
+
+        parsed_content_id = stored.metadata.get("parsed_content_id")
+        if isinstance(parsed_content_id, str) and parsed_content_id:
+            return parsed_content_id
+
+        return content_id
+
+    def canonicalize_content_id(
+        self,
+        *,
+        content_id: str,
+        session_id: str,
+    ) -> Tuple[str, Optional[str]]:
+        canonical_content_id = self.resolve_canonical_content_id(
+            content_id=content_id,
+            session_id=session_id,
+        )
+        if canonical_content_id == content_id:
+            return canonical_content_id, None
+        return canonical_content_id, (
+            f"content_id {content_id} is a wrapper or redirect receipt. "
+            f"This tool already used canonical_content_id {canonical_content_id} automatically; "
+            "no manual ID switch is required for this call."
+        )
+
+    def update_metadata(
+        self,
+        *,
+        content_id: str,
+        session_id: str,
+        metadata: Dict[str, Any],
+    ) -> Optional[StoredContent]:
+        stored = self.get(content_id=content_id, session_id=session_id)
+        if stored is None:
+            return None
+
+        stored.metadata.update(metadata)
+        self._store.put_stored_content(stored)
+        return stored
 
     def put_receipt(
         self,
@@ -236,7 +294,7 @@ def read_tool_content_window_by_offset(
         格式化后的内容窗口字符串。内容不可用时返回错误提示信息。
     """
     if limit is None:
-        limit = settings.TOOL_RESULT_MAX_CHARS
+        limit = settings.TOOL_RESULT_MAX_CHARS * 2
 
     window = content_store.read_chunk_window_by_offset(
         content_id=content_id,

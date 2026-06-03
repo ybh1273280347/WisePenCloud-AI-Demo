@@ -6,13 +6,10 @@
   color: rgba(248, 250, 255, 0.96);
 
   font-family:
-    "Kaiti SC",
-    "STKaiti",
-    "KaiTi",
-    "楷体",
-    "LXGW WenKai",
-    "Microsoft YaHei UI",
-    "Microsoft YaHei",
+    "SimSun",
+    "宋体",
+    "Noto Serif CJK SC",
+    "Source Han Serif SC",
     sans-serif;
 
   font-size: 16.5px;
@@ -35,8 +32,8 @@
   margin: 0 0 13px;
 }
 
-.markdown-content > :last-child,
-.markdown-content li > :last-child,
+.markdown-content> :last-child,
+.markdown-content li> :last-child,
 .markdown-content p:last-child {
   margin-bottom: 0;
 }
@@ -49,13 +46,10 @@
   color: rgba(252, 253, 255, 0.98);
 
   font-family:
-    "Kaiti SC",
-    "STKaiti",
-    "KaiTi",
-    "楷体",
-    "LXGW WenKai",
-    "Microsoft YaHei UI",
-    "Microsoft YaHei",
+    "SimSun",
+    "宋体",
+    "Noto Serif CJK SC",
+    "Source Han Serif SC",
     sans-serif;
 
   font-weight: 600;
@@ -213,17 +207,49 @@
   font-size: 1.04em;
 }
 
+.tool-output-summary {
+  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+.tool-output-summary p,
+.tool-output-summary ul,
+.tool-output-summary ol,
+.tool-output-summary blockquote,
+.tool-output-summary pre,
+.tool-output-summary table {
+  margin-bottom: 8px;
+}
+
+.tool-summary-grid .tool-output-summary p {
+  display: block;
+  overflow: visible;
+  margin: 0 0 8px;
+  color: inherit;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+}
+
+.tool-output-summary .katex {
+  font-size: 1em;
+}
+
+.tool-output-summary .katex-display {
+  margin: 8px 0 0;
+  padding: 4px 0;
+}
+
 .user-markdown {
   color: rgba(250, 252, 255, 0.97);
 
   font-family:
-    "Kaiti SC",
-    "STKaiti",
-    "KaiTi",
-    "楷体",
-    "LXGW WenKai",
-    "Microsoft YaHei UI",
-    "Microsoft YaHei",
+    "SimSun",
+    "宋体",
+    "Noto Serif CJK SC",
+    "Source Han Serif SC",
     sans-serif;
 
   font-size: 16px;

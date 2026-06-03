@@ -1,4 +1,4 @@
-import {apiFetch, readApiData} from "./client";
+import { apiFetch, readApiData } from "./client";
 
 export type SearchProviderMode = "default" | "custom";
 
@@ -8,42 +8,38 @@ export type SearchProviderName =
   | "brave"
   | "serpapi"
   | "exa"
-  | "perplexity";
+  | "perplexity"
+  | "anysearch";
 
 export type SearchProviderConfig = {
   mode: SearchProviderMode;
   provider: SearchProviderName | null;
-  keyPrefix4: string | null;
-  keyLast4: string | null;
-  status: string;
-  lastVerifiedAt: string | null;
-  lastErrorCode: string | null;
+  maskedKey: string | null;
+  isValid: boolean;
 };
 
 type SearchProviderConfigDto = {
-  mode: SearchProviderMode;
+  provider_mode: SearchProviderMode;
   provider?: SearchProviderName | null;
-  key_prefix4?: string | null;
-  key_last4?: string | null;
-  status: string;
-  last_verified_at?: string | null;
-  last_error_code?: string | null;
+  masked_key?: string | null;
+  is_valid?: boolean;
 };
 
 export const searchProviders: Array<{
   value: SearchProviderName;
   label: string;
 }> = [
-  { value: "serper", label: "Serper" },
-  { value: "tavily", label: "Tavily" },
-  { value: "brave", label: "Brave" },
-  { value: "serpapi", label: "SerpAPI" },
-  { value: "exa", label: "Exa" },
-  { value: "perplexity", label: "Perplexity" },
-];
+    { value: "serper", label: "Serper" },
+    { value: "tavily", label: "Tavily" },
+    { value: "brave", label: "Brave" },
+    { value: "serpapi", label: "SerpAPI" },
+    { value: "exa", label: "Exa" },
+    { value: "perplexity", label: "Perplexity" },
+    { value: "anysearch", label: "AnySearch" },
+  ];
 
 export async function getSearchProviderConfig(): Promise<SearchProviderConfig> {
-  const response = await apiFetch("/chat/searchProvider/get");
+  const response = await apiFetch("/chat/searchProvider/getConfig");
   const data = await readApiData<SearchProviderConfigDto>(
     response,
     "加载搜索源配置失败",
@@ -92,7 +88,7 @@ export async function clearCustomSearchProvider(): Promise<SearchProviderConfig>
 }
 
 export async function verifyCustomSearchProvider(): Promise<SearchProviderConfig> {
-  const response = await apiFetch("/chat/searchProvider/verify", {
+  const response = await apiFetch("/chat/searchProvider/verifyProvider", {
     method: "POST",
   });
   const data = await readApiData<SearchProviderConfigDto>(
@@ -103,13 +99,15 @@ export async function verifyCustomSearchProvider(): Promise<SearchProviderConfig
 }
 
 function mapConfig(dto: SearchProviderConfigDto): SearchProviderConfig {
+  const mode = normalizeMode(dto.provider_mode);
   return {
-    mode: dto.mode,
+    mode,
     provider: dto.provider ?? null,
-    keyPrefix4: dto.key_prefix4 ?? null,
-    keyLast4: dto.key_last4 ?? null,
-    status: dto.status,
-    lastVerifiedAt: dto.last_verified_at ?? null,
-    lastErrorCode: dto.last_error_code ?? null,
+    maskedKey: dto.masked_key ?? null,
+    isValid: dto.is_valid ?? false,
   };
+}
+
+function normalizeMode(mode: SearchProviderConfigDto["provider_mode"]): SearchProviderMode {
+  return String(mode || "default").toLowerCase() === "custom" ? "custom" : "default";
 }

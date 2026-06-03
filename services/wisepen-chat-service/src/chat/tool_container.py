@@ -455,7 +455,7 @@ def _register_tool_content(container_cls: Any) -> None:
     container_cls.tool_content_base_store = providers.Singleton(
         ContentStore,
         repository=container_cls.tool_content_repository,
-        default_chunk_size=settings.TOOL_RESULT_MAX_CHARS,
+        default_chunk_size=settings.TOOL_RESULT_MAX_CHARS * 2,
         max_item_chars=_TOOL_CONTENT_STORE_MAX_ITEM_CHARS,
         normalize_text=True,
     )
@@ -575,6 +575,7 @@ def _register_document_convert(container_cls: Any) -> None:
         markdown_converter=container_cls.document_convert_markdown_converter,
         export_service=container_cls.document_export_service,
         temp_file_resolver=container_cls.document_file_resolver,
+        download_resolver=container_cls.document_export_download_resolver,
     )
 
 

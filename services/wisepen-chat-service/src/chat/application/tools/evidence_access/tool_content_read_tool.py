@@ -99,6 +99,12 @@ class ToolContentReadTool(BaseTool):
         if content_id.startswith("file_ref"):
             return "[Tool Error] content_id must be a cnt_* value, not a file_ref value."
 
+        canonical_content_id, redirect_note = self._content_store.canonicalize_content_id(
+            content_id=content_id,
+            session_id=session_id,
+        )
+        content_id = canonical_content_id
+
         # 路由特征码提取
         has_chunk_index = "chunk_index" in kwargs
         has_offset_mode = "offset" in kwargs or "limit" in kwargs
@@ -134,7 +140,7 @@ class ToolContentReadTool(BaseTool):
                 after_chunks=after_chunks,
             )
 
-            return read_tool_content_window_by_index(
+            result = read_tool_content_window_by_index(
                 session_id=session_id,
                 content_id=content_id,
                 chunk_index=chunk_index,
@@ -142,6 +148,7 @@ class ToolContentReadTool(BaseTool):
                 after_chunks=after_chunks,
                 content_store=self._content_store,
             )
+            return _prepend_redirect_note(result, redirect_note)
 
         # ----------------------------------------------------------------
         # 模式二：基于绝对字符偏移量的单图流式续读器
@@ -154,8 +161,9 @@ class ToolContentReadTool(BaseTool):
         if limit is not None:
             if not isinstance(limit, int) or limit < 1:
                 return "[Tool Error] limit must be an integer greater than or equal to 1."
-            if limit > app_settings.TOOL_RESULT_MAX_CHARS:
-                return f"[Tool Error] limit must be less than or equal to {app_settings.TOOL_RESULT_MAX_CHARS}."
+            max_limit = app_settings.TOOL_RESULT_MAX_CHARS * 2
+            if limit > max_limit:
+                return f"[Tool Error] limit must be less than or equal to {max_limit}."
 
         log_event(
             "tool_content_read 调用",
@@ -164,10 +172,17 @@ class ToolContentReadTool(BaseTool):
             limit=limit,
         )
 
-        return read_tool_content_window_by_offset(
+        result = read_tool_content_window_by_offset(
             session_id=session_id,
             content_id=content_id,
             offset=offset,
             limit=limit,
             content_store=self._content_store,
         )
+        return _prepend_redirect_note(result, redirect_note)
+
+
+def _prepend_redirect_note(result: str, redirect_note: Optional[str]) -> str:
+    if not redirect_note:
+        return result
+    return f"[ToolContent Auto-Redirect]\n{redirect_note}\n\n{result}"

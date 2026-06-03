@@ -1,4 +1,4 @@
-import type {AssistantPart, ChatMessage, ChatSession} from "../types/chat";
+import type {AssistantPart, ChatFileAttachment, ChatMessage, ChatSession} from "../types/chat";
 import {apiFetch, ensureApiOk, readApiData, readJson} from "./client";
 
 type SessionDto = {
@@ -37,8 +37,8 @@ export async function listSessions(page = 1, size = 50): Promise<ChatSession[]> 
     size: String(size),
   });
   const response = await apiFetch(`/chat/session/listSessions?${params.toString()}`);
-  const data = await readApiData<{ list?: SessionDto[] }>(response, "加载对话列表失败");
-  return (data.list || []).map(mapSession);
+  const data = await readApiData<PageDto<SessionDto>>(response, "加载对话列表失败");
+  return pageItems(data).map(mapSession);
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
@@ -101,8 +101,21 @@ export async function listHistoryMessages(sessionId: string, page = 1, size = 50
     size: String(size),
   });
   const response = await apiFetch(`/chat/session/listHistoryMessages?${params.toString()}`);
-  const data = await readApiData<{ list?: UIMessageDto[] }>(response, "加载历史消息失败");
-  return (data.list || []).map(mapUiMessage);
+  const data = await readApiData<PageDto<UIMessageDto>>(response, "加载历史消息失败");
+  return pageItems(data).map(mapUiMessage);
+}
+
+type PageDto<T> = {
+  list?: T[];
+  items?: T[];
+  records?: T[];
+};
+
+function pageItems<T>(data: PageDto<T> | T[]): T[] {
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return data.list || data.items || data.records || [];
 }
 
 function mapSession(dto: SessionDto): ChatSession {
@@ -135,13 +148,15 @@ type UIMessageDto = {
 function mapUiMessage(dto: UIMessageDto): ChatMessage {
   const createdAt = dto.createdAt ? Date.parse(dto.createdAt) || Date.now() : Date.now();
   if (dto.role === "user") {
+    const rawContent = dto.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text || "")
+      .join("\n");
     return {
       id: dto.id || crypto.randomUUID(),
       role: "user",
-      content: stripAttachmentBlock(dto.parts
-        .filter((part) => part.type === "text")
-        .map((part) => part.text || "")
-        .join("\n")),
+      content: stripAttachmentBlock(rawContent),
+      attachments: parseAttachmentBlock(rawContent),
       createdAt,
     };
   }
@@ -192,4 +207,32 @@ function stringifyOutput(value: unknown): string {
 
 function stripAttachmentBlock(text: string): string {
   return text.replace(/\n\n\[Attached files\][\s\S]*$/m, "");
+}
+
+function parseAttachmentBlock(text: string): ChatFileAttachment[] {
+  const block = text.match(/\n\n\[Attached files\]\n([\s\S]*?)(?:\nInstruction:|\n\n\[|$)/m)?.[1];
+  if (!block) {
+    return [];
+  }
+
+  const items = block.split(/\n(?=- file_name: )/g);
+  return items
+    .map((item) => {
+      const fileName = readAttachmentField(item, "file_name");
+      const fileRef = readAttachmentField(item, "file_ref");
+      if (!fileName || !fileRef) {
+        return null;
+      }
+      return {
+        fileName,
+        fileRef,
+        contentType: readAttachmentField(item, "content_type") || "application/octet-stream",
+      };
+    })
+    .filter((item): item is ChatFileAttachment => Boolean(item));
+}
+
+function readAttachmentField(text: string, fieldName: string): string | undefined {
+  const pattern = new RegExp(`^\\s*-?\\s*${fieldName}:\\s*(.+?)\\s*$`, "im");
+  return text.match(pattern)?.[1]?.trim();
 }

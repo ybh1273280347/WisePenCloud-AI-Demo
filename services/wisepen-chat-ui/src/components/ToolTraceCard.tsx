@@ -3,7 +3,9 @@ import {extractGeneratedFilesFromToolOutput, fetchFileBlob} from "../api/file";
 import type {AssistantPart, ChatFileItem} from "../types/chat";
 import {formatDuration} from "../utils/formatDuration";
 import {Badge} from "./Badge";
+import {ChartPreviewCard} from "./ChartPreviewCard";
 import {JsonBlock} from "./JsonBlock";
+import {MarkdownContent} from "./MarkdownContent";
 import {ToolMascotPopup} from "./ToolMascotPopup";
 
 type ToolCallPart = Extract<AssistantPart, { type: "tool_call" }>;
@@ -69,7 +71,10 @@ export function ToolTraceCard({ part }: ToolTraceCardProps) {
         </div>
         <div>
           <span className="tool-field-label">{isError ? "错误" : "结果"}</span>
-          <p>{hasOutput ? outputSummary : "等待输出"}</p>
+          <MarkdownContent
+            content={hasOutput ? outputSummary : "等待输出"}
+            className="tool-output-summary"
+          />
         </div>
       </div>
 
@@ -87,6 +92,10 @@ export function ToolTraceCard({ part }: ToolTraceCardProps) {
             <div className="generated-document-error">{downloadError}</div>
           ) : null}
         </div>
+      ) : null}
+
+      {typeof part.output === "string" && !isError ? (
+        <ChartPreviewCard output={part.output} />
       ) : null}
 
       <JsonBlock value={part.input} label="原始输入 JSON" defaultOpen={false} />
@@ -134,6 +143,14 @@ function summarizeValue(value: unknown): string {
   }
 
   const raw = typeof value === "string" ? value : stringifyForSummary(value);
+  if (typeof value === "string") {
+    const trimmed = raw.trim();
+    if (trimmed.length <= 720) {
+      return trimmed;
+    }
+    return `${trimmed.slice(0, 720)}...`;
+  }
+
   const compact = raw.replace(/\s+/g, " ").trim();
   if (compact.length <= 360) {
     return compact;

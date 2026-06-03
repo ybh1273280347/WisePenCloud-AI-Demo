@@ -26,7 +26,7 @@ export async function uploadChatFile(sessionId: string, file: File): Promise<Cha
     file_name: file.name,
   });
 
-  const response = await apiFetch(`/chat/file/upload?${params.toString()}`, {
+  const response = await apiFetch(`/chat/chatFile/uploadChatFile?${params.toString()}`, {
     method: "POST",
     headers: {
       "Content-Type": file.type || "application/octet-stream",
@@ -34,6 +34,21 @@ export async function uploadChatFile(sessionId: string, file: File): Promise<Cha
     body: file,
   });
   const data = await readApiData<UploadedChatFileDto>(response, "Failed to upload file");
+  if (!data.file_ref) {
+    throw new Error("上传成功但后端没有返回 file_ref，请重启 wisepen-chat-service 后重试。");
+  }
+  return mapUploadedFile(data);
+}
+
+function mapUploadedFile(data: UploadedChatFileDto): ChatFileItem {
+  const fileId = data.file_id;
+  const previewUrl =
+    normalizeUploadedFileUrl(data.preview_url) ||
+    `/chat/chatFile/previewChatFile?session_id=${encodeURIComponent(dataSessionId(data.preview_url))}&file_id=${encodeURIComponent(fileId)}`;
+  const downloadUrl =
+    normalizeUploadedFileUrl(data.download_url) ||
+    `/chat/chatFile/downloadChatFile?session_id=${encodeURIComponent(dataSessionId(data.download_url))}&file_id=${encodeURIComponent(fileId)}`;
+
   return {
     id: `upload:${data.file_id}`,
     source: "upload",
@@ -42,28 +57,10 @@ export async function uploadChatFile(sessionId: string, file: File): Promise<Cha
     fileName: data.file_name,
     contentType: data.content_type,
     sizeBytes: data.size_bytes,
-    previewUrl: data.preview_url,
-    downloadUrl: data.download_url,
+    previewUrl,
+    downloadUrl,
     createdAt: Date.now(),
   };
-}
-
-export async function listChatFiles(sessionId: string): Promise<ChatFileItem[]> {
-  const params = new URLSearchParams({ session_id: sessionId });
-  const response = await apiFetch(`/chat/file/list?${params.toString()}`);
-  const data = await readApiData<UploadedChatFileDto[]>(response, "Failed to list files");
-  return data.map((file) => ({
-    id: `upload:${file.file_id}`,
-    source: "upload",
-    fileId: file.file_id,
-    fileRef: file.file_ref,
-    fileName: file.file_name,
-    contentType: file.content_type,
-    sizeBytes: file.size_bytes,
-    previewUrl: file.preview_url,
-    downloadUrl: file.download_url,
-    createdAt: Date.now(),
-  }));
 }
 
 export async function deleteChatFile(sessionId: string, file: ChatFileItem): Promise<void> {
@@ -75,7 +72,7 @@ export async function deleteChatFile(sessionId: string, file: ChatFileItem): Pro
     session_id: sessionId,
     file_id: file.fileId,
   });
-  const response = await apiFetch(`/chat/file/delete?${params.toString()}`, {
+  const response = await apiFetch(`/chat/chatFile/delete?${params.toString()}`, {
     method: "DELETE",
   });
   await ensureApiOk(response, "Failed to delete file");
@@ -189,4 +186,21 @@ function parseOptionalNumber(value: string | undefined): number | undefined {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeUploadedFileUrl(urlPath: string | undefined): string | undefined {
+  if (!urlPath) {
+    return undefined;
+  }
+  return urlPath
+    .replace("/chat/file/preview?", "/chat/chatFile/previewChatFile?")
+    .replace("/chat/file/download?", "/chat/chatFile/downloadChatFile?");
+}
+
+function dataSessionId(urlPath: string | undefined): string {
+  if (!urlPath) {
+    return "";
+  }
+  const query = urlPath.split("?", 2)[1] || "";
+  return new URLSearchParams(query).get("session_id") || "";
 }

@@ -22,7 +22,10 @@ class PythonMathEngine:
 
     @staticmethod
     def parse_bound(value: str | None, name: str, variables: list[str] | None = None) -> sp.Expr:
-        return PythonMathEngine.parse_expression(value, variables)
+        try:
+            return PythonMathEngine.parse_expression(value, variables)
+        except Exception as e:
+            raise MathSolverError(f"{name} must be a non-empty math expression string.") from e
 
     # ---- symbolic ----
 
@@ -43,6 +46,12 @@ class PythonMathEngine:
         if task == PythonMathTask.INTEGRATE:
             return sp.integrate(self.parse_expression(data.expression, variable_names), variable)
         if task == PythonMathTask.DEFINITE_INTEGRAL:
+            if data.lower_bound is None or data.upper_bound is None:
+                raise MathSolverError(
+                    "definite_integral requires both lower_bound and upper_bound. "
+                    "Use lower_bound/upper_bound for integration limits; lower/upper are only aliases.",
+                    retryable=False,
+                )
             lower = self.parse_bound(data.lower_bound, "lower_bound", variable_names)
             upper = self.parse_bound(data.upper_bound, "upper_bound", variable_names)
             return sp.integrate(

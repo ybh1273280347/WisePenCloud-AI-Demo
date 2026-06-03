@@ -27,6 +27,16 @@ class RejectExplicitNullMixin:
         return data
 
 
+def _normalize_bound_aliases(data: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(data)
+    if normalized.get("task") == "definite_integral":
+        if "lower_bound" not in normalized and "lower" in normalized:
+            normalized["lower_bound"] = normalized.pop("lower")
+        if "upper_bound" not in normalized and "upper" in normalized:
+            normalized["upper_bound"] = normalized.pop("upper")
+    return normalized
+
+
 class SageComputeRequest(RejectExplicitNullMixin, BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
@@ -77,6 +87,13 @@ class SageComputeRequest(RejectExplicitNullMixin, BaseModel):
     element: Optional[StrictStr] = None
     element_a: Optional[StrictStr] = None
     element_b: Optional[StrictStr] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return _normalize_bound_aliases(data)
+        return data
 
 
 class SageComputeResponse(BaseModel):

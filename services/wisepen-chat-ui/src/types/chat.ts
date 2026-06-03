@@ -3,6 +3,7 @@ export type ChatMessage =
       id: string;
       role: "user";
       content: string;
+      attachments?: ChatFileAttachment[];
       createdAt: number;
     }
   | {
@@ -70,6 +71,13 @@ export type MemoryItem = {
 
 export type ChatFileSource = "upload" | "generated";
 
+export type ChatFileAttachment = {
+  fileName: string;
+  fileRef: string;
+  contentType: string;
+  sizeBytes?: number;
+};
+
 export type ChatFileItem = {
   id: string;
   source: ChatFileSource;
@@ -82,4 +90,11 @@ export type ChatFileItem = {
   fileId?: string;
   fileRef?: string;
   downloadRef?: string;
+};
+
+export type ChatResourceRef = {
+  resourceId: string;
+  resourceType: string;
+  title: string;
+  source: "drag" | "manual";
 };

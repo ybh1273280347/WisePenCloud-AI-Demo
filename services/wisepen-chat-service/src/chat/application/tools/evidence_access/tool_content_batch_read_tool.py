@@ -64,11 +64,12 @@ class BatchReadItem:
 
 
 @dataclass(frozen=True, slots=True)
-class SkippedBatchItem:
+class BatchReadResultItem:
     index: int
     content_id: str
     chunk_index: int
-    reason: str
+    status: str
+    block: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,10 +110,22 @@ class ToolContentBatchReadTool(BaseTool):
             return "[Tool Error] max_total_chars must be an integer between 1000 and 30000."
 
         blocks: List[str] = []
-        skipped_items: List[SkippedBatchItem] = []
+        result_items: List[BatchReadResultItem] = []
         total_chars = 0
+        per_item_budget = max(1, max_total_chars // len(validated_items))
 
         for index, item in enumerate(validated_items, 1):
+            requested_content_id = item.content_id
+            content_id, redirect_note = self._content_store.canonicalize_content_id(
+                content_id=requested_content_id,
+                session_id=session_id,
+            )
+            item = BatchReadItem(
+                content_id=content_id,
+                chunk_index=item.chunk_index,
+                before_chunks=item.before_chunks,
+                after_chunks=item.after_chunks,
+            )
             stored = self._content_store.get(
                 content_id=item.content_id,
                 session_id=session_id,
@@ -131,39 +144,56 @@ class ToolContentBatchReadTool(BaseTool):
             if window is None:
                 block = _error_block(index, item)
             else:
-                block = _build_window_block(index, item, window, _extract_structure(stored, item.chunk_index))
-
-            if total_chars + len(block) > max_total_chars:
-                skipped_items.extend(
-                    SkippedBatchItem(
-                        index=i,
-                        content_id=s.content_id,
-                        chunk_index=s.chunk_index,
-                        reason="max_total_chars_exceeded",
-                    )
-                    for i, s in enumerate(validated_items[index - 1:], start=index)
+                block = _build_window_block(
+                    index,
+                    item,
+                    window,
+                    _extract_structure(stored, item.chunk_index),
+                    requested_content_id=requested_content_id,
+                    redirect_note=redirect_note,
                 )
-                break
+
+            status = "ok"
+            if len(block) > per_item_budget:
+                block = _truncate_block(
+                    block=block,
+                    budget=per_item_budget,
+                    item=item,
+                    reason="per_item_budget_exceeded",
+                )
+                status = "partial"
+
+            remaining_budget = max_total_chars - total_chars
+            if len(block) > remaining_budget:
+                block = _truncate_block(
+                    block=block,
+                    budget=remaining_budget,
+                    item=item,
+                    reason="max_total_chars_exceeded",
+                )
+                status = "partial"
 
             blocks.append(block)
             total_chars += len(block)
+            result_items.append(BatchReadResultItem(
+                index=index,
+                content_id=item.content_id,
+                chunk_index=item.chunk_index,
+                status=status,
+                block=block,
+            ))
 
         lines = [
             "[Tool Result] Batch Tool Content Windows",
             f"Requested: {len(validated_items)} item(s)",
             f"Returned: {len(blocks)} window(s)",
-            f"Skipped: {len(skipped_items)} item(s)",
+            "Skipped: 0 item(s)",
         ]
-        if skipped_items:
-            lines.append("Skip reason: max_total_chars_exceeded")
+        partial_count = sum(1 for item in result_items if item.status == "partial")
+        if partial_count:
+            lines.append(f"Partial: {partial_count} item(s)")
         lines.append("")
         lines.extend(blocks)
-
-        if skipped_items:
-            lines.extend(["", "Skipped items:"])
-            for s in skipped_items:
-                lines.extend([f"[{s.index}]", f"content_id: {s.content_id}",
-                               f"chunk_index: {s.chunk_index}", f"reason: {s.reason}"])
 
         return "\n".join(lines).rstrip()
 
@@ -200,14 +230,22 @@ def _build_window_block(
     item: BatchReadItem,
     window: ContentWindow,
     structure: TargetChunkStructure,
+    *,
+    requested_content_id: str,
+    redirect_note: Optional[str],
 ) -> str:
     lines = [
         f"[{index}]",
+        "status: ok",
         f"content_id: {item.content_id}",
         f"chunk_index: {item.chunk_index}",
         f"before_chunks: {item.before_chunks}",
         f"after_chunks: {item.after_chunks}",
     ]
+    if requested_content_id != item.content_id:
+        lines.append(f"requested_content_id: {requested_content_id}")
+    if redirect_note:
+        lines.append(f"redirect_note: {redirect_note}")
     if structure.heading_path:
         lines.append("target_heading_path: " + " > ".join(structure.heading_path))
     if structure.page_number is not None:
@@ -222,6 +260,24 @@ def _build_window_block(
         lines.append(f"error: {window.error}")
     lines.extend(["", "[Content]", window.text])
     return "\n".join(lines)
+
+
+def _truncate_block(
+    *,
+    block: str,
+    budget: int,
+    item: BatchReadItem,
+    reason: str,
+) -> str:
+    suffix = (
+        "\ntruncated: true"
+        f"\nreason: {reason}"
+        "\nsuggested_next_call: "
+        f'{{"content_id": "{item.content_id}", "chunk_index": {item.chunk_index}, '
+        '"before_chunks": 0, "after_chunks": 0, "max_total_chars": 4000}}'
+    )
+    available = max(0, budget - len(suffix))
+    return block[:available].rstrip() + suffix
 
 
 def _validate_items(raw_items: Any) -> Tuple[Optional[str], List[BatchReadItem]]:

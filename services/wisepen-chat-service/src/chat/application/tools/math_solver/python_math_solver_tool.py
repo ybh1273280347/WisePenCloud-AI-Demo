@@ -59,8 +59,14 @@ _TOOL_SCHEMA = {
         "variables": {"type": "array", "items": {"type": "string"}},
         "point": {"type": "string"},
         "order": {"type": "integer"},
-        "lower_bound": {"type": "string"},
-        "upper_bound": {"type": "string"},
+        "lower_bound": {
+            "type": "string",
+            "description": "Lower integration bound for definite_integral.",
+        },
+        "upper_bound": {
+            "type": "string",
+            "description": "Upper integration bound for definite_integral.",
+        },
         "matrix": {
             "type": "array",
             "items": {"type": "array", "items": _MATRIX_ENTRY_SCHEMA},
@@ -73,8 +79,14 @@ _TOOL_SCHEMA = {
         "n": {"type": "integer"},
         "k": {"type": "integer"},
         "probability": {"type": "string"},
-        "lower": {"type": "string"},
-        "upper": {"type": "string"},
+        "lower": {
+            "type": "string",
+            "description": "Alias for lower_bound on definite_integral; lower limit for summation/numeric ranges.",
+        },
+        "upper": {
+            "type": "string",
+            "description": "Alias for upper_bound on definite_integral; upper limit for summation/numeric ranges.",
+        },
     },
     "required": ["task"],
     "additionalProperties": False,
@@ -111,9 +123,22 @@ class PythonMathSolverTool(BaseTool):
                 False,
             )
 
-        request = MathSolverRequest(
-            **{field: kwargs.get(field) for field in _REQUEST_FIELDS}
-        )
+        request_data = {field: kwargs.get(field) for field in _REQUEST_FIELDS}
+        if task == "definite_integral":
+            if request_data["lower_bound"] is None:
+                request_data["lower_bound"] = request_data["lower"]
+            if request_data["upper_bound"] is None:
+                request_data["upper_bound"] = request_data["upper"]
+            if request_data["lower_bound"] is None or request_data["upper_bound"] is None:
+                return format_math_solver_error(
+                    self.name,
+                    task,
+                    "definite_integral requires both lower_bound and upper_bound. "
+                    "You may pass lower/upper as aliases, but the integration limits must not be missing.",
+                    False,
+                )
+
+        request = MathSolverRequest(**request_data)
 
         try:
             result = await self._service.solve(request)

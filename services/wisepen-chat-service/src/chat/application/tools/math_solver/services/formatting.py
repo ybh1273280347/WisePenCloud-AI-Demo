@@ -66,5 +66,9 @@ def format_math_solver_error(
             f"Task: {task}",
             f"Reason: {reason}",
             f"Retryable: {retryable_text}",
+            "",
+            "Assistant instructions:",
+            "- Treat this as a tool-call argument or computation failure, not as the final answer.",
+            "- If Retryable is true, correct the tool arguments according to Reason and retry.",
         ]
     )

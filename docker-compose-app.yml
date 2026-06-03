@@ -40,6 +40,7 @@ services:
     volumes:
       - ../logs/chat:/logs
       - wisepen-document-temp:/tmp/wisepen-chat-upload-files
+      - ./.runtime/model-cache/datalab:/root/.cache/datalab
 
     ports:
       - "${CHAT_SERVICE_PORT:-9200}:9200"
@@ -87,6 +88,7 @@ services:
       - LOG_LEVEL=warn
       - LOG_STORAGE_ENABLED=true
       - LOG_STORAGE_PATH=/data/logs/browser-logs.duckdb
+      - SKIP_FINGERPRINT_INJECTION=true
 
     volumes:
       - steel-logs:/data/logs

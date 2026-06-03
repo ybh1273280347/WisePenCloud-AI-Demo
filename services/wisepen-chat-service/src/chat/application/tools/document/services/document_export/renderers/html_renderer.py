@@ -2,7 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from chat.application.tools.document.services.document_export.enums import ExportFormat
 from chat.application.tools.document.services.document_export.errors import (
@@ -174,35 +174,78 @@ class HtmlRenderer(DocumentRenderer):
                 assets_dir=assets_dir,
             )
 
-            process = await asyncio.create_subprocess_exec(
-                *args,
-                cwd=str(input_path.parent),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            stdout = await self._run_pandoc_with_compat_fallback(
+                args=args,
+                cwd=input_path.parent,
+                timeout_seconds=timeout_seconds,
             )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=timeout_seconds,
-                )
-            except asyncio.TimeoutError as e:
-                process.kill()
-                _, stderr = await process.communicate()
-                message = self._format_stderr(stderr)
-                raise ExportTimeoutError(
-                    f"HtmlRenderer timed out: {message}"
-                ) from e
-
-            if process.returncode != 0:
-                message = self._format_stderr(stderr)
-                raise ExportRenderError(
-                    "HtmlRenderer failed: Pandoc exited with code "
-                    f"{process.returncode}. {message}"
-                )
 
             html = stdout.decode("utf-8", errors="replace")
             return self._inject_css(html=html, css=css or self.css)
+
+    async def _run_pandoc_with_compat_fallback(
+        self,
+        *,
+        args: List[str],
+        cwd: Path,
+        timeout_seconds: float,
+    ) -> bytes:
+        stdout, stderr, returncode = await self._run_pandoc(
+            args=args,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+        )
+        if returncode == 0:
+            return stdout
+
+        message = self._format_stderr(stderr)
+        if self._should_retry_with_self_contained(message):
+            fallback_args = [
+                "--self-contained" if arg == "--embed-resources" else arg
+                for arg in args
+            ]
+            stdout, stderr, returncode = await self._run_pandoc(
+                args=fallback_args,
+                cwd=cwd,
+                timeout_seconds=timeout_seconds,
+            )
+            if returncode == 0:
+                return stdout
+            message = self._format_stderr(stderr)
+
+        raise ExportRenderError(
+            "HtmlRenderer failed: Pandoc exited with code "
+            f"{returncode}. {message}"
+        )
+
+    async def _run_pandoc(
+        self,
+        *,
+        args: List[str],
+        cwd: Path,
+        timeout_seconds: float,
+    ) -> Tuple[bytes, bytes, int]:
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError as e:
+            process.kill()
+            _, stderr = await process.communicate()
+            message = self._format_stderr(stderr)
+            raise ExportTimeoutError(
+                f"HtmlRenderer timed out: {message}"
+            ) from e
+
+        return stdout, stderr, process.returncode
 
     def _build_pandoc_args(
         self,
@@ -240,6 +283,18 @@ class HtmlRenderer(DocumentRenderer):
 
         args.extend(["--resource-path", os.pathsep.join(resource_paths)])
         return args
+
+    @staticmethod
+    def _should_retry_with_self_contained(message: str) -> bool:
+        lower_message = message.lower()
+        return (
+            "embed-resources" in lower_message
+            and (
+                "unknown option" in lower_message
+                or "unrecognized option" in lower_message
+                or "option" in lower_message
+            )
+        )
 
     def _inject_css(self, *, html: str, css: str) -> str:
         """将 CSS 注入到 HTML 的 <head> 中。"""

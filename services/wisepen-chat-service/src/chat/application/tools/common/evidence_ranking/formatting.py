@@ -69,6 +69,23 @@ def format_evidence_result(result: EvidenceRankResult) -> str:
             lines.append("   Excerpt:")
             lines.extend(f"      {excerpt_line}" for excerpt_line in ev.excerpt.split("\n"))
 
+        if ev.context_preview:
+            lines.append("   Context preview:")
+            for key in [
+                "before",
+                "after",
+                "current_chunk_index",
+                "start_chunk_index",
+                "end_chunk_index",
+                "truncated",
+            ]:
+                if key in ev.context_preview:
+                    lines.append(f"      {key}: {ev.context_preview[key]}")
+            preview_text = ev.context_preview.get("text")
+            if isinstance(preview_text, str) and preview_text:
+                lines.append("      text: |-")
+                lines.extend(f"        {line}" for line in preview_text.splitlines())
+
     lines.append("")
 
     # 特征分析：为下游大模型动态推导 Tool Tips 诱导词

@@ -10,6 +10,7 @@ services:
         HTTPS_PROXY: ${HTTPS_PROXY}
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
+        PRELOAD_TRANSLATION_MODELS: ${PRELOAD_TRANSLATION_MODELS:-true}
 
   sage-math-worker:
     image: ${DOCKER_REGISTRY}/wisepencloud-sage-math-worker:${APP_VERSION}

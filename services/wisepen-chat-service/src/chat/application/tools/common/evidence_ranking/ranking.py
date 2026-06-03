@@ -84,6 +84,9 @@ def rank_evidence(
     content_store: ToolContentStore,
     max_evidence: int = 8,
     max_chunks_per_content: int = MAX_CHUNKS_PER_CONTENT,
+    before: int = 0,
+    after: int = 0,
+    max_context_chars_per_hit: int = 2000,
 ) -> EvidenceRankResult:
     """我要用 query，在这些 content_ids 里找最多 max_evidence 条证据。"""
 
@@ -91,15 +94,25 @@ def rank_evidence(
     found: Dict[str, StoredContent] = {}  # 成功取到的内容
     missing: List[str] = []  # 缓存里找不到的 id
     notes: List[str] = []  # 供调试用的备注，最终塞进结果
+    resolved_content_ids: List[str] = []
 
     # 根据 content_id 从缓存里面获取内容
     # 如果取到，计入 found，否则计入 missing
     for cid in content_ids:
-        stored = content_store.get(content_id=cid, session_id=session_id)
+        resolved_cid, redirect_note = content_store.canonicalize_content_id(
+            content_id=cid,
+            session_id=session_id,
+        )
+        if redirect_note:
+            add_note(notes, redirect_note)
+        if resolved_cid not in resolved_content_ids:
+            resolved_content_ids.append(resolved_cid)
+
+        stored = content_store.get(content_id=resolved_cid, session_id=session_id)
         if stored is not None:
-            found[cid] = stored
+            found[resolved_cid] = stored
         else:
-            missing.append(cid)
+            missing.append(resolved_cid)
 
     if missing:
         add_note(notes, f"content_id not found or expired: {', '.join(missing)}")
@@ -119,7 +132,7 @@ def rank_evidence(
     query_terms = tuple(dict.fromkeys(tokenize_for_bm25(query)))
 
     # content_order: {content_id -> 原始传入顺序}，用于同分时的稳定排序
-    content_order = {cid: i for i, cid in enumerate(content_ids) if cid in found}
+    content_order = {cid: i for i, cid in enumerate(resolved_content_ids) if cid in found}
 
     # 先多选一倍候选，再在域名/块数限制后截取 max_evidence
     candidate_window = max_evidence * 2
@@ -176,6 +189,14 @@ def rank_evidence(
             evidence_type=c.evidence_type,
             matched_reason=c.matched_reason,
             term_hit_stats=c.term_hit_stats,
+            context_preview=_build_context_preview(
+                candidate=c,
+                content_store=content_store,
+                session_id=session_id,
+                before=before,
+                after=after,
+                max_chars=max_context_chars_per_hit,
+            ),
         )
         for c in top_candidates
     ]
@@ -541,6 +562,45 @@ def _make_excerpt(text: str, *, query_terms: Tuple[str, ...] = ()) -> str:
     if end < len(clean):
         excerpt = excerpt.rstrip() + "..."
     return excerpt
+
+
+def _build_context_preview(
+    *,
+    candidate: EvidenceCandidate,
+    content_store: ToolContentStore,
+    session_id: str,
+    before: int,
+    after: int,
+    max_chars: int,
+) -> Dict[str, object]:
+    if candidate.chunk_index < 0 or before <= 0 and after <= 0:
+        return {}
+
+    window = content_store.read_chunk_window_by_index(
+        content_id=candidate.content_id,
+        session_id=session_id,
+        chunk_index=candidate.chunk_index,
+        before_chunks=max(0, before),
+        after_chunks=max(0, after),
+    )
+    if window is None:
+        return {}
+
+    text = window.text
+    truncated = False
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip()
+        truncated = True
+
+    return {
+        "before": before,
+        "after": after,
+        "current_chunk_index": candidate.chunk_index,
+        "start_chunk_index": window.metadata.get("start_chunk_index"),
+        "end_chunk_index": window.metadata.get("end_chunk_index"),
+        "text": text,
+        "truncated": truncated or window.truncated,
+    }
 
 
 def _extract_heading_path(chunk: Optional[ContentChunk], stored: StoredContent) -> Tuple[str, ...]:

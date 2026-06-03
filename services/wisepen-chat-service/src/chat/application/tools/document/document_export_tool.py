@@ -89,17 +89,21 @@ class DocumentExportTool(BaseTool):
         content_ref: Optional[str] = kwargs.get("content_ref")
         content: Optional[str] = kwargs.get("content")
 
-        if content is None or content_ref is None:
+        if content is None and content_ref is None:
             return "[Tool Error] content or content_ref not provided."
 
         if content_ref and content:
-            return "[Tool Error] Content and content cannot be both provided."
+            return "[Tool Error] content and content_ref cannot both be provided."
 
         file_name: Optional[str] = kwargs.get("file_name")
 
         try:
             # 如果是内容引用，则从工具内容缓存读取
             if content_ref:
+                content_ref = self.content_store.resolve_canonical_content_id(
+                    session_id=session_id,
+                    content_id=content_ref,
+                )
                 stored = self.content_store.get(
                     session_id=session_id,
                     content_id=content_ref,

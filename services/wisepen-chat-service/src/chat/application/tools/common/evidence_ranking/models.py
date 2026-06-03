@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +38,7 @@ class RankedEvidence:
     evidence_type: str = "chunk"
     matched_reason: str = ""
     term_hit_stats: Tuple[EvidenceTermHitStat, ...] = ()
+    context_preview: Dict[str, object] = field(default_factory=dict)
 
     @property
     def display_title(self) -> str:

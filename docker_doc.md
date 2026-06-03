@@ -55,22 +55,53 @@ docker compose --progress=plain `
   build chat-service --no-cache
 ```
 
-## 启动全部服务
+## 本地开发：源码挂载 + 自动 reload
+
+日常改 Python 源码用这个，不需要每次重新构建镜像：
 
 ```powershell
-docker compose `
-  -f docker-compose-app.yml `
-  -f docker-compose-build.yml `
-  up -d
+.\deploy-local.ps1
 ```
 
-## 只启动 / 重建 chat-service
+它会叠加 `docker-compose-dev.yml`，把本地源码挂载到容器：
+
+```text
+./services/wisepen-chat-service/src -> /app/services/wisepen-chat-service/src
+./services/wisepen-common/src       -> /app/services/wisepen-common/src
+```
+
+并使用 `uvicorn --reload`。普通 `.py` 小改动会自动同步并触发重载。
+
+## 首次启动或依赖变更：构建后进入开发模式
+
+改了 `pyproject.toml`、`uv.lock`、`Dockerfile` 或系统依赖时才需要构建：
+
+```powershell
+.\deploy-local.ps1 -Build
+```
+
+如果本地内测不需要 `translation_assist` 的 OPUS-MT 翻译模型，可以跳过翻译模型预热：
+
+```powershell
+.\deploy-local.ps1 -Build -SkipTranslationPreload
+```
+
+## 生产镜像模式：启动全部服务
 
 ```powershell
 docker compose `
   -f docker-compose-app.yml `
   -f docker-compose-build.yml `
-  up -d --force-recreate chat-service
+  up -d --build --force-recreate
+```
+
+## 生产镜像模式：只启动 / 重建 chat-service
+
+```powershell
+docker compose `
+  -f docker-compose-app.yml `
+  -f docker-compose-build.yml `
+  up -d --build --force-recreate chat-service
 ```
 
 ## 停止全部服务
@@ -581,22 +612,33 @@ docker compose --progress=plain `
 
 # 14. 当前项目最常用命令组合
 
-## 构建 chat-service
+## 本地开发启动 / 同步 chat-service 源码
+
+日常改 Python 源码用这个，容器会挂载本地 `src` 并自动 reload：
 
 ```powershell
-docker compose --progress=plain `
-  -f docker-compose-app.yml `
-  -f docker-compose-build.yml `
-  build chat-service
+.\deploy-local.ps1
 ```
 
-## 启动 chat-service
+## 依赖变更后重建 chat-service
+
+```powershell
+.\deploy-local.ps1 -Build
+```
+
+本地不需要翻译工具时可以跳过 OPUS-MT 模型预热：
+
+```powershell
+.\deploy-local.ps1 -Build -SkipTranslationPreload
+```
+
+## 生产镜像模式启动 chat-service
 
 ```powershell
 docker compose `
   -f docker-compose-app.yml `
   -f docker-compose-build.yml `
-  up -d --force-recreate chat-service
+  up -d --build --force-recreate chat-service
 ```
 
 ## 查看 chat-service 日志
@@ -628,4 +670,3 @@ docker builder prune -a -f
 ```powershell
 docker system df
 ```
-

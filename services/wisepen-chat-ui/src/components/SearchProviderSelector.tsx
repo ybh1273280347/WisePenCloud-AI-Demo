@@ -1,15 +1,15 @@
-import type {CSSProperties} from "react";
-import {useEffect, useRef, useState} from "react";
-import {createPortal} from "react-dom";
+import type { CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-import type {SearchProviderConfig, SearchProviderMode, SearchProviderName,} from "../api/searchProvider";
+import type { SearchProviderConfig, SearchProviderMode, SearchProviderName, } from "../api/searchProvider";
 import {
-    clearCustomSearchProvider,
-    getSearchProviderConfig,
-    searchProviders,
-    setCustomSearchProvider,
-    setSearchProviderMode,
-    verifyCustomSearchProvider,
+  clearCustomSearchProvider,
+  getSearchProviderConfig,
+  searchProviders,
+  setCustomSearchProvider,
+  setSearchProviderMode,
+  verifyCustomSearchProvider,
 } from "../api/searchProvider";
 
 type SearchProviderSelectorProps = {
@@ -26,21 +26,13 @@ const DEFAULT_PROVIDER: SearchProviderName = "serper";
 const defaultConfig: SearchProviderConfig = {
   mode: "default",
   provider: null,
-  keyPrefix4: null,
-  keyLast4: null,
-  status: "unset",
-  lastVerifiedAt: null,
-  lastErrorCode: null,
+  maskedKey: null,
+  isValid: false,
 };
 
 const SEARCH_PROVIDER_STATUS_LABELS: Record<string, string> = {
-  unset: "unset",
   valid: "valid",
-  untested: "untested",
   invalid: "invalid",
-  quota_exhausted: "quota",
-  rate_limited: "limited",
-  provider_error: "error",
 };
 
 export function SearchProviderSelector({
@@ -60,9 +52,9 @@ export function SearchProviderSelector({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  const providerStatus = config.status;
+  const providerStatus = config.isValid ? "valid" : "invalid";
   const providerStatusLabel =
-    SEARCH_PROVIDER_STATUS_LABELS[providerStatus] ?? "unset";
+    SEARCH_PROVIDER_STATUS_LABELS[providerStatus] ?? "invalid";
 
   const draftProviderLabel =
     searchProviders.find((item) => item.value === provider)?.label ?? "未配置";
@@ -70,10 +62,7 @@ export function SearchProviderSelector({
   const triggerValue =
     draftMode === "custom" ? `Custom · ${draftProviderLabel}` : "Default";
 
-  const maskedKey =
-    config.keyPrefix4 && config.keyLast4
-      ? `${config.keyPrefix4}••••${config.keyLast4}`
-      : "未保存";
+  const maskedKey = config.maskedKey ?? "未保存";
 
   useEffect(() => {
     let alive = true;
@@ -200,7 +189,7 @@ export function SearchProviderSelector({
       return;
     }
 
-    if (config.provider && config.keyLast4 && !apiKey) {
+    if (config.provider && config.maskedKey && !apiKey) {
       await run(() => setSearchProviderMode("custom"));
       return;
     }
@@ -258,10 +247,8 @@ export function SearchProviderSelector({
       setDraftMode(nextConfig.mode);
       setProvider(nextConfig.provider ?? provider);
 
-      if (nextConfig.status === "valid") {
+      if (nextConfig.isValid) {
         setVerifyResult({ success: true, message: "验证成功" });
-      } else if (nextConfig.lastErrorCode) {
-        setVerifyResult({ success: false, message: nextConfig.lastErrorCode });
       } else {
         setVerifyResult({ success: false, message: "验证失败" });
       }
@@ -298,196 +285,185 @@ export function SearchProviderSelector({
 
       {isOpen
         ? createPortal(
-            <div
-              ref={dropdownRef}
-              className="search-provider-panel"
-              style={dropdownStyle}
-            >
-              <div className="search-provider-panel-header">
-                <span className="search-provider-panel-title">搜索源</span>
-                <span
-                  className={`search-provider-status status-${providerStatus}`}
-                >
-                  {providerStatusLabel}
-                </span>
-              </div>
-
-              <div
-                className="search-mode-segmented"
-                role="group"
-                aria-label="搜索模式"
+          <div
+            ref={dropdownRef}
+            className="search-provider-panel"
+            style={dropdownStyle}
+          >
+            <div className="search-provider-panel-header">
+              <span className="search-provider-panel-title">搜索源</span>
+              <span
+                className={`search-provider-status status-${providerStatus}`}
               >
-                <button
-                  type="button"
-                  className={draftMode === "default" ? "active" : ""}
-                  onClick={() => void selectMode("default")}
-                  disabled={busy}
-                >
-                  Default
-                </button>
+                {providerStatusLabel}
+              </span>
+            </div>
 
-                <button
-                  type="button"
-                  className={draftMode === "custom" ? "active" : ""}
-                  onClick={() => void selectMode("custom")}
-                  disabled={busy}
-                >
-                  Custom
-                </button>
-              </div>
+            <div
+              className="search-mode-segmented"
+              role="group"
+              aria-label="搜索模式"
+            >
+              <button
+                type="button"
+                className={draftMode === "default" ? "active" : ""}
+                onClick={() => void selectMode("default")}
+                disabled={busy}
+              >
+                Default
+              </button>
 
-              {draftMode === "custom" ? (
-                <div className="custom-provider-card">
-                  <label className="custom-provider-row">
-                    <span>供应商</span>
+              <button
+                type="button"
+                className={draftMode === "custom" ? "active" : ""}
+                onClick={() => void selectMode("custom")}
+                disabled={busy}
+              >
+                Custom
+              </button>
+            </div>
 
-                    <div className="provider-custom-select">
-                      <button
-                        type="button"
-                        className={`provider-custom-trigger ${
-                          providerMenuOpen ? "open" : ""
+            {draftMode === "custom" ? (
+              <div className="custom-provider-card">
+                <label className="custom-provider-row">
+                  <span>供应商</span>
+
+                  <div className="provider-custom-select">
+                    <button
+                      type="button"
+                      className={`provider-custom-trigger ${providerMenuOpen ? "open" : ""
                         }`}
-                        onClick={() => {
-                          if (!busy) {
-                            setProviderMenuOpen((current) => !current);
-                          }
-                        }}
-                        disabled={busy}
-                        aria-haspopup="listbox"
-                        aria-expanded={providerMenuOpen}
-                      >
-                        <span className="provider-custom-value">
-                          {draftProviderLabel}
-                        </span>
-                        <span
-                          className={`provider-custom-arrow ${
-                            providerMenuOpen ? "open" : ""
+                      onClick={() => {
+                        if (!busy) {
+                          setProviderMenuOpen((current) => !current);
+                        }
+                      }}
+                      disabled={busy}
+                      aria-haspopup="listbox"
+                      aria-expanded={providerMenuOpen}
+                    >
+                      <span className="provider-custom-value">
+                        {draftProviderLabel}
+                      </span>
+                      <span
+                        className={`provider-custom-arrow ${providerMenuOpen ? "open" : ""
                           }`}
-                        >
-                          ╲╱
-                        </span>
-                      </button>
+                      >
+                        ╲╱
+                      </span>
+                    </button>
 
-                      {providerMenuOpen ? (
-                        <div
-                          className="provider-custom-menu"
-                          role="listbox"
-                          aria-label="搜索供应商"
-                        >
-                          {searchProviders.map((item) => {
-                            const selected = item.value === provider;
+                    {providerMenuOpen ? (
+                      <div
+                        className="provider-custom-menu"
+                        role="listbox"
+                        aria-label="搜索供应商"
+                      >
+                        {searchProviders.map((item) => {
+                          const selected = item.value === provider;
 
-                            return (
-                              <div
-                                key={item.value}
-                                className={`provider-custom-option ${
-                                  selected ? "selected" : ""
+                          return (
+                            <div
+                              key={item.value}
+                              className={`provider-custom-option ${selected ? "selected" : ""
                                 }`}
-                                role="option"
-                                aria-selected={selected}
-                                tabIndex={0}
-                                onClick={() =>
+                              role="option"
+                              aria-selected={selected}
+                              tabIndex={0}
+                              onClick={() =>
+                                changeProvider(
+                                  item.value as SearchProviderName,
+                                )
+                              }
+                              onKeyDown={(event) => {
+                                if (
+                                  event.key === "Enter" ||
+                                  event.key === " "
+                                ) {
+                                  event.preventDefault();
                                   changeProvider(
                                     item.value as SearchProviderName,
-                                  )
+                                  );
                                 }
-                                onKeyDown={(event) => {
-                                  if (
-                                    event.key === "Enter" ||
-                                    event.key === " "
-                                  ) {
-                                    event.preventDefault();
-                                    changeProvider(
-                                      item.value as SearchProviderName,
-                                    );
-                                  }
 
-                                  if (event.key === "Escape") {
-                                    setProviderMenuOpen(false);
-                                  }
-                                }}
-                              >
-                                <span>{item.label}</span>
-                                {selected ? (
-                                  <span className="provider-custom-check">
-                                    ✓
-                                  </span>
-                                ) : null}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                    </div>
-                  </label>
-
-                  <label className="custom-provider-row">
-                    <span>API Key</span>
-                    <input
-                      value={apiKey}
-                      onChange={(event) => changeApiKey(event.target.value)}
-                      type="password"
-                      autoComplete="off"
-                      placeholder={maskedKey}
-                      disabled={busy}
-                    />
-                  </label>
-
-                  {config.lastErrorCode ? (
-                    <div className="custom-provider-meta">
-                      <span>{config.lastErrorCode}</span>
-                    </div>
-                  ) : null}
-
-                  <div className="custom-provider-actions">
-                    <button
-                      type="button"
-                      onClick={() => void saveCustomProvider()}
-                      disabled={busy || !apiKey}
-                    >
-                      保存
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => void handleVerify()}
-                      disabled={busy || !config.provider || !config.keyLast4}
-                    >
-                      验证
-                    </button>
-
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => void clearCustomProvider()}
-                      disabled={busy || !config.provider}
-                    >
-                      清除
-                    </button>
+                                if (event.key === "Escape") {
+                                  setProviderMenuOpen(false);
+                                }
+                              }}
+                            >
+                              <span>{item.label}</span>
+                              {selected ? (
+                                <span className="provider-custom-check">
+                                  ✓
+                                </span>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
+                </label>
 
-                  {verifyResult || (errorText && draftMode === "custom") ? (
-                    <div
-                      className={`search-provider-verify ${
-                        verifyResult
-                          ? verifyResult.success
-                            ? "verify-success"
-                            : "verify-error"
-                          : "verify-error"
-                      }`}
-                    >
-                      {verifyResult
-                        ? `${verifyResult.success ? "✓" : "✗"} ${
-                            verifyResult.message
-                          }`
-                        : errorText}
-                    </div>
-                  ) : null}
+                <label className="custom-provider-row">
+                  <span>API Key</span>
+                  <input
+                    value={apiKey}
+                    onChange={(event) => changeApiKey(event.target.value)}
+                    type="password"
+                    autoComplete="off"
+                    placeholder={maskedKey}
+                    disabled={busy}
+                  />
+                </label>
+
+                <div className="custom-provider-actions">
+                  <button
+                    type="button"
+                    onClick={() => void saveCustomProvider()}
+                    disabled={busy || !apiKey}
+                  >
+                    保存
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleVerify()}
+                    disabled={busy || !config.provider || !config.maskedKey}
+                  >
+                    验证
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void clearCustomProvider()}
+                    disabled={busy || !config.provider}
+                  >
+                    清除
+                  </button>
                 </div>
-              ) : null}
-            </div>,
-            document.body,
-          )
+
+                {verifyResult || (errorText && draftMode === "custom") ? (
+                  <div
+                    className={`search-provider-verify ${verifyResult
+                      ? verifyResult.success
+                        ? "verify-success"
+                        : "verify-error"
+                      : "verify-error"
+                      }`}
+                  >
+                    {verifyResult
+                      ? `${verifyResult.success ? "✓" : "✗"} ${verifyResult.message
+                      }`
+                      : errorText}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>,
+          document.body,
+        )
         : null}
     </div>
   );

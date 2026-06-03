@@ -60,6 +60,27 @@ TOOL_SCHEMA = {
             "description": "Maximum number of ranked evidence snippets to return.",
             "default": 8,
         },
+        "before": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "default": 0,
+            "description": "Optional number of chunks before each hit to include as a lightweight context preview.",
+        },
+        "after": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "default": 0,
+            "description": "Optional number of chunks after each hit to include as a lightweight context preview.",
+        },
+        "max_context_chars_per_hit": {
+            "type": "integer",
+            "minimum": 200,
+            "maximum": 4000,
+            "default": 2000,
+            "description": "Maximum characters of context preview per ranked hit.",
+        },
     },
     "required": ["query", "content_ids"],
     "additionalProperties": False,
@@ -104,6 +125,19 @@ class EvidenceRankTool(BaseTool):
         if not isinstance(max_evidence, int) or max_evidence < 1:
             return "[Tool Error] max_evidence must be a positive integer."
 
+        before = kwargs.get("before", 0)
+        after = kwargs.get("after", 0)
+        max_context_chars_per_hit = kwargs.get("max_context_chars_per_hit", 2000)
+        if not isinstance(before, int) or not (0 <= before <= 2):
+            return "[Tool Error] before must be an integer between 0 and 2."
+        if not isinstance(after, int) or not (0 <= after <= 2):
+            return "[Tool Error] after must be an integer between 0 and 2."
+        if (
+            not isinstance(max_context_chars_per_hit, int)
+            or not (200 <= max_context_chars_per_hit <= 4000)
+        ):
+            return "[Tool Error] max_context_chars_per_hit must be an integer between 200 and 4000."
+
         loop = asyncio.get_running_loop()
         try:
             result = await loop.run_in_executor(
@@ -115,6 +149,9 @@ class EvidenceRankTool(BaseTool):
                 self._content_store,
                 max_evidence,
                 MAX_CHUNKS_PER_CONTENT,
+                before,
+                after,
+                max_context_chars_per_hit,
             )
 
             return format_evidence_result(result)

@@ -1,13 +1,14 @@
-import type {ConnectionStatus, ModelGroups} from "../types/chat";
-import {ModelSelector} from "./ModelSelector";
-import {SearchProviderSelector} from "./SearchProviderSelector";
-import {UserPreferencesSelector} from "./UserPreferencesSelector";
+import { apiBaseUrl } from "../api/client";
+import type { ConnectionStatus, ModelGroups } from "../types/chat";
+import { ModelSelector } from "./ModelSelector";
+import { SearchProviderSelector } from "./SearchProviderSelector";
 
 type ChatHeaderProps = {
   title: string;
   modelName?: string;
   modelGroups: ModelGroups;
   selectedModelId: number | null;
+  sessionId: string | null;
   onModelChange: (modelId: number | null) => void;
   connectionStatus: ConnectionStatus;
   streaming: boolean;
@@ -20,6 +21,7 @@ export function ChatHeader({
   modelName,
   modelGroups,
   selectedModelId,
+  sessionId,
   onModelChange,
   connectionStatus,
   streaming,
@@ -51,13 +53,37 @@ export function ChatHeader({
         <SearchProviderSelector
           disabled={streaming}
         />
-        <UserPreferencesSelector disabled={streaming} />
         <span className={`header-pill connection-pill connection-pill-${connectionStatus}`}>
           <span className="status-dot" />
           {statusLabel}
         </span>
         <span className="header-pill">{messageCount} 条消息</span>
         <span className="header-pill">{fileCount} 个文件</span>
+        <details className="developer-debug">
+          <summary>debug</summary>
+          <dl>
+            <div>
+              <dt>api</dt>
+              <dd>{apiBaseUrl || "vite proxy"}</dd>
+            </div>
+            <div>
+              <dt>session</dt>
+              <dd>{sessionId || "none"}</dd>
+            </div>
+            <div>
+              <dt>model</dt>
+              <dd>{selectedModelId ?? "auto"}</dd>
+            </div>
+            <div>
+              <dt>status</dt>
+              <dd>{connectionStatus}</dd>
+            </div>
+            <div>
+              <dt>streaming</dt>
+              <dd>{String(streaming)}</dd>
+            </div>
+          </dl>
+        </details>
       </div>
     </header>
   );

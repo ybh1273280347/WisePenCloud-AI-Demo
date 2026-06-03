@@ -146,6 +146,10 @@ class ContentStore:
         )
         return stored.content_id if stored else None
 
+    def put_stored_content(self, stored: StoredContent) -> None:
+        """重写已存在的 StoredContent，用于补充协议 metadata。"""
+        self._repository.put(stored)
+
     def get_content(self, *, content_id: str, scope_id: str) -> Optional[StoredContent]:
         """从缓存中获取已存储的内容。
 

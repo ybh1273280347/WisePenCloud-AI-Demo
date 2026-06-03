@@ -4,8 +4,9 @@ from chat.application.tools.document.services.document_export.models import Gene
 from chat.application.tools.document.services.document_export.utils.path import sanitize_path_segment
 
 _DOWNLOAD_REF_USAGE_NOTE = (
-    "download_ref is for user download and preview only. Do not pass download_ref to "
-    "web_fetch, document_parse, evidence_rank, or tool_content_read."
+    "download_ref is for user download, preview, or document_convert input only. "
+    "Do not pass download_ref to web_fetch, document_parse, evidence_rank, or "
+    "tool_content_read."
 )
 
 _DOWNLOAD_PATH = "/api/document-export/download"

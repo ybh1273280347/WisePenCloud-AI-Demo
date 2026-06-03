@@ -14,6 +14,7 @@ export type SseEvent = Record<string, unknown> & {
     | "start-step"
     | "finish-step"
     | "source-url"
+    | "source-urls"
     | "error"
     | "abort";
   _raw?: string;
@@ -28,4 +29,5 @@ export type SseEvent = Record<string, unknown> & {
   reason?: string;
   sourceId?: string;
   url?: string;
+  urls?: string;
 };

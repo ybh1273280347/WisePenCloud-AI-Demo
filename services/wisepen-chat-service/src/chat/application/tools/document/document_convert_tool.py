@@ -9,10 +9,11 @@ from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_fail
 
 _TOOL_DESCRIPTION = (
-    "Converts a server-side temporary document file_ref into a generated downloadable "
-    "file. Use this when the user wants an already-ingested document file converted "
-    "into markdown, html, pdf, docx, or txt.\n\n"
-    "The input MUST be a file_ref value, not a content_id.\n"
+    "Converts a server-side temporary document file_ref or a generated document "
+    "download_ref into a generated downloadable file. Use this when the user wants "
+    "an already-ingested or already-generated document converted into markdown, "
+    "html, pdf, docx, or txt.\n\n"
+    "The input MUST be either file_ref or download_ref, not a content_id.\n"
     "This tool does not accept raw content. Use document_export for direct content "
     "or cached ToolContent content_ref.\n"
     "The conversion service first converts the source file into Markdown, then uses "
@@ -27,8 +28,17 @@ _TOOL_SCHEMA = {
             "type": "string",
             "minLength": 1,
             "description": (
-                "file_ref value for a server-side temporary document. "
+                "file_ref value for a server-side temporary document, or a "
+                "download_ref returned by document_export/document_convert. "
                 "Do not pass cnt_* content_id values."
+            ),
+        },
+        "download_ref": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "download_ref returned by document_export/document_convert. "
+                "Use this to convert a previously generated downloadable document."
             ),
         },
         "target_format": {
@@ -55,7 +65,7 @@ _TOOL_SCHEMA = {
             ),
         },
     },
-    "required": ["file_ref", "target_format"],
+    "required": ["target_format"],
     "additionalProperties": False,
 }
 
@@ -86,15 +96,23 @@ class DocumentConvertTool(BaseTool):
         if not user_id:
             return "[Tool Error] Missing user_id in execution context."
 
-        file_ref = kwargs["file_ref"]
+        file_ref = kwargs.get("file_ref")
+        download_ref: Optional[str] = kwargs.get("download_ref")
+        if file_ref is not None and download_ref is not None:
+            return "[Tool Error] Provide only one of file_ref or download_ref."
+        if file_ref is None:
+            file_ref = download_ref
+        if file_ref is None:
+            return "[Tool Error] Missing file_ref or download_ref."
+
         if file_ref.startswith("cnt_"):
             return (
-                "[Tool Error] Invalid file_ref parameter: content_id values "
+                "[Tool Error] Invalid source reference: content_id values "
                 "must be passed to tool_content_read, evidence_rank, or document_export."
             )
         if file_ref.startswith(("http://", "https://")):
             return (
-                "[Tool Error] Invalid file_ref parameter: URLs must be passed "
+                "[Tool Error] Invalid source reference: URLs must be passed "
                 "to web_fetch, not document_convert."
             )
 
