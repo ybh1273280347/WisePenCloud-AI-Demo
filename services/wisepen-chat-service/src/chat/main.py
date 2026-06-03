@@ -7,14 +7,14 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from beanie import init_beanie
-from chat.application.rag.implementations.persistence.mongodb.documents.chunk_documents import (
+from chat.application.rag.implementations.persistence.mongodb.entities.chunk_documents import (
     RetrieveChunkDocument,
     SearchChunkDocument,
 )
-from chat.application.rag.implementations.persistence.mongodb.documents.manifest_documents import (
+from chat.application.rag.implementations.persistence.mongodb.entities.manifest_documents import (
     RagIndexManifestDocument,
 )
-from chat.application.rag.implementations.persistence.mongodb.documents.resource_documents import (
+from chat.application.rag.implementations.persistence.mongodb.entities.resource_documents import (
     DocumentResourceDocument,
     NoteResourceDocument,
 )
@@ -24,7 +24,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from chat.api.endpoints import (
     chat as chat_endpoints,
     chat_file as chat_file_endpoints,
-    document_export as document_export_endpoints,
     memory as memory_endpoints,
     model as model_endpoints,
     rag as rag_endpoints,
@@ -187,7 +186,6 @@ container.wire(
         model_endpoints,
         rag_endpoints,
         search_provider_endpoints,
-        document_export_endpoints,
         chat_file_endpoints,
     ]
 )
@@ -208,7 +206,6 @@ app.add_middleware(
 )
 app.add_middleware(SecurityHeaderMiddleware, from_source_secret=settings.FROM_SOURCE_SECRET)
 setup_global_exception_handlers(app, is_dev=settings.DEV)
-app.include_router(document_export_endpoints.router)
 app.include_router(api_router, prefix="/chat")
 
 

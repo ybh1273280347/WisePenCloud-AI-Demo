@@ -95,10 +95,6 @@ _TOOL_SCHEMA = {
             ),
         },
     },
-    "oneOf": [
-        {"required": ["urls"]},
-        {"required": ["from_search_content_id", "source_ids"]},
-    ],
     "additionalProperties": False,
 }
 
@@ -166,8 +162,8 @@ class WebFetchTool(BaseTool):
         if isinstance(targets_or_error, str):
             return targets_or_error
 
-        targets = targets_or_error
-        if not targets:
+        targets, warnings = targets_or_error
+        if not targets and not warnings:
             return (
                 "[Tool Error] Missing required input: pass urls, or pass "
                 "from_search_content_id with source_ids."
@@ -182,6 +178,7 @@ class WebFetchTool(BaseTool):
             user_id=user_id,
             session_id=session_id,
             results=results,
+            warnings=warnings,
             target_contexts=[target.source_context for target in targets],
             objective=raw_objective.strip() if raw_objective else None,
         )
@@ -192,6 +189,7 @@ class WebFetchTool(BaseTool):
             user_id: str,
             session_id: str,
             results: List[FetchResultItem],
+            warnings: List[str],
             target_contexts: List[Optional[FetchSourceContext]],
             objective: Optional[str],
     ) -> str:
@@ -201,8 +199,15 @@ class WebFetchTool(BaseTool):
         success_count = sum(1 for r in results if r.success)
         fail_count = len(results) - success_count
         lines.append(
-            f"Total: {len(results)} URLs，{success_count} 个已完成，{fail_count} 个未完成。"
+            f"Total: {len(results)} URLs，{success_count} 个已完成，{fail_count} 个未完成。\n"
         )
+
+        if warnings:
+            lines.append("")
+            lines.append(f"{len(warnings)} 个 URL 被安全策略拦截。")
+            lines.append("Warnings:")
+            for warning in warnings:
+                lines.append(f"- {warning.strip()}")
 
         for item, source_context in zip(results, target_contexts):
             if item.success:
@@ -347,10 +352,48 @@ def _resolve_fetch_targets(
         session_id: str,
         kwargs: Dict[str, Any],
         content_store: ToolContentStore,
-) -> Union[List[FetchTarget], str]:
+):
     """两路输入路由统一解析器。"""
-    if "urls" in kwargs:
-        return [FetchTarget(url=url) for url in _normalize_fetch_urls(kwargs["urls"])]
+    has_urls = "urls" in kwargs
+    has_from_search_content_id = "from_search_content_id" in kwargs
+    has_source_ids = "source_ids" in kwargs
+    has_search_mode = has_from_search_content_id or has_source_ids
+
+    if has_urls and has_search_mode:
+        return (
+            "[Tool Error] web_fetch accepts exactly one input mode: pass urls, "
+            "or pass from_search_content_id with source_ids."
+        )
+
+    if not has_urls and not has_search_mode:
+        return (
+            "[Tool Error] Missing required input: pass urls, or pass "
+            "from_search_content_id with source_ids."
+        )
+
+    if has_urls:
+        urls = _normalize_fetch_urls(kwargs["urls"])
+        if not urls:
+            return "[Tool Error] urls contains no valid http:// or https:// URL."
+
+        targets: List[FetchTarget] = []
+        warnings: List[str] = []
+        for url in urls:
+            try:
+                safe_url = validate_public_http_url(url)
+            except UrlSecurityError as e:
+                warnings.append(f"[Security Warning] URL {url} rejected by security policy: {e}")
+                continue
+
+            targets.append(FetchTarget(url=safe_url))
+
+        return targets, warnings
+
+    if not has_from_search_content_id or not has_source_ids:
+        return (
+            "[Tool Error] web_search source mode requires both "
+            "from_search_content_id and source_ids."
+        )
 
     resolved_or_error = _resolve_source_id_targets(
         session_id=session_id,
@@ -361,15 +404,16 @@ def _resolve_fetch_targets(
     if isinstance(resolved_or_error, str):
         return resolved_or_error
 
+    raw_targets, warnings = resolved_or_error
     targets: List[FetchTarget] = []
     seen_urls: Set[str] = set()
-    for target in resolved_or_error:
+    for target in raw_targets:
         if target.url in seen_urls:
             continue
         seen_urls.add(target.url)
         targets.append(target)
 
-    return targets
+    return targets, warnings
 
 
 def _resolve_source_id_targets(
@@ -378,7 +422,7 @@ def _resolve_source_id_targets(
         from_search_content_id: str,
         source_ids: List[str],
         content_store: ToolContentStore,
-) -> Union[List[FetchTarget], str]:
+):
     """从内容存贮区中读取先前的搜索凭据包，依 source_ids 检索恢复原始 URL。"""
     stored = content_store.get(
         content_id=from_search_content_id,
@@ -419,6 +463,7 @@ def _resolve_source_id_targets(
         )
 
     targets: List[FetchTarget] = []
+    warnings: List[str] = []
     for source_id in source_ids:
         item = results_by_source_id[source_id]
         raw_url = item.get("urls")
@@ -432,9 +477,9 @@ def _resolve_source_id_targets(
         try:
             url = validate_public_http_url(urls[0])
         except UrlSecurityError as e:
-            return (
-                f"[Tool Error] source_id {source_id} URL rejected by security policy: {e}"
-            )
+            warnings.append(f"[Tool Error] source_id {source_id} URL rejected by security policy: {e}")
+            continue
+
         title = item.get("title")
         domain = item.get("domain")
         targets.append(
@@ -450,7 +495,7 @@ def _resolve_source_id_targets(
             )
         )
 
-    return targets
+    return targets, warnings
 
 
 def _normalize_fetch_urls(raw_urls: List[str]) -> List[str]:

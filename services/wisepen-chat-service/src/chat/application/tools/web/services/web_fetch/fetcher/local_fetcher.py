@@ -431,12 +431,39 @@ class LocalScriptFetcher(BaseFetcher):
             log_error("LocalScriptFetcher worker pool 启动", e, url=url)
             return None
 
-        worker = await self._idle_workers.get()
+        try:
+            worker = await asyncio.wait_for(
+                self._idle_workers.get(),
+                timeout=self._timeout,
+            )
+        except asyncio.TimeoutError:
+            log_fail(
+                "LocalScriptFetcher worker pool",
+                f"idle worker checkout timeout: {self._timeout}s",
+                url=url,
+                started=self._started,
+                idle_qsize=self._idle_workers.qsize(),
+                worker_count=self._worker_count,
+                worker_concurrency=self._worker_concurrency,
+            )
+
+            self._started = False
+            self._drain_idle_workers()
+            return None
 
         try:
             return await worker.fetch(url)
+        except Exception as e:
+            log_error(
+                "LocalScriptFetcher worker pool fetch",
+                e,
+                url=url,
+                worker=worker.index,
+            )
+            return None
         finally:
-            await self._idle_workers.put(worker)
+            if self._started:
+                await self._idle_workers.put(worker)
 
     async def close(self) -> None:
         """关闭所有工作器并清空闲队列。"""

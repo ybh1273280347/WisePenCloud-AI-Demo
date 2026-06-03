@@ -25,8 +25,8 @@ from chat.application.tools.document.services.document_parse.ocr.image_adapter i
 from chat.application.tools.document.services.document_parse.parser.base import (
     BaseDocumentParser,
 )
-from chat.application.tools.document.services.document_parse.parser.pdf.marker import (
-    MarkerPdfExtractor,
+from chat.application.tools.document.services.document_parse.parser.pdf.docling import (
+    DoclingPdfExtractor,
 )
 from chat.application.tools.document.services.document_parse.parser.pdf.page_classifier import (
     PageClassifier,
@@ -40,7 +40,7 @@ from chat.application.tools.document.services.document_parse.utils.text import (
 )
 from common.logger import log_fail
 
-_BACKEND_MARKER = ParserName.MARKER_PDF
+_BACKEND_DOCLING = ParserName.DOCLING_PDF_TABLE_NO_OCR
 _BACKEND_PYMUPDF = ParserName.PYMUPDF
 _BACKEND_PADDLEOCR = ParserName.PADDLEOCR
 _BACKEND_NONE = "none"
@@ -61,7 +61,7 @@ class PageDraft:
 
 
 class PdfParser(BaseDocumentParser):
-    """PDF 解析器，编排 Marker 全文提取与 PyMuPDF 逐页 fallback 流程，包含 OCR 和表格抽取。"""
+    """PDF 解析器，编排 Docling 全文提取与 PyMuPDF 逐页 fallback 流程，包含 OCR 和表格抽取。"""
 
     @property
     def name(self) -> ParserName:
@@ -78,42 +78,44 @@ class PdfParser(BaseDocumentParser):
         *,
         classifier: PageClassifier,
         ocr_adapter: OcrImageAdapter,
-        marker_extractor: MarkerPdfExtractor,
+        docling_extractor: DoclingPdfExtractor,
         table_extractor: TableExtractor,
         scanned_ocr_max_pages: int = 80,
         scanned_ocr_concurrency: int = 2,
         max_pages: int = 80,
-        marker_min_text_chars: int = 30,
+        docling_min_text_chars: int = 30,
         render_dpi: int = 220,
         render_max_image_pixels: int = 36_000_000,
         render_alpha: bool = False,
     ) -> None:
-        """初始化 PdfParser，注入页面分类器、OCR 适配器、Marker 提取器、表格提取器及渲染参数。"""
+        """初始化 PdfParser，注入页面分类器、OCR 适配器、Docling 提取器、表格提取器及渲染参数。"""
         self.classifier = classifier
         self.ocr_adapter = ocr_adapter
-        self.marker_extractor = marker_extractor
+        self.docling_extractor = docling_extractor
         self.table_extractor = table_extractor
         self._scanned_ocr_max_pages = scanned_ocr_max_pages
         self._scanned_ocr_concurrency = max(1, scanned_ocr_concurrency)
         self._max_pages = max_pages
-        self._marker_min_text_chars = marker_min_text_chars
+        self._docling_min_text_chars = docling_min_text_chars
         self._render_dpi = render_dpi
         self._render_max_image_pixels = render_max_image_pixels
         self._render_alpha = render_alpha
 
     async def parse(self, path: Path) -> DocumentParseResult:
-        """Marker 整文解析优先；失败或文本过短时降级到 PyMuPDF fallback 流程。"""
-        try:
-            marker_result = await asyncio.to_thread(self.marker_extractor.extract, path)
-            text = normalize_text(marker_result.text)
+        """Docling 整文解析优先；失败或文本过短时降级到 PyMuPDF fallback 流程。"""
+        warnings: List[str] = []
 
-            if len(text) >= self._marker_min_text_chars:
+        try:
+            docling_result = await asyncio.to_thread(self.docling_extractor.extract, path)
+            text = normalize_text(docling_result.text)
+
+            if len(text) >= self._docling_min_text_chars:
                 page = ParsedPage(
                     page_index=0,
                     text=text,
-                    page_type=PageType.MARKER,
+                    page_type=PageType.TEXT,
                     tables=[],
-                    metadata={"backend": _BACKEND_MARKER},
+                    metadata={"backend": _BACKEND_DOCLING},
                 )
                 return DocumentParseResult(
                     text=text,
@@ -124,39 +126,37 @@ class PdfParser(BaseDocumentParser):
                     metadata={
                         "parser": self.name,
                         "selected_parser": self.name,
-                        "pdf_backend": _BACKEND_MARKER,
+                        "pdf_backend": _BACKEND_DOCLING,
                         "fallback_used": False,
-                        "page_count": None,
+                        "ocr_backend": _BACKEND_PADDLEOCR,
+                        "page_count": docling_result.metadata.get("page_count"),
                         "parsed_page_count": 1,
-                        "marker_metadata": marker_result.metadata,
+                        "docling_metadata": docling_result.metadata,
                     },
                 )
 
             reason = "empty_text" if not text else "text_too_short"
-            return await self._parse_with_pymupdf(
-                path,
-                marker_warning=(
-                    f"marker_failed: {reason}: length={len(text)}, "
-                    f"min_text_chars={self._marker_min_text_chars}"
-                ),
+            warnings.append(
+                f"docling_failed: {reason}: length={len(text)}, "
+                f"min_text_chars={self._docling_min_text_chars}"
             )
 
         except Exception as e:
-            return await self._parse_with_pymupdf(
-                path,
-                marker_warning=f"marker_failed: {type(e).__name__}: {e}",
-            )
+            warnings.append(f"docling_failed: {type(e).__name__}: {e}")
+
+        return await self._parse_with_pymupdf(
+            path,
+            warnings=warnings,
+        )
 
     async def _parse_with_pymupdf(
         self,
         path: Path,
         *,
-        marker_warning: Optional[str] = None,
+        warnings: Optional[List[str]] = None,
     ) -> DocumentParseResult:
         """PyMuPDF 降级解析：分类页面 → 提取草稿 → OCR 扫描页 → 输出结果。"""
-        warnings: List[str] = []
-        if marker_warning:
-            warnings.append(marker_warning)
+        warnings = list(warnings or [])
 
         with fitz.open(str(path)) as doc:
             total_page_count = len(doc)

@@ -42,7 +42,7 @@ class Mem0Adapter(MemoryProvider):
                 "provider": "qdrant",
                 "config": {
                     "collection_name": "wisepen_memories",
-                    "urls": f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}",
+                    "url": f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}",
                     "api_key": settings.QDRANT_PASSWORD,
                 },
             },

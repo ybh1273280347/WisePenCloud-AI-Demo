@@ -47,7 +47,7 @@ def map_brave_response(
 
         result = SearchResult(
             title=str(item.get("title") or "").strip(),
-            url=str(item.get("urls") or "").strip(),
+            url=str(item.get("url") or "").strip(),
             snippet=str(item.get("description") or "").strip(),
         )
 

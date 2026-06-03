@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from beanie.odm.operators.update.general import Set
-from chat.application.rag.implementations.persistence.mongodb.documents.manifest_documents import \
+from chat.application.rag.implementations.persistence.mongodb.entities.manifest_documents import \
     RagIndexManifestDocument
 
 from chat.application.rag.domain.index_publication import RagIndexManifest
@@ -91,7 +91,7 @@ class MongoManifestRepository(RagManifestRepository):
     ) -> List[RagIndexManifest]:
         documents = await (
             RagIndexManifestDocument.find()
-            .sort(-"updated_at")
+            .sort("-updated_at")
             .limit(limit)
             .to_list()
         )

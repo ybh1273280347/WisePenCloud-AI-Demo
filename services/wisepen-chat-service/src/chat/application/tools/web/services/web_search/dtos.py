@@ -13,4 +13,4 @@ class UserSearchProviderConfigUpsertDTO:
     provider: Optional[SearcherName] = None
     encrypted_api_key: Optional[str] = None
     masked_key: Optional[str] = None
-    is_valid: bool = False
+    is_valid: bool = True

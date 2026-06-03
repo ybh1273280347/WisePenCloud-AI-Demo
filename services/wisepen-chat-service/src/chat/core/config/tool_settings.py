@@ -1,4 +1,6 @@
 from typing import Optional
+import secrets
+import base64
 
 from pydantic import BaseModel
 
@@ -13,7 +15,7 @@ class ToolSettings(BaseModel):
 
     # ── Web Search ────────────────────────────────────────────────
     WEB_SEARCH_USER_AGENT: str = (
-        "WisePenCloud-AI web_search/1.0 (contact@jzsun24@m.fudan.edu.cn)"
+        "WisePenCloud-AI web_search/1.0 (contact: jzsun24@m.fudan.edu.cn)"
     )
     FOURGET_WEB_SCRAPER: str = "ddg"
     FOURGET_TIMEOUT: float = 8.0
@@ -32,8 +34,8 @@ class ToolSettings(BaseModel):
     BROWSER_INTERACT_DISABLE_DEV_SHM_USAGE: bool = False
 
     # ── Search Provider Credential ────────────────────────────────
-    SEARCH_PROVIDER_CREDENTIAL_MASTER_KEY: Optional[str] = None
-    SEARCH_PROVIDER_CREDENTIAL_KEY_ID: Optional[str] = None
+    SEARCH_PROVIDER_CREDENTIAL_MASTER_KEY: str = "ivdklTUVOL7MpIqEhgzwxRJx3tDXBhmvqUmWB4sXc_s="
+    SEARCH_PROVIDER_CREDENTIAL_KEY_ID: str = "local-dev-v2"
 
     # ── Web Fetch ─────────────────────────────────────────────────
     WEB_ACCESS_DOH_SERVERS: tuple[str, ...] = (

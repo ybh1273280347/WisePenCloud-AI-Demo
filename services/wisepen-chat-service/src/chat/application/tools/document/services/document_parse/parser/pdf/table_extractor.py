@@ -16,6 +16,7 @@ from chat.application.tools.document.services.document_parse.utils.text import (
 )
 
 _SCANNED_TABLE_BACKEND = ParserName.PP_STRUCTURE
+_NATIVE_TABLE_BACKEND = ParserName.PYMUPDF
 
 
 def _format_table_rows(rows: List[List[Any]]) -> str:
@@ -149,6 +150,58 @@ class TableExtractor:
 
         return self._format_table_text_blocks(blocks), parsed_tables
 
+    def extract_scanned_from_image(
+        self,
+        *,
+        image_path: Path,
+        page_index: int,
+    ) -> Tuple[str, List[ParsedTable]]:
+        """从扫描页渲染图片中抽取表格。"""
+        return self.extract(image_path=image_path, page_index=page_index)
+
+    def extract_native_from_page(
+        self,
+        *,
+        page: Any,
+        page_index: int,
+        warnings: List[str],
+    ) -> Tuple[str, List[ParsedTable]]:
+        """从 PyMuPDF 页面抽取原生表格，失败时记录 warning 并返回空结果。"""
+        try:
+            tables = page.find_tables()
+        except Exception as e:
+            warnings.append(
+                f"native_table_extract_failed: page={page_index + 1}: "
+                f"{type(e).__name__}: {e}"
+            )
+            return "", []
+
+        blocks: List[str] = []
+        parsed_tables: List[ParsedTable] = []
+
+        for table_index, table in enumerate(getattr(tables, "tables", []) or [], 1):
+            rows = self._native_table_to_rows(table)
+            table_text = _format_table_rows(rows)
+
+            if not table_text:
+                continue
+
+            blocks.append(table_text)
+            parsed_tables.append(
+                ParsedTable(
+                    table_id=f"pdf_page_{page_index}_native_table_{table_index}",
+                    source=_NATIVE_TABLE_BACKEND,
+                    rows=rows,
+                    page_index=page_index,
+                    metadata=self._native_table_metadata(table),
+                )
+            )
+
+        if not blocks:
+            return "", []
+
+        return self._format_table_text_blocks(blocks), parsed_tables
+
     def _pp_structure_item_to_rows(self, item: Any) -> List[List[str]]:
         """
         PaddleOCR 2.10.0 PPStructure table item 协议：
@@ -186,6 +239,21 @@ class TableExtractor:
             "score": item.get("score"),
             "img_idx": item.get("img_idx"),
             "cell_bbox": cell_bbox,
+        }
+
+    def _native_table_to_rows(self, table: Any) -> List[List[str]]:
+        rows = table.extract()
+        return _normalize_table_rows(rows)
+
+    def _native_table_metadata(self, table: Any) -> Dict[str, Any]:
+        bbox = getattr(table, "bbox", None)
+        row_count = getattr(table, "row_count", None)
+        col_count = getattr(table, "col_count", None)
+
+        return {
+            "bbox": bbox,
+            "row_count": row_count,
+            "col_count": col_count,
         }
 
     def _html_table_to_rows(self, html: str) -> List[List[str]]:

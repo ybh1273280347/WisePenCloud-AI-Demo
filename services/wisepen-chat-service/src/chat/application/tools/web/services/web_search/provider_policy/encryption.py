@@ -38,10 +38,9 @@ class CredentialDecryptionError(CredentialCipherError):
 
 @dataclass(frozen=True, slots=True)
 class CipherResult:
-    """加密结果 DTO，包含密文、脱敏 Key 和所使用的密钥 ID。"""
+    """加密结果 DTO，包含密文和脱敏 Key。"""
     encrypted_key: str
     masked_key: str
-    encryption_key_id: str
 
 
 class SearchProviderCredentialCipher:
@@ -110,7 +109,6 @@ class SearchProviderCredentialCipher:
                 )
             ),
             masked_key=masked,
-            encryption_key_id=key_id,
         )
 
     def decrypt(
@@ -119,7 +117,6 @@ class SearchProviderCredentialCipher:
             user_id: str,
             provider: SearcherName,
             encrypted_api_key: str,
-            encryption_key_id: str,
     ) -> str:
         """解密 API Key。
 
@@ -127,19 +124,14 @@ class SearchProviderCredentialCipher:
             user_id: 用户 ID（作为 AAD 验证的一部分）。
             provider: 搜索引擎名称（作为 AAD 验证的一部分）。
             encrypted_api_key: 密文 API Key。
-            encryption_key_id: 加密时使用的密钥 ID。
 
         Returns:
             解密后的 API Key 明文。
 
         Raises:
-            CredentialDecryptionError: 解密失败（密钥不匹配、格式错误、完整性校验失败）。
+            CredentialDecryptionError: 解密失败（格式错误、完整性校验失败）。
         """
         master_key = self._master_key_bytes(CredentialDecryptionError)
-        key_id = self._key_id_str(CredentialDecryptionError)
-
-        if encryption_key_id != key_id:
-            raise CredentialDecryptionError("unsupported encryption key id")
 
         try:
             version, nonce_text, ciphertext_text = encrypted_api_key.split(":", 2)

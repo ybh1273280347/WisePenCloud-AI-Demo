@@ -11,8 +11,6 @@ from typing import Any, AsyncIterator, Dict, List
 import httpx
 from dependency_injector import providers
 from docling.document_converter import DocumentConverter
-from marker.converters.pdf import PdfConverter as MarkerPdfConverter
-from marker.models import create_model_dict
 from markitdown import MarkItDown
 from paddleocr import PPStructure
 from steel import AsyncSteel
@@ -31,6 +29,21 @@ from chat.application.infra.document_temp_files.scheduler import (
 from chat.application.tool_output_aspect import ToolOutputAspect
 from chat.application.tool_registry import ToolRegistry
 from chat.application.tools.browser.browse_interact_tool import BrowseInteractTool
+from chat.application.tools.chart.chart_tools import (
+    QuickChartFromTableTool,
+    QuickFunctionPlotTool,
+    TraceableChartFromNoteTool,
+)
+from chat.application.tools.chart.services.note_provider import MockNoteTableProvider
+from chat.application.tools.chart.services.output_adapter import ChartTempOutputAdapter
+from chat.application.tools.chart.services.renderer import (
+    QuickChartRenderer,
+    TraceableMatplotlibRenderer,
+)
+from chat.application.tools.chart.services.service import (
+    QuickChartService,
+    TraceableChartService,
+)
 from chat.application.tools.document.document_convert_tool import DocumentConvertTool
 from chat.application.tools.document.document_export_tool import DocumentExportTool
 from chat.application.tools.document.document_parse_tool import DocumentParseTool
@@ -80,8 +93,8 @@ from chat.application.tools.document.services.document_parse.parser.office.parse
 from chat.application.tools.document.services.document_parse.parser.office.primary import (
     OfficePrimaryParser,
 )
-from chat.application.tools.document.services.document_parse.parser.pdf.marker import (
-    MarkerPdfExtractor,
+from chat.application.tools.document.services.document_parse.parser.pdf.docling import (
+    DoclingPdfExtractor,
 )
 from chat.application.tools.document.services.document_parse.parser.pdf.page_classifier import (
     PageClassifier,
@@ -220,6 +233,7 @@ def register_tools(container_cls: Any) -> None:
     _register_document_export(container_cls)
     _register_document_convert(container_cls)
     _register_tool_content(container_cls)
+    _register_chart(container_cls)
     _register_web(container_cls)
     _register_skill_create(container_cls)
 
@@ -320,6 +334,25 @@ def register_tools(container_cls: Any) -> None:
         service=container_cls.sage_math_solver_service,
     )
 
+    # ----- 图表渲染工具 -----
+    tool(
+        "quick_chart_from_table_tool",
+        QuickChartFromTableTool,
+        service=container_cls.quick_chart_service,
+    )
+
+    tool(
+        "quick_function_plot_tool",
+        QuickFunctionPlotTool,
+        service=container_cls.quick_chart_service,
+    )
+
+    tool(
+        "traceable_chart_from_note_tool",
+        TraceableChartFromNoteTool,
+        service=container_cls.traceable_chart_service,
+    )
+
     # ----- 翻译工具 -----
     container_cls.translation_opus_config = providers.Singleton(OpusMtEngineConfig)
 
@@ -359,6 +392,7 @@ def register_tools(container_cls: Any) -> None:
         DocumentParseTool,
         parse_service=container_cls.document_parse_service,
         temp_file_resolver=container_cls.document_file_resolver,
+        content_store=container_cls.tool_content_store,
     )
 
     tool(
@@ -437,6 +471,32 @@ def _register_tool_content(container_cls: Any) -> None:
     )
 
 
+def _register_chart(container_cls: Any) -> None:
+    """注册图表工具依赖。"""
+    container_cls.chart_output_adapter = providers.Singleton(
+        ChartTempOutputAdapter,
+        output_root=document_export_output_path(),
+        atomic_writer=container_cls.document_export_atomic_writer,
+    )
+
+    container_cls.quick_chart_renderer = providers.Singleton(QuickChartRenderer)
+    container_cls.traceable_chart_renderer = providers.Singleton(TraceableMatplotlibRenderer)
+    container_cls.note_table_provider = providers.Singleton(MockNoteTableProvider)
+
+    container_cls.quick_chart_service = providers.Singleton(
+        QuickChartService,
+        output_adapter=container_cls.chart_output_adapter,
+        renderer=container_cls.quick_chart_renderer,
+    )
+
+    container_cls.traceable_chart_service = providers.Singleton(
+        TraceableChartService,
+        output_adapter=container_cls.chart_output_adapter,
+        renderer=container_cls.traceable_chart_renderer,
+        note_table_provider=container_cls.note_table_provider,
+    )
+
+
 def _register_document_parse(container_cls: Any) -> None:
     components = _build_document_parse_components()
 
@@ -451,7 +511,9 @@ def _register_document_parse(container_cls: Any) -> None:
     container_cls.office_primary_parser = providers.Object(components["office_primary_parser"])
     container_cls.office_fallback_parser = providers.Object(components["office_fallback_parser"])
     container_cls.office_parser = providers.Object(components["office_parser"])
-    container_cls.pdf_converter = providers.Object(components["pdf_converter"])
+    container_cls.pdf_docling_extractor = providers.Object(
+        components["docling_pdf_extractor"]
+    )
     container_cls.pdf_parser = providers.Object(components["pdf_parser"])
     container_cls.epub_parser = providers.Object(components["epub_parser"])
     container_cls.spreadsheet_parser = providers.Object(components["spreadsheet_parser"])
@@ -528,7 +590,7 @@ def _register_web(container_cls: Any) -> None:
         base_url=settings.FOURGET_BASE_URL,
         user_agent=tool_settings.WEB_SEARCH_USER_AGENT,
         timeout=tool_settings.FOURGET_TIMEOUT,
-        scraper=tool_settings.FOURGET_WEB_SCRAPER,
+        scraper=None,
         max_concurrency=tool_settings.FOURGET_MAX_CONCURRENCY,
     )
 
@@ -672,6 +734,10 @@ def _build_document_parse_components() -> Dict[str, Any]:
     ocr_image_adapter = OcrImageAdapter(local_ocr_processor=ocr_processor)
 
     docling_document_converter = DocumentConverter()
+    docling_pdf_extractor = DoclingPdfExtractor(
+        do_table_structure=True,
+        do_ocr=False,
+    )
     markitdown_converter = MarkItDown()
     pp_structure_engine = PPStructure(show_log=False)
 
@@ -681,12 +747,9 @@ def _build_document_parse_components() -> Dict[str, Any]:
         primary_parser=office_primary_parser,
         fallback_parser=office_fallback_parser,
     )
-    pdf_converter = MarkerPdfConverter(
-        artifact_dict=create_model_dict(),
-    )
     pdf_parser = PdfParser(
         classifier=PageClassifier(),
-        marker_extractor=MarkerPdfExtractor(converter=pdf_converter),
+        docling_extractor=docling_pdf_extractor,
         ocr_adapter=ocr_image_adapter,
         table_extractor=TableExtractor(pp_structure_engine=pp_structure_engine),
     )
@@ -703,12 +766,12 @@ def _build_document_parse_components() -> Dict[str, Any]:
         "ocr_processor": ocr_processor,
         "ocr_image_adapter": ocr_image_adapter,
         "docling_document_converter": docling_document_converter,
+        "docling_pdf_extractor": docling_pdf_extractor,
         "markitdown_converter": markitdown_converter,
         "pp_structure_engine": pp_structure_engine,
         "office_primary_parser": office_primary_parser,
         "office_fallback_parser": office_fallback_parser,
         "office_parser": office_parser,
-        "pdf_converter": pdf_converter,
         "pdf_parser": pdf_parser,
         "epub_parser": epub_parser,
         "spreadsheet_parser": spreadsheet_parser,

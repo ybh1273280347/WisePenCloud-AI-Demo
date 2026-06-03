@@ -26,11 +26,10 @@ _UNKNOWN_BINARY = ContentDetection(
 class FileTypeDetector:
     """表示当前组件。"""
     def __init__(self, magika_detector: MagikaDetector) -> None:
-        """初始化对象依赖。"""
         self._magika = magika_detector
 
     async def detect_path(self, path: Path) -> ContentDetection:
-        """检测当前流程。"""
+
         with path.open("rb") as f:
             header = f.read(_HEADER_BYTES)
             if header.startswith(_ZIP_SIGNATURES):
@@ -41,7 +40,7 @@ class FileTypeDetector:
         return await self._magika.detect_path(path) or _UNKNOWN_BINARY
 
     async def detect_bytes(self, content: bytes) -> ContentDetection:
-        """检测当前流程。"""
+
         if content[:_HEADER_BYTES].startswith(_ZIP_SIGNATURES):
             return classify_zip_document(content)
 

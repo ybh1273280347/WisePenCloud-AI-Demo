@@ -12,13 +12,18 @@ from chat.application.tools.web.services.web_search.errors import CustomSearchPr
 from chat.application.tools.web.services.web_search.models import CustomProviderCredential
 from chat.application.tools.web.services.web_search.runner.base import BaseSearchRunner
 from chat.application.tools.web.services.web_search.searcher import (
-    AnySearchSearcher, BraveSearcher, ExaSearcher, PerplexitySearcher,
-    SerpApiSearcher, CustomSerperSearcher, TavilySearcher, WebSearcher,
+    AnySearchSearcher,
+    BraveSearcher,
+    CustomSerperSearcher,
+    ExaSearcher,
+    PerplexitySearcher,
+    SerpApiSearcher,
+    TavilySearcher,
+    WebSearcher,
 )
-from chat.application.tools.web.services.web_search.utils.results import has_response_content
-from common.logger import log_ok
+from common.logger import log_ok, log_fail
 
-_VERIFY_QUERY_TEXT = "OpenAI"
+_VERIFY_QUERY_TEXT = "Deepseek"
 
 
 class CustomSearcherFactory:
@@ -84,9 +89,17 @@ class CustomProviderRunner(BaseSearchRunner):
 
         active_searcher = self._factory.get(self._provider)
 
-        # 没有传入 searcher 说明没有有效searcher，报错符合预期
+        if active_searcher is None:
+            raise CustomSearchProviderUnavailableError(
+                provider=self._provider,
+                message=(
+                    "Unsupported custom provider or provider type mismatch: "
+                    f"{self._provider!r}, type={type(self._provider).__name__}"
+                ),
+            )
+
         super().__init__(
-            searcher=active_searcher,   # type: ignore
+            searcher=active_searcher,
             cache=cache,
             purpose=SearchPurpose.RECALL,
             provider_mode=ProviderMode.CUSTOM,
@@ -98,16 +111,22 @@ class CustomProviderRunner(BaseSearchRunner):
         searcher = self._factory.get(self._provider)
 
         if searcher is None:
+            log_fail(
+                "search provider verify",
+                "未配置搜索源或不支持的搜索源"
+            )
             raise CustomSearchProviderUnavailableError(
                 provider=self._provider,
                 message=f"Verify failed: unsupported provider {self._provider.value}",
             )
 
         try:
-            response = await searcher.search(query=_VERIFY_QUERY_TEXT, max_results=1)
-            if not has_response_content(response):
-                raise ValueError("Provider returned empty payload.")
+            await searcher.search(query=_VERIFY_QUERY_TEXT, max_results=1)
         except Exception as e:
+            log_fail(
+                "search provider verify",
+                repr(e),
+            )
             raise CustomSearchProviderUnavailableError(
                 provider=self._provider,
                 message=f"Hot-verification to provider [{self._provider.value}] failed: {e}",
@@ -120,9 +139,30 @@ class CustomProviderRunner(BaseSearchRunner):
     ) -> List[VariantSearchResponse]:
         """多路变体并发调度入口"""
         if not provider_calls:
+            log_fail(
+                "Custom provider 搜索",
+                "provider_calls is empty",
+                provider=self._provider.value,
+                user_id=self._user_id,
+            )
             return []
 
         variants = [call.variant for call in provider_calls]
+
+        log_ok(
+            "Custom provider 调用计划",
+            provider=self._provider.value,
+            calls=len(provider_calls),
+            variants=[
+                {
+                    "query": variant.text,
+                    "role": variant.role.value,
+                    "max_results": variant.max_results,
+                }
+                for variant in variants
+            ],
+            user_id=self._user_id,
+        )
 
         results = await self.run_variants(
             search_call_id=f"custom:"
@@ -131,6 +171,13 @@ class CustomProviderRunner(BaseSearchRunner):
             variants=variants
         )
 
-        log_ok("Custom provider 搜索", calls=len(provider_calls), results=len(results), user_id=self._user_id)
+        log_ok(
+            "Custom provider 搜索",
+            provider=self._provider.value,
+            calls=len(provider_calls),
+            results=len(results),
+            result_items=sum(len(item.response.results) for item in results),
+            user_id=self._user_id,
+        )
         return results
 

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Dict, List, Optional
 
 from beanie.odm.operators.update.general import Set
-from chat.application.rag.implementations.persistence.mongodb.documents.cache_documents import (
+from chat.application.rag.implementations.persistence.mongodb.entities.cache_documents import (
     RagChunkContextCacheDocument,
     RagDenseEmbeddingCacheDocument,
     RagQueryEmbeddingCacheDocument,

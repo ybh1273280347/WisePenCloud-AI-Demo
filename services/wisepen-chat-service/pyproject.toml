@@ -42,7 +42,6 @@ dependencies = [
     # ==========================================
     "docling",                 # 多模态文档解析
     "markitdown",              # 微软官方全格式转 Markdown
-    "marker-pdf>=1.10.2,<1.11",# 高精 PDF 扫描提取
     "pymupdf",                 # 高性能 PDF 基础操作
     "markdown-it-py",          # MD 渲染与分块辅助
     "langchain-text-splitters",# 文本切片器
@@ -50,7 +49,7 @@ dependencies = [
     "steel-sdk",               # 浏览器自动化提取
     "trafilatura",             # 高性能网页正文抓取
     "playwright",              # 自动化无头浏览器
-
+    "beautifulsoup4",
     # ==========================================
     # 5. 传统 NLP 与特定业务策略工具 (NLP & Rule-based Tools)
     # ==========================================
@@ -76,7 +75,13 @@ dependencies = [
     "openpyxl",                # Excel 重度读写支持
     "sympy",                   # 专有业务：符号数学计算与推理
     "cachetools",              # 运行时内存缓存
-    "cryptography>=48.0.0"     # 凭证底层刚性加解密
+    "cryptography>=48.0.0",    # 凭证底层刚性加解密
+
+    # ==========================================
+    # 8. 可溯源图表渲染 (Provenance-aware Chart Render)
+    # ==========================================
+    "matplotlib",               # Chart Render 唯一渲染后端
+    "seaborn",                   # 普通 session quick chart 风格化绘图；可追溯 chart 不使用
 ]
 
 [dependency-groups]

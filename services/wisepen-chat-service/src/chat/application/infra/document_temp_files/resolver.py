@@ -188,7 +188,7 @@ class DocumentTempFileResolver:
 
         return session_root
 
-    def _ensure_session_root_exists(self, session_root: Path) -> None:
+    def _ensure_session_root_exists(self, session_root: Path) -> Path:
         """
         确认 session_root 已存在且是目录。
         """

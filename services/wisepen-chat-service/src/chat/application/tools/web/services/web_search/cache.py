@@ -45,7 +45,7 @@ def make_search_cache_descriptor(
     """
     # 只保留核心检索契约，让相同查询、相同渠道共享缓存命中。
     payload = {
-        "source": source,
+        "source": source.value,
         "purpose": purpose.value,
         "provider_mode": provider_mode.value,
         "query": " ".join(query.strip().split()),  # 仅保留压缩连续空格，防止多余空格导致哈希错乱
@@ -121,7 +121,7 @@ class SearchCache:
             queries: List[str],
             *,
             max_results: int,
-            source: str,
+            source: SearcherName,
             purpose: SearchPurpose = SearchPurpose.RECALL,
     ) -> Tuple[List[SearchResponse], List[str]]:
         """同步批量变体检索缓存（用于上层批量并发前的缓存过滤拦截）

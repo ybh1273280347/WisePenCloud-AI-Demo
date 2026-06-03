@@ -51,10 +51,6 @@ _TOOL_SCHEMA = {
             "description": "Optional output file name. Name only; not a path.",
         },
     },
-    "oneOf": [
-        {"required": ["content"]},
-        {"required": ["content_ref"]},
-    ],
     "required": ["target_format"],
     "additionalProperties": False,
 }
@@ -87,10 +83,18 @@ class DocumentExportTool(BaseTool):
         if not user_id:
             return "[Tool Error] Missing user_id in execution context."
 
+
         target_format = ExportFormat(kwargs["target_format"])
         source_format = ExportSourceFormat(kwargs.get("source_format", "markdown"))
         content_ref: Optional[str] = kwargs.get("content_ref")
         content: Optional[str] = kwargs.get("content")
+
+        if content is None or content_ref is None:
+            return "[Tool Error] content or content_ref not provided."
+
+        if content_ref and content:
+            return "[Tool Error] Content and content cannot be both provided."
+
         file_name: Optional[str] = kwargs.get("file_name")
 
         try:

@@ -97,11 +97,11 @@ async def upload_chat_file(
         file_name=safe_file_name,
     )
     preview_url = (
-        "/chat/file/previewChatFile"
+        "/chat/chatFile/previewChatFile"
         f"?session_id={quote(session_id)}&file_id={quote(file_id)}"
     )
     download_url = (
-        "/chat/file/downloadChatFile"
+        "/chat/chatFile/downloadChatFile"
         f"?session_id={quote(session_id)}&file_id={quote(file_id)}"
     )
 

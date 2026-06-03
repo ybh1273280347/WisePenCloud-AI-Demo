@@ -18,7 +18,6 @@ class PageType(StrEnum):
     MIXED = "mixed"
     SCANNED = "scanned"
     EMPTY = "empty"
-    MARKER = "marker"
 
 
 class ParserName(StrEnum):
@@ -27,9 +26,9 @@ class ParserName(StrEnum):
     OFFICE = "OfficeParser"
     SPREADSHEET = "SpreadsheetParser"
     DOCLING = "docling"
+    DOCLING_PDF_TABLE_NO_OCR = "docling_pdf_table_no_ocr"
     MARKITDOWN = "markitdown"
     PANDAS = "pandas"
-    MARKER_PDF = "marker-pdf"
     PYMUPDF = "pymupdf"
     PADDLEOCR = "paddleocr"
     PP_STRUCTURE = "pp_structure"

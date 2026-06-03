@@ -2,7 +2,7 @@ import asyncio
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
-from chat.application.rag.implementations.persistence.mongodb.documents.chunk_documents import (
+from chat.application.rag.implementations.persistence.mongodb.entities.chunk_documents import (
     RetrieveChunkDocument,
     SearchChunkDocument,
 )

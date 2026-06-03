@@ -4,7 +4,7 @@ from typing import Dict, Optional
 from beanie import Document
 from beanie.odm.operators.update.general import Inc, Set
 from beanie.odm.queries.update import UpdateResponse
-from chat.application.rag.implementations.persistence.mongodb.documents.resource_documents import (
+from chat.application.rag.implementations.persistence.mongodb.entities.resource_documents import (
     DocumentResourceDocument,
     NoteResourceDocument,
 )

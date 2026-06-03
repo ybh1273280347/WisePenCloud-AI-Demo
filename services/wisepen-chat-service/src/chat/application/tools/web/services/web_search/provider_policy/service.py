@@ -278,5 +278,4 @@ class SearchProviderConfigService:
             user_id=config.user_id,
             provider=config.provider,
             encrypted_api_key=config.encrypted_api_key,
-            encryption_key_id=config.encryption_key_id or self._cipher.key_id,
         )

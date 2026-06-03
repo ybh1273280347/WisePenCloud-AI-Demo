@@ -38,7 +38,7 @@ class SearchResponse:
     """通用搜索响应"""
 
     query: str
-    source: Union[SearcherName, str]
+    source: SearcherName | str
     results: List[SearchResult] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 

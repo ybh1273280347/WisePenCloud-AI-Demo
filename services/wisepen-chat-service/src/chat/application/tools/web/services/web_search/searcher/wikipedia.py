@@ -1,15 +1,17 @@
+from __future__ import annotations
+
 import asyncio
-from typing import Mapping
-from urllib.parse import quote
+from typing import Any, Dict, List, Mapping
 
 import httpx
 
+from chat.application.tools.web.services.web_search.enums import SearcherName
 from chat.application.tools.web.services.web_search.errors import SearchProviderError
 from chat.application.tools.web.services.web_search.models import SearchResponse, SearchResult
-from chat.application.tools.web.services.web_search.searcher.base import SearcherName, WebSearcher
+from chat.application.tools.web.services.web_search.searcher.base import WebSearcher
 from chat.application.tools.web.services.web_search.utils.http_client import fetch_search_json
 from chat.application.tools.web.services.web_search.utils.results import is_valid_result
-from common.logger import log_fail, log_event
+from common.logger import log_event, log_fail
 
 _WIKIPEDIA_API_PATH = "/w/api.php"
 _WIKIPEDIA_SUMMARY_PATH = "/api/rest_v1/page/summary"
@@ -23,7 +25,7 @@ class WikipediaSearcher(WebSearcher):
             client: httpx.AsyncClient,
             *,
             base_url: str = "https://en.wikipedia.org",
-            user_agent: str = "WisePenCloud-AI web_search/1.0",
+            user_agent: str = "WisePenCloud-AI-WebSearch/1.0 (contact: example@",
             max_extract_chars: int = 800,
             concurrency: int = 4,
     ) -> None:
@@ -50,11 +52,8 @@ class WikipediaSearcher(WebSearcher):
             *,
             max_results: int = 3,
     ) -> SearchResponse:
-        """纯文本 Grounding 核心链路"""
-
-        # 基础页面命中阶段 (OpenSearch Page Hit)
-        payload = await fetch_search_json(
-            client=self._client,
+        """纯文本 Grounding 核心链路。"""
+        payload = await self._fetch_wikipedia_json_value(
             url=self._api_url,
             params={
                 "action": "opensearch",
@@ -64,26 +63,26 @@ class WikipediaSearcher(WebSearcher):
                 "redirects": "resolve",
                 "format": "json",
             },
-            headers=self._headers,
             query=query,
             timeout_seconds=5.0,
-            semaphore=self._semaphore,
-            provider_name=SearcherName.WIKIPEDIA.value,
         )
 
-        # 防御性长度校验，防止解包 IndexError 暴毙
         if not isinstance(payload, (list, tuple)) or len(payload) < 4:
             log_fail(
                 "Wikipedia 外部 payload 长度不足，解包",
                 f"expected_len>=4, actual_type={type(payload).__name__}",
                 query=query,
             )
-            return SearchResponse(query=query, results=[], source=SearcherName.WIKIPEDIA.value)
+            return SearchResponse(
+                query=query,
+                results=[],
+                source=SearcherName.WIKIPEDIA,
+            )
 
-        # 安全解包
-        raw_titles, raw_snippets, raw_urls = payload[1], payload[2], payload[3]
+        raw_titles = payload[1]
+        raw_snippets = payload[2]
+        raw_urls = payload[3]
 
-        # 容器类型校验
         if (
                 not isinstance(raw_titles, list)
                 or not isinstance(raw_snippets, list)
@@ -96,10 +95,12 @@ class WikipediaSearcher(WebSearcher):
                 urls=type(raw_urls).__name__,
                 query=query,
             )
-            return SearchResponse(query=query, results=[], source=SearcherName.WIKIPEDIA.value)
+            return SearchResponse(
+                query=query,
+                results=[],
+                source=SearcherName.WIKIPEDIA,
+            )
 
-        # 矩阵长度对齐校验
-        # 外部多维列表必须齐头并进，长度不一致直接判定为畸形数据，拒绝妥协
         if not (len(raw_titles) == len(raw_snippets) == len(raw_urls)):
             log_event(
                 "Wikipedia 外部数据矩阵长度非对称",
@@ -108,54 +109,124 @@ class WikipediaSearcher(WebSearcher):
                 urls_len=len(raw_urls),
                 query=query,
             )
-            return SearchResponse(query=query, results=[], source=SearcherName.WIKIPEDIA.value)
+            return SearchResponse(
+                query=query,
+                results=[],
+                source=SearcherName.WIKIPEDIA,
+            )
 
-        # 页面摘要增强阶段 (Summary Enrichment)
         tasks = [
             self._build_page_result(
-                client=self._client,
-                title=str(t).strip(),
-                page_snippet=str(s).strip(),
-                page_url=str(u).strip(),
+                title=str(title).strip(),
+                page_snippet=str(snippet).strip(),
+                page_url=str(url).strip(),
                 query=query,
             )
-            for t, s, u in zip(raw_titles, raw_snippets, raw_urls)
-            if str(t).strip()
+            for title, snippet, url in zip(raw_titles, raw_snippets, raw_urls)
+            if str(title).strip()
         ]
+
         raw_results = await asyncio.gather(*tasks)
 
-        # 链路唯一合规性闸口清洗
-        results = [
-            res for res in raw_results
-            if isinstance(res, SearchResult) and is_valid_result(res)
+        results: List[SearchResult] = [
+            result
+            for result in raw_results
+            if isinstance(result, SearchResult) and is_valid_result(result)
         ]
 
         return SearchResponse(
             query=query,
-            results=results,
+            results=results[:max_results],
             source=SearcherName.WIKIPEDIA,
         )
 
+    async def _fetch_wikipedia_json_value(
+            self,
+            *,
+            url: str,
+            params: Dict[str, str],
+            query: str,
+            timeout_seconds: float,
+    ) -> Any:
+        """获取 Wikipedia JSON value。
+
+        Args:
+        - url: Wikipedia API URL。
+        - params: GET 查询参数。
+        - query: 原始查询，仅用于错误追踪。
+        - timeout_seconds: 请求超时时间。
+
+        Returns:
+        - Wikipedia 返回的任意合法 JSON value。
+        """
+        timeout = httpx.Timeout(
+            timeout=timeout_seconds,
+            connect=min(3.0, timeout_seconds),
+            read=timeout_seconds,
+        )
+
+        try:
+            async with self._semaphore:
+                response = await self._client.get(
+                    url=url,
+                    params=params,
+                    headers=self._headers,
+                    timeout=timeout,
+                )
+
+            response.raise_for_status()
+
+            try:
+                return response.json()
+            except (ValueError, TypeError) as e:
+                raise SearchProviderError(
+                    provider=SearcherName.WIKIPEDIA.value,
+                    status_code=response.status_code,
+                    reason=f"response_is_not_valid_json:{str(e)}",
+                ) from e
+
+        except httpx.TimeoutException as e:
+            raise SearchProviderError(
+                provider=SearcherName.WIKIPEDIA.value,
+                status_code=0,
+                reason=f"timeout:{timeout_seconds}",
+            ) from e
+
+        except httpx.HTTPStatusError as e:
+            raise SearchProviderError(
+                provider=SearcherName.WIKIPEDIA.value,
+                status_code=e.response.status_code,
+                reason="http_status_error",
+            ) from e
+
+        except httpx.RequestError as e:
+            raise SearchProviderError(
+                provider=SearcherName.WIKIPEDIA.value,
+                status_code=0,
+                reason=f"connection_failed:{str(e)}",
+            ) from e
+
     async def _build_page_result(
             self,
-            client: httpx.AsyncClient,
+            *,
             title: str,
             page_snippet: str,
             page_url: str,
             query: str,
     ) -> SearchResult:
-        """组合 OpenSearch 基础命中结果与可选的 REST Summary 增强摘要"""
-        encoded_title = quote(title.replace(" ", "_"), safe="")
-        endpoint = f"{self._summary_base_url}/{encoded_title}"
-
+        """组合 OpenSearch 基础命中结果与可选 REST Summary 增强摘要。"""
         fallback_result = SearchResult(
             title=title,
             url=page_url,
             snippet=page_snippet,
         )
+
+        encoded_title = title.replace(" ", "_")
+        endpoint = f"{self._summary_base_url}/{encoded_title}"
+
         try:
             summary_data = await fetch_search_json(
-                client=client,
+                client=self._client,
                 url=endpoint,
                 params={},
                 query=query,
@@ -164,25 +235,13 @@ class WikipediaSearcher(WebSearcher):
                 semaphore=self._semaphore,
                 provider_name=SearcherName.WIKIPEDIA.value,
             )
-        except SearchProviderError as e:
-            # 读取真实状态码，如果是标准的未收录 404，降级使用基础命中数据
-            original_exc = e.__cause__
-            if isinstance(original_exc, httpx.HTTPStatusError) and original_exc.response.status_code == 404:
-                return fallback_result
-            raise
-
-        if not isinstance(summary_data, dict):
+        except SearchProviderError:
             return fallback_result
 
-        # 提取高价值深度摘要
-        extract = str(
-            summary_data.get("extract", "")
-        ).strip() or page_snippet
-
+        extract = str(summary_data.get("extract", "")).strip() or page_snippet
         if len(extract) > self._max_extract_chars:
             extract = extract[:self._max_extract_chars].rstrip()
 
-        # 提取高价值标准 Canonical URL
         canonical_url = ""
         content_urls = summary_data.get("content_urls")
         if isinstance(content_urls, Mapping):

@@ -51,16 +51,16 @@ class SteelFetcher(BaseFetcher):
         """调用 Steel API 抓取页面，并按格式优先级尝试获取有效 Markdown。"""
         async with self._semaphore:
             try:
-                parmas = {
-                    "urls": url,
+                params = {
+                    "url": url,
                     "format": self._config.formats,
                     "timeout": self._config.timeout,
                 }
 
                 if self._config.delay_ms > 0:
-                    parmas["delay"] = self._config.delay_ms
+                    params["delay"] = self._config.delay_ms
 
-                response = await self._client.scrape(**parmas)
+                response = await self._client.scrape(**params)
 
                 # 检查 HTTP 层面错误
                 metadata = response.metadata

@@ -120,7 +120,7 @@ class AppSettings(BaseModel):
     CTX_FALLBACK_HISTORY_LIMIT: int = 20
 
     # Agentic ReAct 循环控制
-    AGENT_MAX_ITERATIONS: int = 5
+    AGENT_MAX_ITERATIONS: int = 15
     TOOL_RESULT_MAX_CHARS: int = 4000
 
     # RAG 推理超参（Context 生成与重排序）
@@ -136,7 +136,7 @@ class AppSettings(BaseModel):
     RAG_SPARSE_EMBEDDING_MODEL_VERSION: str = "qdrant-bm25-v1"
     RAG_CONTEXTUAL_INDEXING_VERSION: str = "context-indexing-v1"
     RAG_CONTEXT_PROMPT_VERSION: str = "context-prompt-v1"
-    # 索引管道 Kafka 消费组（RAG 专属，与通用消息队列解耦）
+    # 索引管道消费组（RAG 专属）
     RAG_INDEX_CONSUMER_GROUP: str = "wisepen-rag-indexers"
     # Qdrant Collection 名称
     RAG_QDRANT_COLLECTION_NAME: str = "wisepen-qdrant-rag"
@@ -156,7 +156,7 @@ class AppSettings(BaseModel):
     ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
     WIKIPEDIA_BASE_URL_TEMPLATE: str = "https://en.wikipedia.org"
     # Web 页面全文抓取代理
-    STEEL_BASE_URL: str = "http://steel:8000"
+    STEEL_BASE_URL: str = "http://steel-browser:3000"
 
 
     # ==========================================

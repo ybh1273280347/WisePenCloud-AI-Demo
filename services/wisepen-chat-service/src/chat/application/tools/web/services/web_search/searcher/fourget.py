@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Optional
 
 import httpx
 
 from chat.application.tools.web.services.web_search.enums import SearcherName
 from chat.application.tools.web.services.web_search.errors import (
     SearchProviderError,
-    SearchProviderTransientError,
+    SearchRateLimitError,
+    SearchTimeoutError,
 )
 from chat.application.tools.web.services.web_search.models import SearchResponse
 from chat.application.tools.web.services.web_search.schemas.fourget import (
     FourGetSearchRequest,
-    map_fourget_response,
+    map_fourget_html,
 )
-from chat.application.tools.web.services.web_search.utils.http_client import fetch_search_json
 from common.logger import log_event
 from .base import WebSearcher
 
-FOURGET_ENDPOINT = "/api/v1/web"
+FOURGET_ENDPOINT = "/web"
 
 
 class FourGetSearcher(WebSearcher):
@@ -29,17 +30,18 @@ class FourGetSearcher(WebSearcher):
             base_url: str,
             user_agent: str = "WisePenCloud-AI web_search/1.0",
             timeout: float = 8.0,
-            scraper: str = "ddg",
+            scraper: Optional[str] = None,
             max_concurrency: int = 5,
     ) -> None:
-        self._request_url = f"{base_url.rstrip('/')}{FOURGET_ENDPOINT}"
+        normalized_base_url = base_url.rstrip("/")
+        self._request_url = f"{normalized_base_url}{FOURGET_ENDPOINT}"
         self._client = client
         self._timeout = timeout
         self._scraper = scraper
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._headers = {
             "User-Agent": user_agent,
-            "Accept": "application/json",
+            "Accept": "text/html,application/xhtml+xml",
         }
 
     @property
@@ -54,51 +56,79 @@ class FourGetSearcher(WebSearcher):
     ) -> SearchResponse:
         request = FourGetSearchRequest(query=query, scraper=self._scraper)
 
-        data = await fetch_search_json(
-            client=self._client,
-            url=self._request_url,
-            params=request.to_params(),
-            query=query,
-            timeout_seconds=self._timeout,
-            semaphore=self._semaphore,
-            provider_name=self.name.value,
-            headers=self._headers,
+        timeout = httpx.Timeout(
+            timeout=self._timeout,
+            connect=min(3.0, self._timeout),
+            read=self._timeout,
         )
 
-        if not isinstance(data, dict):
-            log_event(
-                "FourGet 返回了畸形非字典结构",
-                data_type=type(data).__name__,
-                query=query
-            )
+        try:
+            async with self._semaphore:
+                response = await self._client.get(
+                    url=self._request_url,
+                    params=request.to_params(),
+                    headers=self._headers,
+                    timeout=timeout,
+                )
 
-            return SearchResponse(
+            if response.status_code == 429:
+                try:
+                    retry_after = int(response.headers.get("retry-after", "0"))
+                except ValueError:
+                    retry_after = 0
+
+                raise SearchRateLimitError(
+                    provider=self.name.value,
+                    retry_after=retry_after,
+                )
+
+            response.raise_for_status()
+
+            content_type = response.headers.get("content-type", "")
+            if "html" not in content_type.lower():
+                raise SearchProviderError(
+                    provider=self.name.value,
+                    status_code=response.status_code,
+                    reason=f"unexpected_content_type:{content_type}",
+                )
+
+            search_response = map_fourget_html(
+                response.text,
                 query=query,
-                results=[],
-                source=SearcherName.FOURGET,
+                scraper=self._scraper,
+                max_results=max_results,
             )
 
-        # 4get 特有业务状态码检查
-        if data.get("status", "ok") != "ok":
-            raise SearchProviderError(
-                provider=self.name.value,
-                status_code=200,
-                reason=f"provider_status_error: status={data.get('status')}",
+            log_event(
+                "FourGet response mapped",
+                query=query,
+                request_url=self._request_url,
+                final_url=str(response.url),
+                status_code=response.status_code,
+                content_type=content_type,
+                html_length=len(response.text),
+                normalized_result_count=len(search_response.results),
             )
 
-        response = map_fourget_response(
-            data,
-            query=query,
-            scraper=self._scraper,
-            max_results=max_results,
-        )
+            return search_response
 
-        # 空结果抛出可重试异常（上游无结果，非调用错误）
-        if not response.results:
-            raise SearchProviderTransientError(
+        except httpx.TimeoutException as e:
+            raise SearchTimeoutError(
                 provider=self.name.value,
                 queries=[query],
-                reason="4get empty_result returned from upstream source",
-            )
+                timeout=self._timeout,
+            ) from e
 
-        return response
+        except httpx.HTTPStatusError as e:
+            raise SearchProviderError(
+                provider=self.name.value,
+                status_code=e.response.status_code,
+                reason="http_status_error",
+            ) from e
+
+        except httpx.RequestError as e:
+            raise SearchProviderError(
+                provider=self.name.value,
+                status_code=0,
+                reason=f"connection_failed:{str(e)}",
+            ) from e

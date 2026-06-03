@@ -207,8 +207,7 @@ class WebSearchTool(BaseTool):
         return TOOL_SCHEMA
 
     async def execute(self, context: Dict[str, Any], **kwargs) -> str:
-        # 执行上下文。
-        """执行工具入口流程。"""
+
         session_id = context.get("session_id")
         if not session_id:
             return "[Tool Error] Missing session_id in execution context."
@@ -238,17 +237,29 @@ class WebSearchTool(BaseTool):
         # 搜索源模式与自定义渠道凭证。
         provider_mode = ProviderMode.DEFAULT
         credential = None
-        search_config: SearchProviderConfig = context.get("search_config")
+        search_config: SearchProviderConfig | None = context.get("search_config")
+        
         if search_config and search_config.provider_mode == ProviderMode.CUSTOM:
             provider_mode = search_config.provider_mode
             if not search_config.active_provider or not search_config.is_valid:
                 return (
                     "[Tool Error] The current web search mode is custom, "
                     "but the configured custom search provider is unavailable.\n"
-                    f"Error Message: {search_config.error_message}"
+                    f"- Active provider: {search_config.active_provider}"
+                    f"- Is Valid: {search_config.is_valid} "
+                    f"- Error Message: {search_config.error_message} "
                     "Ask the user to recharge that provider API key, "
                     "replace the key, or switch back to default search mode."
                 )
+
+            if search_config.api_key is None:
+                return (
+                    "[Tool Error] The current web search mode is custom, "
+                    "but the provider API key is missing after runtime credential loading.\n"
+                    f"- Active provider: {search_config.active_provider}\n"
+                    "Ask the user to reconfigure and verify that provider."
+                )
+
             credential = CustomProviderCredential(
                 provider=search_config.active_provider,
                 api_key=search_config.api_key,
