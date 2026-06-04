@@ -28,6 +28,7 @@ class RagIndexingTextBuilder:
     ) -> Dict[str, IndexingTextPair]:
         """构建 SearchChunk 双索引文本。"""
         context_map = {context.chunk_id: context for context in contexts}
+        sibling_windows = _build_sibling_windows(search_chunks)
         text_pairs: Dict[str, IndexingTextPair] = {}
 
         for search_chunk in search_chunks:
@@ -45,7 +46,10 @@ class RagIndexingTextBuilder:
                 f"{context.context_text}\n"
                 "\n"
                 "Chunk text:\n"
-                f"{search_chunk.text}"
+                f"{search_chunk.text}\n"
+                "\n"
+                "Local parent context:\n"
+                f"{sibling_windows.get(search_chunk.chunk_id, search_chunk.text)}"
             )
 
 
@@ -55,3 +59,23 @@ class RagIndexingTextBuilder:
             )
 
         return text_pairs
+
+
+def _build_sibling_windows(search_chunks: List[SearchChunk]) -> Dict[str, str]:
+    """为每个子块构造同父块内的一跳局部上下文窗口。"""
+    grouped_chunks: Dict[str, List[SearchChunk]] = {}
+    for chunk in search_chunks:
+        grouped_chunks.setdefault(chunk.parent_chunk_id, []).append(chunk)
+
+    windows: Dict[str, str] = {}
+    for sibling_chunks in grouped_chunks.values():
+        ordered_chunks = sorted(sibling_chunks, key=lambda chunk: chunk.chunk_index)
+        for index, chunk in enumerate(ordered_chunks):
+            start = max(0, index - 1)
+            end = min(len(ordered_chunks), index + 2)
+            windows[chunk.chunk_id] = "\n\n".join(
+                sibling.text
+                for sibling in ordered_chunks[start:end]
+            )
+
+    return windows

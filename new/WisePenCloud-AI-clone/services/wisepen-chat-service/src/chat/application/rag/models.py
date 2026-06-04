@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .enums import ResourceKind, RetrievalMode
 
@@ -103,6 +103,7 @@ class RagSearchRequest:
     neighbor_before: Optional[int] = None
     neighbor_after: Optional[int] = None
     mmr_lambda: Optional[float] = None
+    debug: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +114,11 @@ class RagSearchResult:
     evidence_count: int
     sufficient: bool
     insufficient_reason: Optional[str]
+    recommended_next_action: str
+    rewrite_guidance: Optional[str]
     included_evidence_ids: List[str]
     skipped_evidence_count: int
+    channel_candidate_counts: Dict[str, int]
+    diagnostics: List[Dict[str, object]]
     assembled_context: str
     rendered_text: str

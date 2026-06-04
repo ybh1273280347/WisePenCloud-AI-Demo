@@ -40,6 +40,15 @@ class InsufficientReason(StrEnum):
     EXACT_MODE_NO_KEYWORD_HIT = "exact_mode_no_keyword_hit"
 
 
+class RagRecommendedNextAction(StrEnum):
+    """RAG 检索后的推荐下一步动作。"""
+
+    ANSWER_WITH_EVIDENCE = "answer_with_evidence"
+    REWRITE_QUERY = "rewrite_query"
+    USE_WEB_SEARCH = "use_web_search"
+    ASK_USER_TO_UPLOAD_OR_INDEX = "ask_user_to_upload_or_index"
+
+
 class NeighborRelation(StrEnum):
     """证据相邻上下文关系。
 

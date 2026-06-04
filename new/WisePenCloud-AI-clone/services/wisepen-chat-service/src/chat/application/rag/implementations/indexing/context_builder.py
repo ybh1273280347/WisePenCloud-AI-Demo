@@ -3,6 +3,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Dict, List
 
+from common.logger import log_fail
 from chat.application.rag.domain.index_chunks import RetrieveChunk, SearchChunk
 from chat.application.rag.domain.index_chunks import SearchChunkContext
 from chat.application.rag.domain.ports import (
@@ -26,6 +27,7 @@ class RagContextBuilderConfig:
     context_model_version: str
     context_prompt_version: str
     concurrency: int = 8
+    fallback_on_generation_error: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +54,7 @@ class RagContextBuilder:
     - 为每个 SearchChunk 生成 SearchChunkContext。
     - Context Indexing 永远启用。
     - 先查 context cache，cache miss 时调用 context client。
-    - 任意 SearchChunk 生成 context 失败时，整个索引构建失败。
+    - SearchChunk context 生成失败时默认使用本地 fallback context。
     - 返回顺序与 search_chunks 输入顺序一致。
     """
 
@@ -199,12 +201,52 @@ class RagContextBuilder:
                         search_chunk=item.search_chunk,
                     )
                 except Exception as e:
+                    if self._config.fallback_on_generation_error:
+                        log_fail(
+                            "rag context indexing fallback",
+                            e,
+                            user_id=resource.user_id,
+                            resource_kind=resource.resource_kind.value,
+                            resource_id=resource.resource_id,
+                            search_chunk_id=item.search_chunk.chunk_id,
+                            parent_chunk_id=item.parent_chunk.chunk_id,
+                        )
+                        return GeneratedContext(
+                            chunk_id=item.search_chunk.chunk_id,
+                            context_input_hash=item.context_input_hash,
+                            context_text=_build_fallback_context(
+                                resource=resource,
+                                parent_chunk=item.parent_chunk,
+                                search_chunk=item.search_chunk,
+                            ),
+                        )
+
                     raise ContextBuildError(
                         f"Context client failed for search chunk {item.search_chunk.chunk_id}: {e}"
                     ) from e
 
             context_text = context_text.strip()
             if not context_text:
+                if self._config.fallback_on_generation_error:
+                    log_fail(
+                        "rag context indexing fallback",
+                        "empty generated context",
+                        user_id=resource.user_id,
+                        resource_kind=resource.resource_kind.value,
+                        resource_id=resource.resource_id,
+                        search_chunk_id=item.search_chunk.chunk_id,
+                        parent_chunk_id=item.parent_chunk.chunk_id,
+                    )
+                    return GeneratedContext(
+                        chunk_id=item.search_chunk.chunk_id,
+                        context_input_hash=item.context_input_hash,
+                        context_text=_build_fallback_context(
+                            resource=resource,
+                            parent_chunk=item.parent_chunk,
+                            search_chunk=item.search_chunk,
+                        ),
+                    )
+
                 raise ContextBuildError(
                     f"Empty context generated for search chunk: {item.search_chunk.chunk_id}"
                 )
@@ -277,3 +319,36 @@ class RagContextBuilder:
             )
 
         return cache_items
+
+
+def _build_fallback_context(
+    *,
+    resource: RagResource,
+    parent_chunk: RetrieveChunk,
+    search_chunk: SearchChunk,
+) -> str:
+    """构造无 LLM 依赖的保守检索上下文。"""
+    heading_path = _extract_heading_path(search_chunk.text) or _extract_heading_path(
+        parent_chunk.text
+    )
+    lines = [
+        f"Resource: {resource.display_name}",
+        f"Resource kind: {resource.resource_kind.value}",
+    ]
+    if heading_path:
+        lines.append(f"Section: {heading_path}")
+    lines.extend(
+        [
+            f"Parent chunk index: {parent_chunk.chunk_index}",
+            f"Search chunk index: {search_chunk.chunk_index}",
+            "Fallback context generated because model context indexing was unavailable.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _extract_heading_path(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("Section: "):
+            return line.removeprefix("Section: ").strip()
+    return ""

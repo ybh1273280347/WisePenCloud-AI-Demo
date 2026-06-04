@@ -1,6 +1,11 @@
 import asyncio
+import time
+from dataclasses import dataclass
+from typing import Awaitable
 from typing import List
 
+from common.logger import log_event, log_fail
+from chat.application.rag.domain.enums import RetrievalChannel
 from chat.application.rag.domain.retrieval_hits import ChannelRetrievalResult
 from chat.application.rag.domain.retrieval_planning import (
     RagIndexScope,
@@ -11,6 +16,15 @@ from .elasticsearch_retriever import (
 )
 from .manifest_resolver import RagManifestResolver
 from .qdrant_retriever import QdrantChunkRetriever
+
+
+@dataclass(frozen=True, slots=True)
+class _RetrievalTaskSpec:
+    """单个检索通道任务描述。"""
+
+    name: str
+    query: str
+    task: Awaitable[ChannelRetrievalResult]
 
 
 class RagRetrievalOrchestrator:
@@ -59,40 +73,97 @@ class RagRetrievalOrchestrator:
 
         # 没有已发布 Manifest 时，当前用户没有可检索索引，直接安全阻断
         if not scopes:
+            log_event(
+                "rag retrieval channels skipped",
+                user_id=query.user_id,
+                reason="no_published_manifest",
+            )
             return []
 
         semantic_queries: List[str] = query.semantic_queries if query.semantic_queries else [query.query,]
         keyword_queries: List[str] = query.keyword_queries if query.keyword_queries else [query.query,]
 
-        tasks = []
+        task_specs: List[_RetrievalTaskSpec] = []
 
         # 灌装 Dense 稠密向量检索任务
         for semantic_query in semantic_queries:
-            tasks.append(
-                self._qdrant_retriever.retrieve_dense(
+            task_specs.append(
+                _RetrievalTaskSpec(
+                    name=RetrievalChannel.DENSE_SEMANTIC.value,
                     query=semantic_query,
-                    scopes=scopes,
-                    top_k=query.top_k,
+                    task=self._qdrant_retriever.retrieve_dense(
+                        query=semantic_query,
+                        scopes=scopes,
+                        top_k=query.top_k,
+                    ),
                 )
             )
 
         # 灌装 BM25 与 ES 关键词检索任务
         for keyword_query in keyword_queries:
-            tasks.append(
-                self._qdrant_retriever.retrieve_bm25(
+            task_specs.append(
+                _RetrievalTaskSpec(
+                    name=RetrievalChannel.SPARSE_LEXICAL.value,
                     query=keyword_query,
-                    scopes=scopes,
-                    top_k=query.top_k,
+                    task=self._qdrant_retriever.retrieve_bm25(
+                        query=keyword_query,
+                        scopes=scopes,
+                        top_k=query.top_k,
+                    ),
                 )
             )
-            tasks.append(
-                self._elasticsearch_retriever.retrieve_keyword(
+            task_specs.append(
+                _RetrievalTaskSpec(
+                    name=RetrievalChannel.KEYWORD_EXACT.value,
                     query=keyword_query,
-                    scopes=scopes,
-                    top_k=query.top_k,
+                    task=self._elasticsearch_retriever.retrieve_keyword(
+                        query=keyword_query,
+                        scopes=scopes,
+                        top_k=query.top_k,
+                    ),
                 )
             )
 
-        channel_results = await asyncio.gather(*tasks)
+        started_at = time.monotonic()
+        raw_results = await asyncio.gather(
+            *(spec.task for spec in task_specs),
+            return_exceptions=True,
+        )
 
-        return list(channel_results)
+        channel_results: List[ChannelRetrievalResult] = []
+        for spec, result in zip(task_specs, raw_results):
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
+            if isinstance(result, Exception):
+                log_fail(
+                    "rag retrieval channel failed",
+                    result,
+                    user_id=query.user_id,
+                    channel=spec.name,
+                    query=spec.query,
+                    scope_count=len(scopes),
+                    elapsed_ms=elapsed_ms,
+                )
+                continue
+
+            log_event(
+                "rag retrieval channel succeeded",
+                user_id=query.user_id,
+                channel=result.channel.value,
+                query=spec.query,
+                candidate_count=len(result.candidates),
+                scope_count=len(scopes),
+                elapsed_ms=elapsed_ms,
+            )
+            channel_results.append(result)
+
+        log_event(
+            "rag retrieval channels completed",
+            user_id=query.user_id,
+            channel_count=len(task_specs),
+            success_count=len(channel_results),
+            failure_count=len(task_specs) - len(channel_results),
+            candidate_count=sum(len(result.candidates) for result in channel_results),
+            elapsed_ms=int((time.monotonic() - started_at) * 1000),
+        )
+
+        return channel_results

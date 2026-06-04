@@ -11,7 +11,9 @@ from chat.application.tools.web.services.web_fetch.fetcher.content_processor imp
 from chat.application.tools.web.services.web_fetch.models import FetchedPage
 from chat.application.tools.web.utils.domains import extract_domain
 from chat.application.tools.web.utils.markdown import extract_markdown_title
-from common.logger import log_fail
+from common.logger import log_event, log_fail
+
+_MAX_ERROR_SNIPPET = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,13 +68,26 @@ class SteelFetcher(BaseFetcher):
                 metadata = response.metadata
                 status_code = metadata.status_code if metadata is not None else None
                 if status_code is not None and status_code >= 400:
+                    log_fail(
+                        "SteelFetcher scrape",
+                        f"upstream status code {status_code}",
+                        url=url,
+                        final_url=getattr(metadata, "final_url", None),
+                    )
                     return None
 
                 content = response.content
                 if content is None:
+                    log_fail(
+                        "SteelFetcher scrape",
+                        "empty content object",
+                        url=url,
+                        status_code=status_code,
+                    )
                     return None
 
                 markdown: Optional[str] = None
+                selected_format: Optional[str] = None
 
                 # 按配置格式优先级逐个尝试，获取第一个能通过内容清洗的结果
                 for output_format in self._config.formats:
@@ -92,9 +107,16 @@ class SteelFetcher(BaseFetcher):
                     )
                     if processed:
                         markdown = processed
+                        selected_format = output_format
                         break
 
                 if markdown is None:
+                    log_fail(
+                        "SteelFetcher scrape",
+                        "all requested formats were empty or unprocessable",
+                        url=url,
+                        status_code=status_code,
+                    )
                     return None
 
                 final_url = url
@@ -106,6 +128,15 @@ class SteelFetcher(BaseFetcher):
                     if metadata.title:
                         title = metadata.title.strip()
 
+                log_event(
+                    "SteelFetcher scrape success",
+                    url=url,
+                    final_url=final_url,
+                    title=title,
+                    status_code=status_code,
+                    selected_format=selected_format,
+                    markdown_length=len(markdown),
+                )
                 return FetchedPage(
                     markdown=markdown,
                     links=[],
@@ -116,8 +147,27 @@ class SteelFetcher(BaseFetcher):
                 )
 
             except steel.APIError as e:
-                log_fail("SteelFetcher", e, url=url)
+                log_fail(
+                    "SteelFetcher API",
+                    _format_steel_api_error(e),
+                    url=url,
+                )
                 return None
             except Exception as e:
                 log_fail("SteelFetcher", e, url=url)
                 return None
+
+
+def _format_steel_api_error(error: steel.APIError) -> str:
+    status_code = getattr(error, "status_code", None)
+    response = getattr(error, "response", None)
+    body = getattr(error, "body", None)
+
+    if body is None and response is not None:
+        try:
+            body = response.text
+        except Exception:
+            body = None
+
+    body_text = str(body)[:_MAX_ERROR_SNIPPET] if body is not None else ""
+    return f"{error.__class__.__name__} status_code={status_code} body={body_text}"

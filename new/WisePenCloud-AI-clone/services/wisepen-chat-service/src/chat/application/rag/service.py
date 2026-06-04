@@ -1,7 +1,10 @@
 from dataclasses import dataclass, fields
 from typing import Dict, List, Optional
 
-from chat.application.rag.domain.enums import InsufficientReason
+from chat.application.rag.domain.enums import (
+    InsufficientReason,
+    RagRecommendedNextAction,
+)
 from chat.application.rag.domain.ports import RagManifestRepository
 from chat.application.rag.domain.resource_lifecycle import RagResource
 from chat.application.rag.domain.retrieval_planning import RagRetrievalQuery
@@ -232,11 +235,15 @@ class RagService:
         retrieval_query = self._build_retrieval_query(request)
         result = await self._retrieval_pipeline.retrieve(retrieval_query)
         assembled_context = self._context_assembler.assemble(list(result.evidences))
+        next_action = _recommend_next_action(result)
+        rewrite_guidance = _build_rewrite_guidance(result, next_action)
         rendered_text = _render_evidence_pack(
             result=result,
             assembled_context_text=assembled_context.text,
             included_evidence_ids=assembled_context.included_evidence_ids,
             skipped_evidence_count=assembled_context.skipped_evidence_count,
+            recommended_next_action=next_action,
+            rewrite_guidance=rewrite_guidance,
         )
         reason = result.sufficiency.reason
         return RagSearchResult(
@@ -245,8 +252,27 @@ class RagService:
             evidence_count=len(result.evidences),
             sufficient=result.sufficiency.sufficient,
             insufficient_reason=reason.value if reason is not None else None,
+            recommended_next_action=next_action.value,
+            rewrite_guidance=rewrite_guidance,
             included_evidence_ids=assembled_context.included_evidence_ids,
             skipped_evidence_count=assembled_context.skipped_evidence_count,
+            channel_candidate_counts={
+                channel_result.channel.value: len(channel_result.candidates)
+                for channel_result in result.channel_results
+            },
+            diagnostics=[
+                {
+                    "stage": item.stage,
+                    "rank": item.rank,
+                    "candidate_id": item.candidate_id,
+                    "resource_id": item.resource_id,
+                    "chunk_id": item.chunk_id,
+                    "parent_chunk_id": item.parent_chunk_id,
+                    "score": item.score,
+                    "sources": item.sources,
+                }
+                for item in result.diagnostics
+            ],
             assembled_context=assembled_context.text,
             rendered_text=rendered_text,
         )
@@ -306,6 +332,8 @@ def _render_evidence_pack(
     assembled_context_text: str,
     included_evidence_ids: List[str],
     skipped_evidence_count: int,
+    recommended_next_action: RagRecommendedNextAction,
+    rewrite_guidance: Optional[str],
 ) -> str:
 
     is_sufficient = result.sufficiency.sufficient
@@ -329,6 +357,8 @@ def _render_evidence_pack(
             f"- can_answer: {str(is_sufficient).lower()}\n"
             f"- refusal_required: {str(not is_sufficient).lower()}\n"
             f"- policy: {policy_msg}\n"
+            f"- recommended_next_action: {recommended_next_action.value}\n"
+            f"- rewrite_guidance: {rewrite_guidance or 'none'}\n"
             "\n"
             "No indexed evidence was found for this query."
         )
@@ -347,6 +377,8 @@ def _render_evidence_pack(
         f"- can_answer: {str(is_sufficient).lower()}",
         f"- refusal_required: {str(not is_sufficient).lower()}",
         f"- policy: {policy_msg}",
+        f"- recommended_next_action: {recommended_next_action.value}",
+        f"- rewrite_guidance: {rewrite_guidance or 'none'}",
         "",
         "Result order: reranked, parent-aggregated, and MMR-selected.",
         (
@@ -387,3 +419,57 @@ def _answer_policy_message(reason: Optional[InsufficientReason]) -> str:
         )
 
     raise ValueError(f"Unsupported insufficient reason: {reason}")
+
+
+def _recommend_next_action(result) -> RagRecommendedNextAction:
+    reason = result.sufficiency.reason
+    if reason is None:
+        return RagRecommendedNextAction.ANSWER_WITH_EVIDENCE
+
+    channel_candidate_count = sum(
+        len(channel_result.candidates)
+        for channel_result in result.channel_results
+    )
+    if reason == InsufficientReason.NO_RESULTS and channel_candidate_count == 0:
+        return RagRecommendedNextAction.REWRITE_QUERY
+
+    if reason in (
+        InsufficientReason.LOW_SCORE,
+        InsufficientReason.EXACT_MODE_NO_KEYWORD_HIT,
+        InsufficientReason.NO_RESULTS,
+    ):
+        return RagRecommendedNextAction.REWRITE_QUERY
+
+    return RagRecommendedNextAction.ASK_USER_TO_UPLOAD_OR_INDEX
+
+
+def _build_rewrite_guidance(
+    result,
+    next_action: RagRecommendedNextAction,
+) -> Optional[str]:
+    if next_action != RagRecommendedNextAction.REWRITE_QUERY:
+        return None
+
+    reason = result.sufficiency.reason
+    if reason == InsufficientReason.EXACT_MODE_NO_KEYWORD_HIT:
+        return (
+            "Call rag_search again with exact mode and explicit keyword_queries. "
+            "Include important names, identifiers, titles, formulas, or original wording. "
+            "If exact wording is not required, retry with normal mode plus semantic_queries."
+        )
+
+    if reason == InsufficientReason.LOW_SCORE:
+        return (
+            "Call rag_search again with 2-3 semantic_queries that paraphrase the information need "
+            "and 1-3 keyword_queries that preserve distinctive terms. Use normal or semantic mode."
+        )
+
+    if reason == InsufficientReason.NO_RESULTS:
+        return (
+            "Call rag_search again with broader semantic_queries and simpler keyword_queries. "
+            "Remove nonessential wording, split compound questions, and include likely document titles or section terms if known."
+        )
+
+    return (
+        "Call rag_search again with rewritten semantic_queries and keyword_queries that separate concepts from exact terms."
+    )

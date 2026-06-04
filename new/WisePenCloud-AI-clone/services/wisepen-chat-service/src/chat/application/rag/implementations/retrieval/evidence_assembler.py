@@ -17,6 +17,11 @@ from chat.application.rag.domain.ports import (
 )
 from chat.application.rag.domain.reranking import RerankableDocument
 
+_RERANK_CONTEXT_LIMIT = 900
+_RERANK_SEARCH_CHUNK_LIMIT = 1200
+_RERANK_PARENT_LIMIT = 1800
+_RERANK_NEIGHBOR_LIMIT = 900
+
 
 class EvidenceAssemblyError(RuntimeError):
     """RAG Evidence 组装失败。"""
@@ -86,16 +91,11 @@ class RagEvidenceAssembler:
                     f"Parent retrieve chunk not found: {parent_candidate.chunk_id}"
                 )
 
-            neighbor_text = "\n\n".join(
-                chunk.text
-                for chunk in candidate_neighbor_chunks
-            )
-
-            rerank_text = (
-                f"Retrieval context:\n{search_record.retrieval_context}\n\n"
-                f"Matched search chunk:\n{search_record.chunk.text}\n\n"
-                f"Parent retrieve chunk:\n{parent_chunk.text}\n\n"
-                f"Neighbor chunks:\n{neighbor_text}"
+            rerank_text = _build_rerank_text(
+                retrieval_context=search_record.retrieval_context,
+                search_chunk_text=search_record.chunk.text,
+                parent_chunk_text=parent_chunk.text,
+                neighbor_texts=[chunk.text for chunk in candidate_neighbor_chunks],
             )
 
             mmr_text = (
@@ -240,6 +240,33 @@ def _build_search_and_parent_lookups(
         search_lookups=search_lookups,
         parent_lookups=parent_lookups,
     )
+
+
+def _build_rerank_text(
+    *,
+    retrieval_context: str,
+    search_chunk_text: str,
+    parent_chunk_text: str,
+    neighbor_texts: List[str],
+) -> str:
+    neighbor_text = "\n\n".join(neighbor_texts)
+    return (
+        "Retrieval context:\n"
+        f"{_trim_text(retrieval_context, _RERANK_CONTEXT_LIMIT)}\n\n"
+        "Matched search chunk:\n"
+        f"{_trim_text(search_chunk_text, _RERANK_SEARCH_CHUNK_LIMIT)}\n\n"
+        "Parent retrieve chunk:\n"
+        f"{_trim_text(parent_chunk_text, _RERANK_PARENT_LIMIT)}\n\n"
+        "Neighbor chunks:\n"
+        f"{_trim_text(neighbor_text, _RERANK_NEIGHBOR_LIMIT)}"
+    )
+
+
+def _trim_text(text: str, limit: int) -> str:
+    stripped = text.strip()
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[:limit].rstrip() + "\n[truncated]"
 
 
 def _build_neighbor_lookups(

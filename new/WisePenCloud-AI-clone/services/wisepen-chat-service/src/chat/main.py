@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import asyncio
 from contextlib import asynccontextmanager
+from typing import Optional
 
 import uvicorn
 from beanie import init_beanie
@@ -79,6 +81,8 @@ DOCUMENT_MODELS = [
     SearchChunkDocument,
 ]
 
+rag_index_worker_task: Optional[asyncio.Task[None]] = None
+
 
 async def guarded(label: str, coro) -> None:
     """执行协程；捕获并记录异常，不中断调用链。"""
@@ -94,6 +98,7 @@ async def guarded(label: str, coro) -> None:
 
 
 async def start_application() -> None:
+    global rag_index_worker_task
     log_event(f"{settings.APP_NAME} 启动")
 
     # ----- 1. 容器资源初始化（HTTP 连接池等）-----
@@ -109,6 +114,11 @@ async def start_application() -> None:
         document_models=DOCUMENT_MODELS,
     )
     log_event("Beanie 初始化", db=settings.MONGODB_DB_NAME)
+
+    if settings.RAG_INDEX_WORKER_IN_PROCESS:
+        rag_index_worker_task = asyncio.create_task(
+            container.rag_index_worker_runner().start()
+        )
 
     # ----- 4. 基础设施连接（Nacos / Kafka / Skill 缓存）-----
     await guarded("Nacos 服务注册", nacos_client_manager.register_instance())
@@ -128,7 +138,17 @@ async def start_application() -> None:
 
 
 async def shutdown_application() -> None:
+    global rag_index_worker_task
     log_event(f"{settings.APP_NAME} 关闭流程开始")
+
+    if rag_index_worker_task is not None:
+        rag_index_worker_task.cancel()
+        try:
+            await rag_index_worker_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            rag_index_worker_task = None
 
     steps = [
         ("Skill Cache Refresher",        container.skill_cache_refresher().stop),

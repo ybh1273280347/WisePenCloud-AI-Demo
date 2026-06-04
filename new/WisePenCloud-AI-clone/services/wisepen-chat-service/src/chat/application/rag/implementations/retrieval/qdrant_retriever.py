@@ -22,6 +22,7 @@ from chat.application.rag.implementations.persistence.qdrant.collection import (
     QdrantCollectionConfig,
 )
 from chat.application.rag.implementations.providers.dense import DenseEmbeddingClient
+from .scope_filter import RagScopeFilterBuilder
 
 
 class QdrantRetrievalError(RuntimeError):
@@ -81,7 +82,7 @@ class QdrantChunkRetriever:
             collection_name=self._config.collection_name,
             query=dense_vectors[0], # type: ignore
             using="dense",
-            query_filter=self._build_scope_filter(scopes),
+            query_filter=RagScopeFilterBuilder(scopes).to_qdrant_filter(),
             limit=top_k,
             with_payload=True,
         )
@@ -120,7 +121,7 @@ class QdrantChunkRetriever:
                 model="qdrant/bm25",
             ),
             using="bm25",
-            query_filter=self._build_scope_filter(scopes),
+            query_filter=RagScopeFilterBuilder(scopes).to_qdrant_filter(),
             limit=top_k,
             with_payload=True,
         )
@@ -167,37 +168,6 @@ class QdrantChunkRetriever:
 
         return dense_vector
 
-
-    def _build_scope_filter(
-        self,
-        scopes: List[RagIndexScope],
-    ) -> models.Filter:
-        """根据多维作用域对象动态构建 Qdrant 条件过滤器。"""
-        return models.Filter(
-            should=[
-                models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="user_id",
-                            match=models.MatchValue(value=scope.user_id),
-                        ),
-                        models.FieldCondition(
-                            key="resource_kind",
-                            match=models.MatchValue(value=scope.resource_kind.value),
-                        ),
-                        models.FieldCondition(
-                            key="resource_id",
-                            match=models.MatchValue(value=scope.resource_id),
-                        ),
-                        models.FieldCondition(
-                            key="index_version",
-                            match=models.MatchValue(value=scope.index_version),
-                        ),
-                    ]
-                )
-                for scope in scopes
-            ]
-        )
 
     def _to_candidate(
         self,

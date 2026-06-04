@@ -5,6 +5,7 @@ from chat.application.rag.domain.ports import (
     RagIndexingQueueRepository,
     RagQueuedIndexMessage,
 )
+from common.logger import log_fail
 from .processor import RagIndexMessageProcessor
 
 
@@ -28,6 +29,7 @@ class RagIndexWorker:
         block_ms: int = 5000,
         pending_min_idle_ms: int = 60000,
         error_sleep_seconds: float = 1.0,
+        max_attempts: int = 5,
     ) -> None:
         """初始化 Worker。
 
@@ -40,6 +42,7 @@ class RagIndexWorker:
             block_ms: 队列为空时阻塞等待的超时时间（毫秒）。
             pending_min_idle_ms: 判定 stale pending 的最小空闲时间（毫秒）。
             error_sleep_seconds: 处理异常时的休眠间隔（秒）。
+            max_attempts: 单条消息进入死信队列前的最大处理次数。
         """
         self._indexing_queue_repository = indexing_queue_repository
         self._processor = processor
@@ -49,6 +52,7 @@ class RagIndexWorker:
         self._block_ms = block_ms
         self._pending_min_idle_ms = pending_min_idle_ms
         self._error_sleep_seconds = error_sleep_seconds
+        self._max_attempts = max_attempts
 
     async def process_once(self) -> int:
         """处理一批索引消息。
@@ -69,17 +73,27 @@ class RagIndexWorker:
 
         ack_message_ids: List[str] = []
 
-        try:
-            for queued_message in queued_messages:
+        for queued_message in queued_messages:
+            try:
                 await self._processor.process(queued_message.message)
                 ack_message_ids.append(queued_message.message_id)
-        except Exception:
-            if ack_message_ids:
-                await self._indexing_queue_repository.ack_many(
-                    message_ids=ack_message_ids,
-                    consumer_group=self._consumer_group,
+            except Exception as e:
+                log_fail(
+                    "rag_index_worker",
+                    repr(e),
+                    user_id=queued_message.message.user_id,
+                    resource_kind=queued_message.message.resource_kind.value,
+                    resource_id=queued_message.message.resource_id,
+                    target_index_version=queued_message.message.target_index_version,
+                    attempts=queued_message.attempts + 1,
+                    max_attempts=self._max_attempts,
                 )
-            raise
+                await self._indexing_queue_repository.handle_failure(
+                    queued_message=queued_message,
+                    consumer_group=self._consumer_group,
+                    error=repr(e),
+                    max_attempts=self._max_attempts,
+                )
 
         if ack_message_ids:
             await self._indexing_queue_repository.ack_many(

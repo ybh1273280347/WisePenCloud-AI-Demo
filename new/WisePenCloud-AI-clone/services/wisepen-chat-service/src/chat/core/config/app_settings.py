@@ -138,6 +138,9 @@ class AppSettings(BaseModel):
     RAG_CONTEXT_PROMPT_VERSION: str = "context-prompt-v1"
     # 索引管道消费组（RAG 专属）
     RAG_INDEX_CONSUMER_GROUP: str = "wisepen-rag-indexers"
+    # Web 进程是否内嵌启动 RAG 索引 Worker；生产建议使用独立 worker 进程
+    RAG_INDEX_WORKER_IN_PROCESS: bool = False
+    RAG_INDEX_MAX_ATTEMPTS: int = 5
     # Qdrant Collection 名称
     RAG_QDRANT_COLLECTION_NAME: str = "wisepen-qdrant-rag"
     RAG_DENSE_VECTOR_SIZE: int = 2048

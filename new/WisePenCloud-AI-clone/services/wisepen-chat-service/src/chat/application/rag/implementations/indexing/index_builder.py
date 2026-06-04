@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+from common.logger import log_event
 from chat.application.rag.domain.index_publication import RagIndexManifest
 from chat.application.rag.domain.index_publication import VersionSnapshot
 from chat.application.rag.domain.ports import RagChunkRepository
@@ -112,6 +113,31 @@ class RagResourceIndexBuilder(RagIndexBuilder):
         chunking_result = self._chunker.build_chunks(resource)
         retrieve_chunks = chunking_result.retrieve_chunks
         search_chunks = chunking_result.search_chunks
+        log_event(
+            "rag indexing chunk quality",
+            user_id=resource.user_id,
+            resource_kind=resource.resource_kind.value,
+            resource_id=resource.resource_id,
+            index_version=version_snapshot.index_version,
+            retrieve_chunk_count=len(retrieve_chunks),
+            search_chunk_count=len(search_chunks),
+            avg_retrieve_chunk_length=_avg_text_length(
+                [chunk.text for chunk in retrieve_chunks]
+            ),
+            avg_search_chunk_length=_avg_text_length(
+                [chunk.text for chunk in search_chunks]
+            ),
+            short_search_chunk_count=sum(
+                1 for chunk in search_chunks if len(chunk.text) < 120
+            ),
+            search_chunks_with_heading_count=sum(
+                1 for chunk in search_chunks if "Section: " in chunk.text
+            ),
+            fenced_code_block_count=resource.content.count("```") // 2,
+            markdown_table_line_count=sum(
+                1 for line in resource.content.splitlines() if "|" in line
+            ),
+        )
 
         # 为每个 search_chunk 生成检索上下文。
         # Context Indexing 永远启用，生成失败会直接中断索引构建。
@@ -183,4 +209,10 @@ class RagResourceIndexBuilder(RagIndexBuilder):
                 current_index_version=version_snapshot.index_version,
             )
         )
+
+
+def _avg_text_length(texts) -> int:
+    if not texts:
+        return 0
+    return int(sum(len(text) for text in texts) / len(texts))
 

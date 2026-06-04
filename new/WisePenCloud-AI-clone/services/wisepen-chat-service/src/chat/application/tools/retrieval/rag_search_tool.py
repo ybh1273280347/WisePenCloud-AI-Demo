@@ -130,6 +130,14 @@ _TOOL_SCHEMA = {
             "maximum": 1.0,
             "description": "MMR relevance-diversity tradeoff weight. If omitted, determined by mode.",
         },
+        "debug": {
+            "type": "boolean",
+            "description": (
+                "Optional. When true, append a short retrieval diagnostics summary "
+                "with channel candidate counts and answerability status."
+            ),
+            "default": False,
+        },
     },
     "required": ["query"],
     "additionalProperties": False,
@@ -179,6 +187,7 @@ class RagSearchTool(BaseTool):
                 neighbor_before=kwargs.get("neighbor_before"),
                 neighbor_after=kwargs.get("neighbor_after"),
                 mmr_lambda=kwargs.get("mmr_lambda"),
+                debug=kwargs.get("debug", False),
             )
         except ValueError as e:
             return f"[Tool Error] {str(e)}"
@@ -205,4 +214,59 @@ class RagSearchTool(BaseTool):
             evidence_count=result.evidence_count,
         )
 
-        return result.rendered_text
+        if not search_request.debug:
+            return result.rendered_text
+
+        return (
+            result.rendered_text
+            + "\n\n"
+            + _render_debug_summary(result=result)
+        )
+
+
+def _render_debug_summary(*, result) -> str:
+    """渲染简短 RAG 调试摘要。"""
+    channel_lines = [
+        f"- {channel}: {count}"
+        for channel, count in result.channel_candidate_counts.items()
+    ]
+    if not channel_lines:
+        channel_lines = ["- none: 0"]
+
+    return "\n".join(
+        [
+            "[Debug] RAG retrieval summary",
+            "Channel candidate counts:",
+            *channel_lines,
+            "Diagnostics:",
+            *_render_diagnostic_lines(result.diagnostics),
+            f"Evidence count: {result.evidence_count}",
+            f"Sufficient: {str(result.sufficient).lower()}",
+            f"Insufficient reason: {result.insufficient_reason or 'none'}",
+            f"Recommended next action: {result.recommended_next_action}",
+            f"Rewrite guidance: {result.rewrite_guidance or 'none'}",
+            f"Included evidence ids: {', '.join(result.included_evidence_ids) or 'none'}",
+            f"Skipped evidence count: {result.skipped_evidence_count}",
+        ]
+    )
+
+
+def _render_diagnostic_lines(diagnostics) -> list:
+    """渲染检索排序诊断行。"""
+    if not diagnostics:
+        return ["- none"]
+
+    lines = []
+    for item in diagnostics[:20]:
+        sources = ",".join(item.get("sources", [])) or "none"
+        lines.append(
+            "- "
+            f"{item.get('stage')} "
+            f"rank={item.get('rank')} "
+            f"score={item.get('score')} "
+            f"resource={item.get('resource_id')} "
+            f"chunk={item.get('chunk_id')} "
+            f"parent={item.get('parent_chunk_id')} "
+            f"sources={sources}"
+        )
+    return lines

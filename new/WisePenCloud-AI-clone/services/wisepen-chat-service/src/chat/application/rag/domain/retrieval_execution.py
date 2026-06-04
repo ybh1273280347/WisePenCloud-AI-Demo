@@ -8,6 +8,20 @@ from .retrieval_planning import RagRetrievalQuery
 
 
 @dataclass(frozen=True, slots=True)
+class RagRetrievalDiagnosticItem:
+    """检索诊断项。"""
+
+    stage: str
+    rank: int
+    candidate_id: str
+    resource_id: str
+    chunk_id: str
+    parent_chunk_id: str
+    score: float
+    sources: List[str]
+
+
+@dataclass(frozen=True, slots=True)
 class RagRetrievalPipelineResult:
     """RAG 检索流水线结果。
 
@@ -22,3 +36,4 @@ class RagRetrievalPipelineResult:
     channel_results: List[ChannelRetrievalResult]
     evidences: List[RagEvidence]
     sufficiency: SufficiencyResult
+    diagnostics: List[RagRetrievalDiagnosticItem]

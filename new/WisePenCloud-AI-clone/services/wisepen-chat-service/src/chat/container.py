@@ -455,6 +455,7 @@ def _register_rag(container_cls: Any) -> None:
         processor=container_cls.rag_index_processor,
         consumer_group=settings.RAG_INDEX_CONSUMER_GROUP,
         consumer_name=settings.SERVICE_NAME,
+        max_attempts=settings.RAG_INDEX_MAX_ATTEMPTS,
     )
 
     container_cls.rag_index_worker_runner = providers.Singleton(

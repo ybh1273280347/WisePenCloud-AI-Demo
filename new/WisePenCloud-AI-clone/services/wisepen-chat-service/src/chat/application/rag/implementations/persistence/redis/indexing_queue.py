@@ -12,6 +12,7 @@ from chat.application.rag.enums import ResourceKind
 from chat.core.config.app_settings import settings
 
 _RAG_INDEXING_STREAM = "wisepen:rag:indexing"
+_RAG_INDEXING_DEAD_STREAM = "wisepen:rag:indexing:dead"
 
 
 class RedisRagIndexingQueue(RagIndexingQueueRepository):
@@ -48,6 +49,7 @@ class RedisRagIndexingQueue(RagIndexingQueueRepository):
                 "pipeline_version": message.pipeline_version,
                 "target_index_version": message.target_index_version,
                 "priority": str(message.priority),
+                "attempts": "0",
             },
         )
 
@@ -116,6 +118,7 @@ class RedisRagIndexingQueue(RagIndexingQueueRepository):
             RagQueuedIndexMessage(
                 message_id=msg_id,
                 message=self._deserialize(fields),
+                attempts=int(fields.get("attempts", "0")),
             )
             for _, raw_messages in (raw_streams or [])
             for msg_id, fields in raw_messages
@@ -168,6 +171,7 @@ class RedisRagIndexingQueue(RagIndexingQueueRepository):
             RagQueuedIndexMessage(
                 message_id=msg_id,
                 message=self._deserialize(fields),
+                attempts=int(fields.get("attempts", "0")),
             )
             for msg_id, fields in raw_result[1]
         ]
@@ -186,6 +190,34 @@ class RedisRagIndexingQueue(RagIndexingQueueRepository):
                 *message_ids,
             )
 
+    async def handle_failure(
+        self,
+        queued_message: RagQueuedIndexMessage,
+        consumer_group: str,
+        error: str,
+        max_attempts: int,
+    ) -> None:
+        """失败消息超过阈值进入死信队列，否则重新入主队列。"""
+        next_attempts = queued_message.attempts + 1
+        target_stream = (
+            _RAG_INDEXING_DEAD_STREAM
+            if next_attempts >= max_attempts
+            else _RAG_INDEXING_STREAM
+        )
+
+        await self.redis.xadd(
+            name=target_stream,
+            fields={
+                **self._serialize(queued_message.message),
+                "attempts": str(next_attempts),
+                "failed_message_id": queued_message.message_id,
+                "last_error": error[:1000],
+            },
+        )
+        await self.ack(
+            message_id=queued_message.message_id,
+            consumer_group=consumer_group,
+        )
 
     def _deserialize(self, fields: Dict[str, Any]) -> RagIndexMessage:
         """反序列化 Redis Stream 字段。
@@ -204,3 +236,14 @@ class RedisRagIndexingQueue(RagIndexingQueueRepository):
             target_index_version=fields["target_index_version"],
             priority=int(fields["priority"]),
         )
+
+    def _serialize(self, message: RagIndexMessage) -> Dict[str, str]:
+        return {
+            "user_id": message.user_id,
+            "resource_kind": message.resource_kind.value,
+            "resource_id": message.resource_id,
+            "expected_version": str(message.expected_version),
+            "pipeline_version": message.pipeline_version,
+            "target_index_version": message.target_index_version,
+            "priority": str(message.priority),
+        }

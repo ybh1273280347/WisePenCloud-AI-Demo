@@ -1,4 +1,5 @@
 import hashlib
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -136,7 +137,10 @@ class ElasticsearchKeywordIndexer:
                         "parent_chunk_index": chunk.parent_chunk_index,
                         "chunk_index": chunk.chunk_index,
                         "display_name": display_name,
-                        "heading_path": heading_path,
+                        "heading_path": _extract_heading_path(
+                            chunk.text,
+                            default=heading_path,
+                        ),
                         "keyword_text": indexing_text_pair.keyword_text,
                     },
                 }
@@ -207,3 +211,13 @@ def build_elasticsearch_client(config: ElasticsearchClientConfig) -> AsyncElasti
         hosts=config.uris,
         basic_auth=(config.username, config.password),
     )
+
+
+def _extract_heading_path(text: str, default: str) -> str:
+    """从注入后的 chunk 文本中提取章节路径。"""
+    for line in text.splitlines():
+        match = re.match(r"^Section:\s*(.+?)\s*$", line)
+        if match is not None:
+            return match.group(1).strip()
+
+    return default

@@ -11,6 +11,7 @@ from chat.application.rag.domain.retrieval_planning import (
     RagIndexScope,
 )
 from chat.application.rag.enums import ResourceKind
+from .scope_filter import RagScopeFilterBuilder
 
 
 class ElasticsearchRetrievalError(RuntimeError):
@@ -53,7 +54,7 @@ class ElasticsearchKeywordRetriever:
             index=self._index_name,
             query=self._build_keyword_query(
                 query=query,
-                scopes=scopes,
+                scope_filter=RagScopeFilterBuilder(scopes).to_elasticsearch_filter(),
             ),
             size=top_k,
         )
@@ -76,7 +77,7 @@ class ElasticsearchKeywordRetriever:
         self,
         *,
         query: str,
-        scopes: List[RagIndexScope],
+        scope_filter: Dict[str, Any],
     ) -> Dict[str, Any]:
         """构建 keyword_exact 查询 DSL。
 
@@ -123,32 +124,8 @@ class ElasticsearchKeywordRetriever:
                 ],
                 "minimum_should_match": 1,
                 "filter": [
-                    self._build_scope_filter(scopes),
+                    scope_filter,
                 ],
-            }
-        }
-
-    def _build_scope_filter(
-            self,
-            scopes: List[RagIndexScope],
-    ) -> Dict[str, Any]:
-        """将多维业务作用域对象动态解析为标准的 ES bool-should DSL 过滤器。"""
-        return {
-            "bool": {
-                "should": [
-                    {
-                        "bool": {
-                            "filter": [
-                                {"term": {"user_id": scope.user_id}},
-                                {"term": {"resource_kind": scope.resource_kind.value}},
-                                {"term": {"resource_id": scope.resource_id}},
-                                {"term": {"index_version": scope.index_version}},
-                            ]
-                        }
-                    }
-                    for scope in scopes
-                ],
-                "minimum_should_match": 1,
             }
         }
 

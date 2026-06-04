@@ -140,6 +140,7 @@ from chat.application.tools.skill.services.skill_create.service import (
     SkillMarkdownRenderer,
 )
 from chat.application.tools.skill.skill_create_tool import CreateSkillBundleTool
+from chat.application.tools.text.count_text_chars_tool import CountTextCharsTool
 from chat.application.tools.tool_content_store import (
     ToolContentStore,
     _TOOL_CONTENT_STORE_MAX_ITEM_CHARS,
@@ -375,6 +376,11 @@ def register_tools(container_cls: Any) -> None:
         "translation_assist_tool",
         TranslationAssistTool,
         service=container_cls.translation_assist_service,
+    )
+
+    tool(
+        "count_text_chars_tool",
+        CountTextCharsTool,
     )
 
     tool(

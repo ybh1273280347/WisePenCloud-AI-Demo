@@ -6,6 +6,9 @@ from chat.application.rag.domain.candidate_fusion import RagFusedCandidate
 from chat.application.rag.domain.enums import RetrievalChannel
 from chat.application.rag.domain.retrieval_hits import SearchChunkHit
 
+_CHILD_DENSITY_BONUS = 0.002
+_CHANNEL_DENSITY_BONUS = 0.001
+
 
 @dataclass(frozen=True, slots=True)
 class ParentCandidate:
@@ -111,6 +114,15 @@ class RagParentAggregator:
 
         matched_channels = list(dict.fromkeys(c.candidate.channel for c in child_candidates))
         matched_queries = list(dict.fromkeys(c.candidate.matched_query for c in child_candidates))
+        matched_child_ids = {
+            c.candidate.chunk_id
+            for c in child_candidates
+        }
+
+        density_bonus = (
+            (len(matched_child_ids) - 1) * _CHILD_DENSITY_BONUS
+            + (len(matched_channels) - 1) * _CHANNEL_DENSITY_BONUS
+        )
 
         return ParentCandidate(
             user_id=best_cand_item.user_id,
@@ -121,5 +133,5 @@ class RagParentAggregator:
             best_child_hit=best_child_hit,
             matched_channels=matched_channels,
             matched_queries=matched_queries,
-            rrf_score=best_candidate.rrf_score,
+            rrf_score=best_candidate.rrf_score + density_bonus,
         )

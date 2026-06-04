@@ -619,6 +619,7 @@ class RagQueuedIndexMessage:
 
     message_id: str
     message: RagIndexMessage
+    attempts: int = 0
 
 
 class RagIndexingQueueRepository(ABC):
@@ -704,4 +705,15 @@ class RagIndexingQueueRepository(ABC):
             message_ids: 消息 ID 列表。
             consumer_group: 消费者组名。
         """
+        pass
+
+    @abstractmethod
+    async def handle_failure(
+        self,
+        queued_message: RagQueuedIndexMessage,
+        consumer_group: str,
+        error: str,
+        max_attempts: int,
+    ) -> None:
+        """处理失败消息：重试或进入死信队列，并确认原消息。"""
         pass
