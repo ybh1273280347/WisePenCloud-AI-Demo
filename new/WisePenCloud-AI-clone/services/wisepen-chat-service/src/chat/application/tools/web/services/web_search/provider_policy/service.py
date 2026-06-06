@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Optional
 
 from chat.application.tools.web.services.web_search.enums import ProviderMode, SearcherName
@@ -11,7 +10,11 @@ from chat.application.tools.web.services.web_search.provider_policy.encryption i
 )
 from chat.application.tools.web.services.web_search.provider_policy.persistence import (
     BaseSearchProviderConfigRepository,
+    UserSearchProviderConfig,
     UserSearchProviderConfigUpsertDTO,
+)
+from chat.application.tools.web.services.web_search.provider_policy.models import (
+    SearchProviderConfig,
 )
 from chat.application.tools.web.services.web_search.provider_policy.validator import (
     SearchProviderConfigValidator,
@@ -20,19 +23,6 @@ from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 
 _ANYSEARCH_ANONYMOUS_ENCRYPTED_KEY = "__anysearch_anonymous__"
-
-
-@dataclass(frozen=True, slots=True)
-class SearchProviderConfig:
-    """搜索提供者运行时配置的快照。
-
-    包含模式（DEFAULT/CUSTOM）、激活的 provider、API Key 及其有效性状态。
-    """
-    provider_mode: ProviderMode
-    active_provider: Optional[SearcherName] = None
-    api_key: Optional[str] = None
-    is_valid: bool = True
-    error_message: Optional[str] = None
 
 
 class SearchProviderConfigService:

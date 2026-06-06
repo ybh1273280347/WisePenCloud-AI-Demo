@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
+from chat.application.tools.web.services.web_crawl.enums import (
+    CrawlItemKind,
+    CrawlSkipReason,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CrawlRequest:
@@ -19,14 +24,14 @@ class CrawlRequest:
 class CrawlResultItem:
     """爬取结果中的单个条目，包含 URL、类型、深度、内容和状态。"""
     url: str
-    kind: str
+    kind: CrawlItemKind
     depth: int
     success: bool
     content_block: Optional[str] = None
     file_ref: Optional[str] = None
     source_url: Optional[str] = None
     error: Optional[str] = None
-    skip_reason: Optional[str] = None
+    skip_reason: Optional[CrawlSkipReason] = None
 
 
 @dataclass(frozen=True, slots=True)

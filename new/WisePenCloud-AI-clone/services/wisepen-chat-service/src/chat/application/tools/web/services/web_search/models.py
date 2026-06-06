@@ -1,26 +1,14 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-from chat.application.tools.web.services.web_search.enums import SearcherName, SearchMode, ProviderMode
-
-# 自定义源白名单收拢
-CUSTOM_PROVIDER_NAMES = frozenset({
-    SearcherName.CUSTOM_SERPER,
-    SearcherName.TAVILY,
-    SearcherName.BRAVE,
-    SearcherName.SERPAPI,
-    SearcherName.EXA,
-    SearcherName.PERPLEXITY,
-    SearcherName.ANYSEARCH,
-})
-
-
-@dataclass(frozen=True, slots=True)
-class CustomProviderCredential:
-    """自定义源 API 密钥凭证"""
-
-    provider: SearcherName
-    api_key: Optional[str]
+from chat.application.tools.web.services.web_search.enums import (
+    ProviderMode,
+    SearcherName,
+    SearchMode,
+)
+from chat.application.tools.web.services.web_search.provider_policy.models import (
+    CustomProviderCredential,
+)
 
 
 @dataclass(frozen=True, slots=True)

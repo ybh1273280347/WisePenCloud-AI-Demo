@@ -9,14 +9,14 @@ import asyncio
 
 from beanie import init_beanie
 
-from chat.application.rag.implementations.persistence.mongodb.entities.chunk_documents import (
+from chat.application.rag.runtime.persistence.entities.chunk_documents import (
     RetrieveChunkDocument,
     SearchChunkDocument,
 )
-from chat.application.rag.implementations.persistence.mongodb.entities.manifest_documents import (
+from chat.application.rag.runtime.persistence.entities import (
     RagIndexManifestDocument,
 )
-from chat.application.rag.implementations.persistence.mongodb.entities.resource_documents import (
+from chat.application.rag.runtime.persistence.entities import (
     DocumentResourceDocument,
     NoteResourceDocument,
 )

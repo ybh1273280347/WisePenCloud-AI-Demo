@@ -19,7 +19,6 @@ dependencies = [
     "nacos-sdk-python",
     "pyyaml",
     "wisepen-common",
-
     # ==========================================
     # 2. 数据库与高性能持久化驱动 (Storage & Vector & Search DB)
     # ==========================================
@@ -28,7 +27,6 @@ dependencies = [
     "qdrant_client",   # 向量数据库
     "elasticsearch",   # 倒排索引与关键词检索
     "dnspython",       # 安全解析与基建连接兜底
-
     # ==========================================
     # 3. 大模型、记忆门面与 RAG 网关 (LLM, Memory & Gateway)
     # ==========================================
@@ -36,7 +34,6 @@ dependencies = [
     "litellm",
     "zeroentropy",
     "mem0ai[nlp]",
-
     # ==========================================
     # 4. 文档解析、高级 PDF 抽取与网页面料抓取 (Document Parsers & Ingestion)
     # ==========================================
@@ -55,7 +52,6 @@ dependencies = [
     # ==========================================
     "jieba",                   # 传统中文分词 (服务于 BM25/Exact)
     "rank-bm25",               # 传统检索算法
-
     # ==========================================
     # 6. 垂直算法、深度学习与 OCR 生态 (Torch & Paddle Heavy Engines)
     # ==========================================
@@ -65,7 +61,6 @@ dependencies = [
     "sentencex",               # 翻译前句子边界切分
     "paddleocr",               # 垂直 OCR 提取
     "paddlepaddle==3.1.1",     # 飞桨深度学习底层
-
     # ==========================================
     # 7. 基础科学计算、重度数据处理与安全 (Data Science & Security)
     # ==========================================
@@ -76,12 +71,12 @@ dependencies = [
     "sympy",                   # 专有业务：符号数学计算与推理
     "cachetools",              # 运行时内存缓存
     "cryptography>=48.0.0",    # 凭证底层刚性加解密
-
     # ==========================================
     # 8. 可溯源图表渲染 (Provenance-aware Chart Render)
     # ==========================================
     "matplotlib",               # Chart Render 唯一渲染后端
     "seaborn",                   # 普通 session quick chart 风格化绘图；可追溯 chart 不使用
+    "regex>=2024.11.6",
 ]
 
 [dependency-groups]

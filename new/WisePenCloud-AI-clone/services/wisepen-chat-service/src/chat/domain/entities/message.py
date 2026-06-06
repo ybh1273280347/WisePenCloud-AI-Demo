@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Dict, List, Optional
 
 import jieba
@@ -8,7 +8,7 @@ from pydantic import ConfigDict, Field
 from pymongo import ASCENDING, IndexModel
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"

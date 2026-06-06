@@ -2,8 +2,8 @@ import httpx
 
 from chat.application.tools.web.services.web_search.cache import SearchCache
 from chat.application.tools.web.services.web_search.enums import SearcherName
-from chat.application.tools.web.services.web_search.models import CustomProviderCredential
-from chat.application.tools.web.services.web_search.runner.custom import CustomProviderRunner
+from chat.application.tools.web.services.web_search.provider_policy.models import CustomProviderCredential
+from chat.application.tools.web.services.web_search.runtime.runner import CustomProviderRunner
 
 
 class SearchProviderConfigValidator:

@@ -21,7 +21,7 @@ for _LOGGER_NAME in ("courlan", "htmldate", "trafilatura"):
 _RENDERED_CONTENT_SCRIPT = r"""() => {
     const candidateSelectors = [
         '#mw-content-text',
-        '.mw-parser-output',
+        '.mw-parsers-output',
         'article',
         'main',
         '[role="main"]',

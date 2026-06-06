@@ -12,78 +12,79 @@ from chat.application.api_service.rag import RagApiService
 from chat.application.api_service.search_provider import SearchProviderConfigApiService
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.model_resolver import ModelResolver
-from chat.application.rag.domain.answerability import EvidenceSufficiencyEvaluator
-from chat.application.rag.domain.candidate_fusion import RagCandidateFusion
-from chat.application.rag.domain.parent_aggregation import RagParentAggregator
-from chat.application.rag.implementations.gc.scheduler import RagIndexGcScheduler
-from chat.application.rag.implementations.gc.service import RagIndexGcService
-from chat.application.rag.implementations.indexing.chunker import ChunkingConfig, RagChunker
-from chat.application.rag.implementations.indexing.context_builder import (
+from chat.application.rag.runtime.retrieval.stages.answerability import EvidenceSufficiencyEvaluator
+from chat.application.rag.runtime.retrieval.stages.candidate_fusion import RagCandidateFusion
+from chat.application.rag.runtime.retrieval.stages.parent_aggregation import RagParentAggregator
+from chat.application.rag.gc import RagIndexGcScheduler
+from chat.application.rag.gc import RagIndexGcService
+from chat.application.rag.runtime.resources.chunker import ChunkingConfig, RagChunker
+from chat.application.rag.runtime.indexing.index_builder.context_indexing import (
     RagContextBuilder,
     RagContextBuilderConfig,
 )
-from chat.application.rag.implementations.indexing.index_builder import RagResourceIndexBuilder
-from chat.application.rag.implementations.indexing.indexing_text_builder import RagIndexingTextBuilder
-from chat.application.rag.implementations.indexing.processor import RagIndexProcessor
-from chat.application.rag.implementations.indexing.runner import RagIndexWorkerRunner
-from chat.application.rag.implementations.indexing.worker import RagIndexWorker
-from chat.application.rag.implementations.persistence.elasticsearch.keyword_indexer import (
+from chat.application.rag.runtime.indexing.index_builder.index_builder import RagResourceIndexBuilder
+from chat.application.rag.runtime.indexing.index_builder.indexing_text_builder import RagIndexingTextBuilder
+from chat.application.rag.runtime.indexing.processor import RagIndexProcessor
+from chat.application.rag.runtime.indexing.runner import RagIndexWorkerRunner
+from chat.application.rag.runtime.indexing.worker import RagIndexWorker
+from chat.application.rag.runtime.indexing.indexers.keyword_indexer import (
     ElasticsearchClientConfig,
     ElasticsearchKeywordIndexer,
     build_elasticsearch_client,
 )
-from chat.application.rag.implementations.persistence.mongodb.repositories.cache_repository import (
+from chat.application.rag.runtime.persistence.repositories import (
     MongoRagContextCacheRepository,
     MongoRagDenseEmbeddingCacheRepository,
     MongoRagQueryEmbeddingCacheRepository,
 )
-from chat.application.rag.implementations.persistence.mongodb.repositories.chunk_repository import (
+from chat.application.rag.runtime.persistence.repositories.chunk_repository import (
     MongoChunkRepository,
 )
-from chat.application.rag.implementations.persistence.mongodb.repositories.manifest_repository import (
+from chat.application.rag.runtime.persistence.repositories.manifest_repository import (
     MongoManifestRepository,
 )
-from chat.application.rag.implementations.persistence.mongodb.repositories.resource_repository import (
+from chat.application.rag.runtime.persistence.repositories.resource_repository import (
     MongoDocumentResourceRepository,
     MongoNoteResourceRepository,
 )
-from chat.application.rag.implementations.persistence.qdrant.collection import (
+from chat.application.rag.runtime.indexing.indexers.qdrant_collection import (
     QdrantCollectionConfig,
     QdrantCollectionManager,
     build_qdrant_client,
 )
-from chat.application.rag.implementations.persistence.qdrant.indexer import QdrantChunkIndexer
-from chat.application.rag.implementations.persistence.redis.indexing_queue import RedisRagIndexingQueue
-from chat.application.rag.implementations.providers.context_client import (
+from chat.application.rag.runtime.indexing.indexers.qdrant_indexer import QdrantChunkIndexer
+from chat.application.rag.runtime.indexing.indexing_queue import RedisRagIndexingQueue
+from chat.application.rag.runtime.llm_clients.context_client import (
     LiteLLMContextClient,
     LiteLLMContextClientConfig,
 )
-from chat.application.rag.implementations.providers.dense import (
+from chat.application.rag.runtime.llm_clients.dense_embedding import (
     CachedDenseEmbeddingClient,
     LiteLLMDenseEmbeddingClient,
     LiteLLMDenseEmbeddingClientConfig,
 )
-from chat.application.rag.implementations.resources.resource_handlers import (
+from chat.application.rag.runtime.resources.resource_handlers import (
     DocumentResourceHandler,
     NoteResourceHandler,
 )
-from chat.application.rag.implementations.resources.resource_service import ResourceService
-from chat.application.rag.implementations.resources.version_service import (
+from chat.application.rag.runtime.resources.resource_service import ResourceService
+from chat.application.rag.runtime.resources.version_service import (
     RagPipelineVersionConfig,
     RagVersionService,
 )
-from chat.application.rag.implementations.retrieval.context_assembler import RagContextAssembler
-from chat.application.rag.implementations.retrieval.elasticsearch_retriever import (
+from chat.application.rag.runtime.context_assembler import RagContextAssembler
+from chat.application.rag.runtime.retrieval.retrievers.elasticsearch_retriever import (
     ElasticsearchKeywordRetriever,
 )
-from chat.application.rag.implementations.retrieval.evidence_assembler import RagEvidenceAssembler
-from chat.application.rag.implementations.retrieval.manifest_resolver import RagManifestResolver
-from chat.application.rag.implementations.retrieval.qdrant_retriever import QdrantChunkRetriever
-from chat.application.rag.implementations.retrieval.reranker import ZeroEntropyReranker
-from chat.application.rag.implementations.retrieval.retrieval_orchetrator import (
+from chat.application.rag.runtime.retrieval.stages.evidence_assembler import RagEvidenceAssembler
+from chat.application.rag.runtime.retrieval.stages.evidence_selector import RagEvidenceSelector
+from chat.application.rag.runtime.manifest_resolver import RagManifestResolver
+from chat.application.rag.runtime.retrieval.retrievers.qdrant_retriever import QdrantChunkRetriever
+from chat.application.rag.runtime.retrieval.stages.reranker import ZeroEntropyReranker
+from chat.application.rag.runtime.retrieval.channels.orchestrator import (
     RagRetrievalOrchestrator,
 )
-from chat.application.rag.implementations.retrieval.retrieval_pipeline import RagRetrievalPipeline
+from chat.application.rag.runtime.retrieval.pipeline import RagRetrievalPipeline
 from chat.application.rag.service import RagService
 from chat.application.skill_cache_refresher import SkillCacheRefresher
 from chat.application.skill_matcher import KeywordSkillMatcher
@@ -476,6 +477,7 @@ def _register_rag(container_cls: Any) -> None:
         manifest_resolver=container_cls.rag_manifest_resolver,
         qdrant_retriever=container_cls.rag_qdrant_chunk_retriever,
         elasticsearch_retriever=container_cls.rag_elasticsearch_keyword_retriever,
+        channel_timeout_seconds=settings.RAG_RETRIEVAL_CHANNEL_TIMEOUT_SECONDS,
     )
 
     container_cls.rag_candidate_fusion = providers.Singleton(RagCandidateFusion)
@@ -484,6 +486,8 @@ def _register_rag(container_cls: Any) -> None:
         RagEvidenceAssembler,
         chunk_repository=container_cls.rag_chunk_repository,
     )
+
+    container_cls.rag_evidence_selector = providers.Singleton(RagEvidenceSelector)
 
     container_cls.rag_parent_aggregator = providers.Singleton(RagParentAggregator)
 
@@ -512,6 +516,7 @@ def _register_rag(container_cls: Any) -> None:
         retrieval_orchestrator=container_cls.rag_retrieval_service,
         candidate_fusion=container_cls.rag_candidate_fusion,
         evidence_assembler=container_cls.rag_evidence_assembler,
+        evidence_selector=container_cls.rag_evidence_selector,
         reranker=container_cls.rag_reranker,
         sufficiency_evaluator=container_cls.rag_evidence_sufficiency_evaluator,
         parent_aggregator=container_cls.rag_parent_aggregator,

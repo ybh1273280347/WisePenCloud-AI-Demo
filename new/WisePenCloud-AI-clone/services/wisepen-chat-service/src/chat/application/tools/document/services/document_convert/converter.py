@@ -15,7 +15,7 @@ from chat.application.tools.document.services.document_convert.errors import (
     UnsupportedDocumentRouteError,
 )
 from chat.application.tools.document.services.document_export.enums import ExportSourceFormat
-from chat.application.tools.document.services.document_export.renderers.markdown_renderer import MarkdownRenderer
+from chat.application.tools.document.services.document_export.runtime.renderers.markdown_renderer import MarkdownRenderer
 from chat.application.tools.document.services.document_parse.errors import (
     DocumentParseError,
 )

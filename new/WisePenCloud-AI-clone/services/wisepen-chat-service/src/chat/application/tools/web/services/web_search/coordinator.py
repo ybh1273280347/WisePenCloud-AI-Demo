@@ -4,20 +4,18 @@ import uuid
 from typing import Any, Callable, List
 
 from chat.application.algorithms.hash import stable_hash
-from chat.application.tools.web.services.web_search.domain.provider_routing import (
+from chat.application.tools.web.services.web_search.runtime.provider_routing import (
     ProviderCallSelector,
 )
-from chat.application.tools.web.services.web_search.domain.query_planning import (
+from chat.application.tools.web.services.web_search.runtime.query_planning import (
     MERGED_CANDIDATE_LIMIT,
     build_search_plan,
 )
-from chat.application.tools.web.services.web_search.domain.result_ranking import (
-    RankedSearchResultCandidate,
+from chat.application.tools.web.services.web_search.runtime.result_ranking import (
     SearchResultRankingPipeline,
 )
-from chat.application.tools.web.services.web_search.domain.variant_execution import (
-    VariantSearchResponse,
-)
+from chat.application.tools.web.services.web_search.runtime.models import VariantSearchResponse, \
+    RankedSearchResultCandidate
 from chat.application.tools.web.services.web_search.enums import ProviderMode
 from chat.application.tools.web.services.web_search.errors import (
     CustomSearchProviderUnavailableError,
@@ -30,21 +28,20 @@ from chat.application.tools.web.services.web_search.models import (
     SearchResult,
     WikipediaGroundingResult,
 )
-from chat.application.tools.web.services.web_search.runner.custom import (
+from chat.application.tools.web.services.web_search.runtime.runner import (
     CustomProviderRunner,
 )
-from chat.application.tools.web.services.web_search.runner.fourget import (
+from chat.application.tools.web.services.web_search.runtime.runner import (
     FourGetSearchRunner,
 )
-from chat.application.tools.web.services.web_search.runner.serper import (
+from chat.application.tools.web.services.web_search.runtime.runner.serper import (
     SerperSearchRunner,
 )
-from chat.application.tools.web.services.web_search.runner.wikipedia import (
+from chat.application.tools.web.services.web_search.runtime.runner.wikipedia import (
     WikipediaRunner,
 )
-
-
 from common.logger import log_event, log_fail
+
 
 def _source_to_string(source: object) -> str:
     """将搜索源统一转换为字符串。

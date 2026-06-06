@@ -12,16 +12,16 @@ from chat.application.tools.document.services.document_parse.models import (
     DocumentParseResult,
     DocumentParseResultItem,
 )
-from chat.application.tools.document.services.document_parse.parser.epub import (
+from chat.application.tools.document.services.document_parse.parsers.epub import (
     EpubParser,
 )
-from chat.application.tools.document.services.document_parse.parser.office.parser import (
+from chat.application.tools.document.services.document_parse.parsers.office.parser import (
     OfficeParser,
 )
-from chat.application.tools.document.services.document_parse.parser.pdf.parser import (
+from chat.application.tools.document.services.document_parse.parsers.pdf.parser import (
     PdfParser,
 )
-from chat.application.tools.document.services.document_parse.parser.spreadsheet import (
+from chat.application.tools.document.services.document_parse.parsers.spreadsheet import (
     SpreadsheetParser,
 )
 from chat.application.tools.document.services.document_parse.utils.suffixes import (
@@ -36,7 +36,7 @@ class DocumentParseService:
     """
     文档解析服务总入口。
 
-    - 根据文件后缀路由到具体 parser。
+    - 根据文件后缀路由到具体 parsers。
     - 对外提供单文件解析 parse_path。
     - 对外提供多文件并发解析 parse_many。
     """

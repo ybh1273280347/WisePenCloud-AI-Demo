@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from chat.application.tools.chart.services.models import (
     ChartRenderPayload,

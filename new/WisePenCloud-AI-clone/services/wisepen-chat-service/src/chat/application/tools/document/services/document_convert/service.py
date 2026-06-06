@@ -5,15 +5,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ContextManager, Optional
 
-from chat.application.infra.document_temp_files.processing_scope import document_processing_scope
 from chat.application.infra.document_temp_files.errors import (
     InvalidDocumentRefError as TempInvalidDocumentRefError,
     UnreadableDocumentRefError as TempUnreadableDocumentRefError,
 )
+from chat.application.infra.document_temp_files.processing_scope import document_processing_scope
 from chat.application.infra.document_temp_files.resolver import DocumentTempFileResolver
 from chat.application.tools.document.services.document_export.enums import ExportFormat, ExportSourceFormat
 from chat.application.tools.document.services.document_export.errors import DocumentExportError
-from chat.application.tools.document.services.document_export.models import ExportOptions, GeneratedDocumentFile
+from chat.application.tools.document.services.document_export.models import GeneratedDocumentFile
+from chat.application.tools.document.services.document_export.runtime.models import ExportOptions
 from chat.application.tools.document.services.document_export.runtime.download_resolver import (
     DocumentDownloadResolver,
 )

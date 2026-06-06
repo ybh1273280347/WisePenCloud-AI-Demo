@@ -49,19 +49,19 @@ from chat.application.tools.document.document_export_tool import DocumentExportT
 from chat.application.tools.document.document_parse_tool import DocumentParseTool
 from chat.application.tools.document.services.document_convert import DocumentConvertService
 from chat.application.tools.document.services.document_convert.converter import MarkdownConverter
-from chat.application.tools.document.services.document_export.renderers.docx_renderer import (
+from chat.application.tools.document.services.document_export.runtime.renderers.docx_renderer import (
     DocxRenderer,
 )
-from chat.application.tools.document.services.document_export.renderers.html_renderer import (
+from chat.application.tools.document.services.document_export.runtime.renderers.html_renderer import (
     HtmlRenderer,
 )
-from chat.application.tools.document.services.document_export.renderers.markdown_renderer import (
+from chat.application.tools.document.services.document_export.runtime.renderers.markdown_renderer import (
     MarkdownRenderer,
 )
-from chat.application.tools.document.services.document_export.renderers.pdf_renderer import (
+from chat.application.tools.document.services.document_export.runtime.renderers.pdf_renderer import (
     PdfRenderer,
 )
-from chat.application.tools.document.services.document_export.renderers.txt_renderer import (
+from chat.application.tools.document.services.document_export.runtime.renderers.txt_renderer import (
     TxtRenderer,
 )
 from chat.application.tools.document.services.document_export.runtime.atomic_writer import (
@@ -85,25 +85,25 @@ from chat.application.tools.document.services.document_parse.ocr.processor impor
     OcrProcessor,
     OcrProcessorConfig,
 )
-from chat.application.tools.document.services.document_parse.parser.epub import EpubParser
-from chat.application.tools.document.services.document_parse.parser.office.fallback import (
+from chat.application.tools.document.services.document_parse.parsers.epub import EpubParser
+from chat.application.tools.document.services.document_parse.parsers.office.fallback import (
     OfficeFallbackParser,
 )
-from chat.application.tools.document.services.document_parse.parser.office.parser import OfficeParser
-from chat.application.tools.document.services.document_parse.parser.office.primary import (
+from chat.application.tools.document.services.document_parse.parsers.office.parser import OfficeParser
+from chat.application.tools.document.services.document_parse.parsers.office.primary import (
     OfficePrimaryParser,
 )
-from chat.application.tools.document.services.document_parse.parser.pdf.docling import (
+from chat.application.tools.document.services.document_parse.parsers.pdf.docling import (
     DoclingPdfExtractor,
 )
-from chat.application.tools.document.services.document_parse.parser.pdf.page_classifier import (
+from chat.application.tools.document.services.document_parse.parsers.pdf.page_classifier import (
     PageClassifier,
 )
-from chat.application.tools.document.services.document_parse.parser.pdf.parser import PdfParser
-from chat.application.tools.document.services.document_parse.parser.pdf.table_extractor import (
+from chat.application.tools.document.services.document_parse.parsers.pdf.parser import PdfParser
+from chat.application.tools.document.services.document_parse.parsers.pdf.table_extractor import (
     TableExtractor,
 )
-from chat.application.tools.document.services.document_parse.parser.spreadsheet import (
+from chat.application.tools.document.services.document_parse.parsers.spreadsheet import (
     SpreadsheetParser,
 )
 from chat.application.tools.evidence_access.evidence_rank_tool import EvidenceRankTool
@@ -164,10 +164,10 @@ from chat.application.tools.web.services.web_fetch.fetcher.steel_fetcher import 
 from chat.application.tools.web.services.web_search.cache import SearchCache
 from chat.application.tools.web.services.web_search.coordinator import SearchCoordinator
 from chat.application.tools.web.services.web_search.enums import ProviderMode
-from chat.application.tools.web.services.web_search.runner.custom import CustomProviderRunner
-from chat.application.tools.web.services.web_search.runner.fourget import FourGetSearchRunner
-from chat.application.tools.web.services.web_search.runner.serper import SerperSearchRunner
-from chat.application.tools.web.services.web_search.runner.wikipedia import WikipediaRunner
+from chat.application.tools.web.services.web_search.runtime.runner import CustomProviderRunner
+from chat.application.tools.web.services.web_search.runtime.runner import FourGetSearchRunner
+from chat.application.tools.web.services.web_search.runtime.runner.serper import SerperSearchRunner
+from chat.application.tools.web.services.web_search.runtime.runner.wikipedia import WikipediaRunner
 from chat.application.tools.web.services.web_search.searcher.fourget import FourGetSearcher
 from chat.application.tools.web.services.web_search.searcher.serper import SerperSearcher
 from chat.application.tools.web.services.web_search.searcher.wikipedia import WikipediaSearcher

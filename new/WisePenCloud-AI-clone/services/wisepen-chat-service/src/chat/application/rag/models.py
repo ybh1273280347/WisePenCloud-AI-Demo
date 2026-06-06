@@ -1,23 +1,30 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from .permissions import RagAclProjection, RagGroupRole
 from .enums import ResourceKind, RetrievalMode
+from .runtime.enums import RagIndexingStatus
+from .runtime.retrieval.enums import (
+    InsufficientReason,
+    RagRecommendedNextAction,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class RagResourceUpsertCommand:
-    """表示当前组件。"""
+    
     user_id: str
     resource_kind: ResourceKind
     resource_id: str
     content: str
     title: Optional[str] = None
     document_name: Optional[str] = None
+    acl_projection: Optional[RagAclProjection] = None
 
 
 @dataclass(frozen=True, slots=True)
 class RagResourceRef:
-    """表示当前组件。"""
+    
     user_id: str
     resource_kind: ResourceKind
     resource_id: str
@@ -25,17 +32,20 @@ class RagResourceRef:
 
 @dataclass(frozen=True, slots=True)
 class RagResourceView:
-    """表示当前组件。"""
+    
     resource_id: str
     resource_kind: ResourceKind
     version: int
     content: str
     is_deleted: bool
+    indexing_status: RagIndexingStatus
+    indexing_error: Optional[str]
+    last_index_version: Optional[str]
 
 
 @dataclass(frozen=True, slots=True)
 class RagResourceUpsertResult:
-    """表示当前组件。"""
+    
     resource_id: str
     resource_kind: ResourceKind
     resource_version: int
@@ -47,7 +57,7 @@ class RagResourceUpsertResult:
 
 @dataclass(frozen=True, slots=True)
 class RagResourceDeleteResult:
-    """表示当前组件。"""
+    
     resource_id: str
     resource_kind: ResourceKind
     deleted: bool
@@ -55,7 +65,7 @@ class RagResourceDeleteResult:
 
 @dataclass(frozen=True, slots=True)
 class RagIndexManifestView:
-    """表示当前组件。"""
+    
     resource_id: str
     resource_kind: ResourceKind
     resource_version: int
@@ -66,11 +76,14 @@ class RagIndexManifestView:
 
 @dataclass(frozen=True, slots=True)
 class RagIndexReadiness:
-    """表示当前组件。"""
+    
     resource_id: str
     resource_kind: ResourceKind
     target_index_version: str
     current_index_version: Optional[str]
+    indexing_status: RagIndexingStatus
+    indexing_error: Optional[str]
+    last_index_version: Optional[str]
     is_index_current: bool
     needs_indexing: bool
     can_retrieve_published_index: bool
@@ -79,7 +92,7 @@ class RagIndexReadiness:
 
 @dataclass(frozen=True, slots=True)
 class RagIndexRebuildResult:
-    """表示当前组件。"""
+    
     resource_id: str
     resource_kind: ResourceKind
     resource_version: int
@@ -89,9 +102,10 @@ class RagIndexRebuildResult:
 
 @dataclass(frozen=True, slots=True)
 class RagSearchRequest:
-    """表示当前组件。"""
+    
     user_id: str
     query: str
+    group_role_map: Optional[Dict[str, RagGroupRole]] = None
     mode: RetrievalMode = RetrievalMode.NORMAL
     resource_kinds: Optional[List[ResourceKind]] = None
     semantic_queries: Optional[List[str]] = None
@@ -103,22 +117,19 @@ class RagSearchRequest:
     neighbor_before: Optional[int] = None
     neighbor_after: Optional[int] = None
     mmr_lambda: Optional[float] = None
-    debug: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class RagSearchResult:
-    """表示当前组件。"""
+    
     query: str
     mode: RetrievalMode
     evidence_count: int
     sufficient: bool
-    insufficient_reason: Optional[str]
-    recommended_next_action: str
+    insufficient_reason: Optional[InsufficientReason]
+    recommended_next_action: RagRecommendedNextAction
     rewrite_guidance: Optional[str]
     included_evidence_ids: List[str]
     skipped_evidence_count: int
-    channel_candidate_counts: Dict[str, int]
-    diagnostics: List[Dict[str, object]]
     assembled_context: str
     rendered_text: str

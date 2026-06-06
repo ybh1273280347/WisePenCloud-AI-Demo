@@ -3,7 +3,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from chat.application.infra.content_store.models import ContentWindow, StoredContent
 from chat.application.tools.tool_content_store import ToolContentStore
+from chat.core.config.app_settings import settings as app_settings
 from chat.domain.interfaces.tool import BaseTool
+
+_PER_CHUNK_BUDGET = app_settings.TOOL_RESULT_MAX_CHARS * 2
 
 TOOL_DESCRIPTION = (
     "Reads multiple cached tool-content chunk windows in one call. "
@@ -41,13 +44,6 @@ TOOL_SCHEMA = {
                 "required": ["content_id", "chunk_index"],
                 "additionalProperties": False,
             },
-        },
-        "max_total_chars": {
-            "type": "integer",
-            "minimum": 1000,
-            "maximum": 30000,
-            "default": 12000,
-            "description": "Maximum total output size. Output stops at window boundary.",
         },
     },
     "required": ["items"],
@@ -105,14 +101,13 @@ class ToolContentBatchReadTool(BaseTool):
         if validation_error:
             return validation_error
 
-        max_total_chars = kwargs.get("max_total_chars", 12000)
-        if not isinstance(max_total_chars, int) or not (1000 <= max_total_chars <= 30000):
-            return "[Tool Error] max_total_chars must be an integer between 1000 and 30000."
+        num_chunks = len(validated_items)
+        max_total_chars = num_chunks * _PER_CHUNK_BUDGET
 
         blocks: List[str] = []
         result_items: List[BatchReadResultItem] = []
         total_chars = 0
-        per_item_budget = max(1, max_total_chars // len(validated_items))
+        per_item_budget = _PER_CHUNK_BUDGET
 
         for index, item in enumerate(validated_items, 1):
             requested_content_id = item.content_id

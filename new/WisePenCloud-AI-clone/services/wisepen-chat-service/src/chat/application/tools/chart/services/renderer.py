@@ -1,6 +1,6 @@
-import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, Tuple
 
 import matplotlib
 

@@ -1,5 +1,5 @@
 import json
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Dict, Iterable
 
 import regex
@@ -61,7 +61,7 @@ _NON_CJK_WORD_RE = regex.compile(
 )
 
 
-class _TokenType(str, Enum):
+class _TokenType(StrEnum):
     """markdown-it 解析结果中实际用到的 token 类型。"""
     CODE_INLINE = "code_inline"
     CODE_BLOCK  = "code_block"

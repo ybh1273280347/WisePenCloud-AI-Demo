@@ -2,12 +2,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from chat.application.rag.enums import ResourceKind
-from chat.application.rag.errors import (
-    RagInvalidResourceKindError,
-    RagResourceNotFoundError,
-)
+from chat.application.rag.errors import RagResourceNotFoundError
+from chat.application.rag.permissions import RagAclProjection
+from chat.application.rag.runtime.enums import RagIndexingStatus
 from chat.application.rag.models import RagResourceRef, RagResourceUpsertCommand
-from chat.application.rag.service import RagService, parse_resource_kind
+from chat.application.rag.service import RagService
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 
@@ -19,6 +18,9 @@ class RagResourceDetailView:
     version: int
     content: str
     is_deleted: bool
+    indexing_status: RagIndexingStatus
+    indexing_error: Optional[str]
+    last_index_version: Optional[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +57,9 @@ class RagIndexReadinessView:
     resource_kind: ResourceKind
     target_index_version: str
     current_index_version: Optional[str]
+    indexing_status: RagIndexingStatus
+    indexing_error: Optional[str]
+    last_index_version: Optional[str]
     is_index_current: bool
     needs_indexing: bool
     can_retrieve_published_index: bool
@@ -160,15 +165,14 @@ class RagApiService:
         self,
         *,
         user_id: str,
-        resource_kind: str,
+        resource_kind: ResourceKind,
         resource_id: str,
     ) -> Optional[RagIndexManifestApiView]:
-        kind = _parse_api_resource_kind(resource_kind)
         try:
             manifest = await self._rag_service.get_index_manifest(
                 RagResourceRef(
                     user_id=user_id,
-                    resource_kind=kind,
+                    resource_kind=resource_kind,
                     resource_id=resource_id,
                 )
             )
@@ -191,15 +195,14 @@ class RagApiService:
         self,
         *,
         user_id: str,
-        resource_kind: str,
+        resource_kind: ResourceKind,
         resource_id: str,
     ) -> RagIndexReadinessView:
-        kind = _parse_api_resource_kind(resource_kind)
         try:
             readiness = await self._rag_service.get_index_readiness(
                 RagResourceRef(
                     user_id=user_id,
-                    resource_kind=kind,
+                    resource_kind=resource_kind,
                     resource_id=resource_id,
                 )
             )
@@ -213,6 +216,9 @@ class RagApiService:
             resource_kind=readiness.resource_kind,
             target_index_version=readiness.target_index_version,
             current_index_version=readiness.current_index_version,
+            indexing_status=readiness.indexing_status,
+            indexing_error=readiness.indexing_error,
+            last_index_version=readiness.last_index_version,
             is_index_current=readiness.is_index_current,
             needs_indexing=readiness.needs_indexing,
             can_retrieve_published_index=readiness.can_retrieve_published_index,
@@ -259,6 +265,7 @@ class RagApiService:
         content: str,
         title: Optional[str],
         document_name: Optional[str],
+        acl_projection: Optional[RagAclProjection] = None,
     ) -> RagResourceUpsertView:
         try:
             result = await self._rag_service.upsert_resource(
@@ -269,6 +276,7 @@ class RagApiService:
                     content=content,
                     title=title,
                     document_name=document_name,
+                    acl_projection=acl_projection,
                 )
             )
         except Exception as e:
@@ -334,14 +342,8 @@ class RagApiService:
             version=resource.version,
             content=resource.content,
             is_deleted=resource.is_deleted,
+            indexing_status=resource.indexing_status,
+            indexing_error=resource.indexing_error,
+            last_index_version=resource.last_index_version,
         )
 
-
-def _parse_api_resource_kind(raw: str) -> ResourceKind:
-    try:
-        return parse_resource_kind(raw)
-    except RagInvalidResourceKindError:
-        raise ServiceException(
-            ChatErrorCode.CUSTOM_PROVIDER_INVALID_MODE,
-            custom_msg="Unsupported resource_kind",
-        )

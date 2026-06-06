@@ -12,6 +12,7 @@ from chat.api.schemas.rag import (
     RagResourceUpsertRequest,
     RagResourceUpsertResponse,
 )
+from chat.application.rag.enums import ResourceKind
 from chat.application.api_service.rag import RagApiService
 from chat.container import Container
 from common.core.domain import R
@@ -140,6 +141,9 @@ async def get_note_resource_detail(
             version=resource.version,
             content=resource.content,
             is_deleted=resource.is_deleted,
+            indexing_status=resource.indexing_status,
+            indexing_error=resource.indexing_error,
+            last_index_version=resource.last_index_version,
         )
     )
 
@@ -164,6 +168,9 @@ async def get_document_resource_detail(
             version=resource.version,
             content=resource.content,
             is_deleted=resource.is_deleted,
+            indexing_status=resource.indexing_status,
+            indexing_error=resource.indexing_error,
+            last_index_version=resource.last_index_version,
         )
     )
 
@@ -171,7 +178,7 @@ async def get_document_resource_detail(
 @router.get("/getIndexManifest", response_model=R[RagIndexManifestResponse])
 @inject
 async def get_index_manifest(
-    resource_kind: str,
+    resource_kind: ResourceKind,
     resource_id: str,
     user_id: str = Depends(require_login),
     service: RagApiService = Depends(Provide[Container.rag_api_service]),
@@ -200,7 +207,7 @@ async def get_index_manifest(
 @router.get("/getIndexReadiness", response_model=R[RagIndexReadinessResponse])
 @inject
 async def get_index_readiness(
-    resource_kind: str,
+    resource_kind: ResourceKind,
     resource_id: str,
     user_id: str = Depends(require_login),
     service: RagApiService = Depends(Provide[Container.rag_api_service]),
@@ -218,6 +225,9 @@ async def get_index_readiness(
             resource_kind=readiness.resource_kind,
             target_index_version=readiness.target_index_version,
             current_index_version=readiness.current_index_version,
+            indexing_status=readiness.indexing_status,
+            indexing_error=readiness.indexing_error,
+            last_index_version=readiness.last_index_version,
             is_index_current=readiness.is_index_current,
             needs_indexing=readiness.needs_indexing,
             can_retrieve_published_index=readiness.can_retrieve_published_index,

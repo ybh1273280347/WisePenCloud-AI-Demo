@@ -17,12 +17,14 @@ from chat.application.tools.web.services.web_search.errors import (
     EmptySearchResultError,
 )
 from chat.application.tools.web.services.web_search.models import (
-    CustomProviderCredential,
     SearchManyRequest,
     SearchResponse,
     WikipediaGroundingResult,
 )
-from chat.application.tools.web.services.web_search.provider_policy.service import SearchProviderConfig
+from chat.application.tools.web.services.web_search.provider_policy.models import (
+    CustomProviderCredential,
+    SearchProviderConfig,
+)
 from chat.application.tools.web.services.web_search.utils.domains import (
     count_unique_domains,
 )
@@ -36,7 +38,7 @@ from common.logger import log_fail
 
 @dataclass(frozen=True, slots=True)
 class OutputBudget:
-    """表示当前组件。"""
+    
     min_queries: int           # 最小查询变体数限制
     max_queries: int           # 最大查询变体数限制
     candidate_page_limit: int   # 候选页面上限
@@ -47,7 +49,7 @@ class OutputBudget:
 
 @dataclass(frozen=True, slots=True)
 class DomainFilters:
-    """表示当前组件。"""
+    
     allowed_domains: List[str] = field(default_factory=list)
     blocked_domains: List[str] = field(default_factory=list)
 

@@ -1,20 +1,22 @@
-from dataclasses import dataclass, fields
-from typing import Dict, List, Optional
+from dataclasses import fields
+from typing import List, Optional
 
-from chat.application.rag.domain.enums import (
+from chat.application.rag.runtime.context_assembler import RagContextAssembler
+from chat.application.rag.runtime.models import RagResource
+from chat.application.rag.runtime.persistence.interfaces import RagManifestRepository
+from chat.application.rag.runtime.resources.resource_service import ResourceService
+from chat.application.rag.runtime.resources.version_service import RagVersionService
+from chat.application.rag.runtime.retrieval.enums import (
     InsufficientReason,
     RagRecommendedNextAction,
 )
-from chat.application.rag.domain.ports import RagManifestRepository
-from chat.application.rag.domain.resource_lifecycle import RagResource
-from chat.application.rag.domain.retrieval_planning import RagRetrievalQuery
-from chat.application.rag.implementations.resources.resource_service import ResourceService
-from chat.application.rag.implementations.resources.version_service import RagVersionService
-from chat.application.rag.implementations.retrieval.context_assembler import RagContextAssembler
-from chat.application.rag.implementations.retrieval.retrieval_pipeline import (
+from chat.application.rag.runtime.retrieval.models import RagRetrievalQuery
+from chat.application.rag.runtime.retrieval.pipeline import (
     RagRetrievalPipeline,
 )
-from .enums import ResourceKind, RetrievalMode
+from common.logger import log_event
+from .permissions import build_owner_acl_projection
+from .enums import ResourceKind
 from .errors import RagInvalidResourceKindError, RagResourceNotFoundError
 from .models import (
     RagIndexManifestView,
@@ -28,60 +30,13 @@ from .models import (
     RagSearchRequest,
     RagSearchResult,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class ModeRetrievalDefaults:
-    """表示当前组件。"""
-    top_k: int
-    fusion_top_k: int
-    rerank_top_n: int
-    final_top_k: int
-    neighbor_before: int
-    neighbor_after: int
-    mmr_lambda: float
-    semantic_query_limit: int
-    keyword_query_limit: int
-
-
-_MODE_DEFAULTS: Dict[RetrievalMode, ModeRetrievalDefaults] = {
-    RetrievalMode.NORMAL: ModeRetrievalDefaults(
-        top_k=30,
-        fusion_top_k=50,
-        rerank_top_n=30,
-        final_top_k=8,
-        neighbor_before=1,
-        neighbor_after=1,
-        mmr_lambda=0.72,
-        semantic_query_limit=3,
-        keyword_query_limit=3,
-    ),
-    RetrievalMode.SEMANTIC: ModeRetrievalDefaults(
-        top_k=40,
-        fusion_top_k=60,
-        rerank_top_n=30,
-        final_top_k=8,
-        neighbor_before=1,
-        neighbor_after=1,
-        mmr_lambda=0.78,
-        semantic_query_limit=5,
-        keyword_query_limit=2,
-    ),
-    RetrievalMode.EXACT: ModeRetrievalDefaults(
-        top_k=40,
-        fusion_top_k=70,
-        rerank_top_n=30,
-        final_top_k=8,
-        neighbor_before=0,
-        neighbor_after=0,
-        mmr_lambda=0.65,
-        semantic_query_limit=2,
-        keyword_query_limit=5,
-    ),
-}
+from .search_settings import RagSearchSettings, get_default_search_settings
 
 _CFG_FIELDS = tuple(
-    f.name for f in fields(ModeRetrievalDefaults) if "query_limit" not in f.name
+    f.name
+    for f in fields(RagSearchSettings)
+    if "query_limit" not in f.name
+    and f.name not in ("active_channels", "channel_weights")
 )
 
 
@@ -115,6 +70,11 @@ class RagService:
             content=command.content,
             title=command.title,
             document_name=command.document_name,
+            acl_projection=(
+                command.acl_projection
+                if command.acl_projection is not None
+                else build_owner_acl_projection(command.user_id)
+            ),
         )
         result = await self._resource_service.upsert(resource)
         return RagResourceUpsertResult(
@@ -155,6 +115,9 @@ class RagService:
             version=resource.version,
             content=resource.content,
             is_deleted=resource.is_deleted,
+            indexing_status=resource.indexing_status,
+            indexing_error=resource.indexing_error,
+            last_index_version=resource.last_index_version,
         )
 
     async def get_index_manifest(
@@ -205,6 +168,9 @@ class RagService:
             resource_kind=resource.resource_kind,
             target_index_version=snapshot.index_version,
             current_index_version=current_index_version,
+            indexing_status=resource.indexing_status,
+            indexing_error=resource.indexing_error,
+            last_index_version=resource.last_index_version,
             is_index_current=is_index_current,
             needs_indexing=not is_index_current,
             can_retrieve_published_index=manifest is not None,
@@ -246,21 +212,29 @@ class RagService:
             rewrite_guidance=rewrite_guidance,
         )
         reason = result.sufficiency.reason
-        return RagSearchResult(
+        log_event(
+            "rag search diagnostics",
+            user_id=request.user_id,
             query=result.query.query,
-            mode=result.query.mode,
+            mode=result.query.mode.value,
             evidence_count=len(result.evidences),
             sufficient=result.sufficiency.sufficient,
             insufficient_reason=reason.value if reason is not None else None,
             recommended_next_action=next_action.value,
-            rewrite_guidance=rewrite_guidance,
-            included_evidence_ids=assembled_context.included_evidence_ids,
-            skipped_evidence_count=assembled_context.skipped_evidence_count,
-            channel_candidate_counts={
-                channel_result.channel.value: len(channel_result.candidates)
-                for channel_result in result.channel_results
-            },
-            diagnostics=[
+            channel_diagnostics=[
+                {
+                    "channel": item.channel.value,
+                    "query": item.query,
+                    "status": item.status.value,
+                    "candidate_count": item.candidate_count,
+                    "scope_count": item.scope_count,
+                    "elapsed_ms": item.elapsed_ms,
+                    "error_type": item.error_type,
+                    "error_message": item.error_message,
+                }
+                for item in result.channel_diagnostics
+            ],
+            ranking_diagnostics=[
                 {
                     "stage": item.stage,
                     "rank": item.rank,
@@ -269,10 +243,21 @@ class RagService:
                     "chunk_id": item.chunk_id,
                     "parent_chunk_id": item.parent_chunk_id,
                     "score": item.score,
-                    "sources": item.sources,
+                    "sources": [source.value for source in item.sources],
                 }
-                for item in result.diagnostics
+                for item in result.diagnostics[:20]
             ],
+        )
+        return RagSearchResult(
+            query=result.query.query,
+            mode=result.query.mode,
+            evidence_count=len(result.evidences),
+            sufficient=result.sufficiency.sufficient,
+            insufficient_reason=reason,
+            recommended_next_action=next_action,
+            rewrite_guidance=rewrite_guidance,
+            included_evidence_ids=assembled_context.included_evidence_ids,
+            skipped_evidence_count=assembled_context.skipped_evidence_count,
             assembled_context=assembled_context.text,
             rendered_text=rendered_text,
         )
@@ -283,7 +268,7 @@ class RagService:
         if not stripped_query:
             raise ValueError("query must not be empty or blank.")
 
-        mode_defaults = _MODE_DEFAULTS[request.mode]
+        mode_defaults = get_default_search_settings(request.mode)
         semantic_queries = [
             q.strip() for q in (request.semantic_queries or []) if q.strip()
         ]
@@ -310,9 +295,12 @@ class RagService:
 
         return RagRetrievalQuery(
             user_id=request.user_id,
+            group_role_map=request.group_role_map or {},
             query=stripped_query,
             mode=request.mode,
             resource_kinds=request.resource_kinds,
+            active_channels=list(mode_defaults.active_channels),
+            channel_weights=dict(mode_defaults.channel_weights),
             semantic_queries=semantic_queries,
             keyword_queries=keyword_queries,
             **cfg_args,

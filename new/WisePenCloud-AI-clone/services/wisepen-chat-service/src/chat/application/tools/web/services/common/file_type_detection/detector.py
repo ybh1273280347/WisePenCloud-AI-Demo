@@ -24,7 +24,7 @@ _UNKNOWN_BINARY = ContentDetection(
 
 
 class FileTypeDetector:
-    """表示当前组件。"""
+    
     def __init__(self, magika_detector: MagikaDetector) -> None:
         self._magika = magika_detector
 

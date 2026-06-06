@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import unquote, urlparse
@@ -13,18 +14,7 @@ from chat.application.security.url_security import (
     validate_public_http_url,
 )
 from chat.application.tools.web.services.common.file_handoff.store import TemporaryFileHandoffStore
-from chat.application.tools.web.services.web_crawl.domain.fetch_execution import (
-    DiscoveryResult,
-    HandleFetchResult,
-    PreFetchDecision,
-)
-from chat.application.tools.web.services.web_crawl.domain.frontier_scheduling import (
-    CrawlFrontierItem,
-)
-from chat.application.tools.web.services.web_crawl.domain.link_discovery import (
-    LinkCandidate,
-    RankedLinkCandidate,
-)
+from chat.application.tools.web.services.web_crawl.runtime.models import LinkCandidate, CrawlFrontierItem
 from chat.application.tools.web.services.web_crawl.enums import (
     CrawlItemKind,
     CrawlSkipReason,
@@ -34,10 +24,10 @@ from chat.application.tools.web.services.web_crawl.models import (
     CrawlResult,
     CrawlResultItem,
 )
-from chat.application.tools.web.services.web_crawl.runtime.frontier import CrawlFrontier
+from chat.application.tools.web.services.web_crawl.runtime.crawl_frontier import CrawlFrontier
 from chat.application.tools.web.services.web_crawl.runtime.link_extractor import LinkExtractor
 from chat.application.tools.web.services.web_crawl.runtime.politeness import PerHostPoliteness
-from chat.application.tools.web.services.web_crawl.runtime.robots import RobotsPolicy
+from chat.application.tools.web.services.web_crawl.runtime.robots_policy import RobotsPolicy
 from chat.application.tools.web.services.web_fetch.coordinator import (
     FetchCoordinator,
 )
@@ -104,6 +94,52 @@ _LINK_FIELD_WEIGHTS = {
 _INTERNAL_ACCEPT_THRESHOLD = 0.30
 _EXTERNAL_ACCEPT_THRESHOLD = 0.45
 _FETCH_WAVE_LIMIT = 3
+
+
+@dataclass(frozen=True, slots=True)
+class PreFetchDecision:
+    """预抓取决策结果，包含是否允许抓取及拒绝原因。"""
+    allowed: bool
+    item: CrawlFrontierItem
+    skip_reason: Optional[CrawlSkipReason] = None
+    error: Optional[str] = None
+
+    def to_result_item(self) -> CrawlResultItem:
+        """将拒绝决策转换为跳过条目。"""
+        return CrawlResultItem(
+            url=self.item.url,
+            kind=CrawlItemKind.SKIPPED,
+            depth=self.item.depth,
+            success=False,
+            source_url=self.item.source_url,
+            error=self.error,
+            skip_reason=self.skip_reason,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class HandleFetchResult:
+    """抓取结果处理结果，包含生成的条目及统计数据。"""
+    items: List[CrawlResultItem]
+    fetched_pages: int = 0
+    documents_found: int = 0
+    skipped_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryResult:
+    """链接发现结果，包含跳过的条目计数。"""
+    items: List[CrawlResultItem]
+    skipped_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class RankedLinkCandidate:
+    """经过 BM25 排序后的链接候选，包含相关性分数和是否接受标记。"""
+    candidate: LinkCandidate
+    score: float
+    accepted: bool
+    reject_reason: Optional[CrawlSkipReason] = None
 
 
 class WebCrawlService:
@@ -175,12 +211,12 @@ class WebCrawlService:
                     items.append(
                         CrawlResultItem(
                             url=item.url,
-                            kind=CrawlItemKind.SKIPPED.value,
+                            kind=CrawlItemKind.SKIPPED,
                             depth=item.depth,
                             success=False,
                             source_url=item.source_url,
                             error="host blocked due to prior 429/403/503",
-                            skip_reason=CrawlSkipReason.RATE_LIMITED.value,
+                            skip_reason=CrawlSkipReason.RATE_LIMITED,
                         )
                     )
                     skipped_count += 1
@@ -241,7 +277,7 @@ class WebCrawlService:
             return PreFetchDecision(
                 False,
                 item,
-                CrawlSkipReason.URL_SECURITY_REJECTED.value,
+                CrawlSkipReason.URL_SECURITY_REJECTED,
                 str(e),
             )
 
@@ -249,7 +285,7 @@ class WebCrawlService:
             return PreFetchDecision(
                 False,
                 item,
-                CrawlSkipReason.RATE_LIMITED.value,
+                CrawlSkipReason.RATE_LIMITED,
                 "host blocked due to prior 429/403/503",
             )
 
@@ -261,9 +297,9 @@ class WebCrawlService:
             return PreFetchDecision(
                 False,
                 item,
-                CrawlSkipReason.ROBOTS_UNAVAILABLE.value
+                CrawlSkipReason.ROBOTS_UNAVAILABLE
                 if robots.unavailable
-                else CrawlSkipReason.ROBOTS_DISALLOWED.value,
+                else CrawlSkipReason.ROBOTS_DISALLOWED,
                 robots.reason.value if robots.reason else None,
             )
 
@@ -306,7 +342,7 @@ class WebCrawlService:
                 items=[
                     CrawlResultItem(
                         url=fetch_item.url,
-                        kind=CrawlItemKind.ERROR.value,
+                        kind=CrawlItemKind.ERROR,
                         depth=frontier_item.depth,
                         success=False,
                         source_url=frontier_item.source_url,
@@ -330,12 +366,12 @@ class WebCrawlService:
                     items=[
                         CrawlResultItem(
                             url=fetch_item.url,
-                            kind=CrawlItemKind.ERROR.value,
+                            kind=CrawlItemKind.ERROR,
                             depth=frontier_item.depth,
                             success=False,
                             source_url=frontier_item.source_url,
                             error=f"document handoff failed: {e.__class__.__name__}",
-                            skip_reason=CrawlSkipReason.FETCH_FAILED.value,
+                            skip_reason=CrawlSkipReason.FETCH_FAILED,
                         )
                     ],
                     skipped_count=1,
@@ -345,7 +381,7 @@ class WebCrawlService:
                 items=[
                     CrawlResultItem(
                         url=fetch_item.url,
-                        kind=CrawlItemKind.DOCUMENT.value,
+                        kind=CrawlItemKind.DOCUMENT,
                         depth=frontier_item.depth,
                         success=True,
                         source_url=frontier_item.source_url,
@@ -360,7 +396,7 @@ class WebCrawlService:
 
         result_item = CrawlResultItem(
             url=fetch_item.url,
-            kind=CrawlItemKind.PAGE.value,
+            kind=CrawlItemKind.PAGE,
             depth=frontier_item.depth,
             success=True,
             source_url=frontier_item.source_url,
@@ -432,7 +468,7 @@ class WebCrawlService:
                         url=link.url,
                         source_url=source_url,
                         depth=source_item.depth + 1,
-                        reason=CrawlSkipReason.NON_URL_REFERENCE.value,
+                        reason=CrawlSkipReason.NON_URL_REFERENCE,
                         error="internal reference is not a URL",
                     )
                 )
@@ -447,7 +483,7 @@ class WebCrawlService:
                         url=link.url,
                         source_url=source_url,
                         depth=source_item.depth + 1,
-                        reason=CrawlSkipReason.URL_SECURITY_REJECTED.value,
+                        reason=CrawlSkipReason.URL_SECURITY_REJECTED,
                         error=f"URL canonicalization failed: {e.__class__.__name__}",
                     )
                 )
@@ -475,7 +511,7 @@ class WebCrawlService:
                         url=canonical,
                         source_url=source_url,
                         depth=source_item.depth + 1,
-                        reason=CrawlSkipReason.URL_SECURITY_REJECTED.value,
+                        reason=CrawlSkipReason.URL_SECURITY_REJECTED,
                         error=str(e),
                     )
                 )
@@ -528,14 +564,14 @@ class WebCrawlService:
                 external_depth=item.candidate.external_depth,
             )
             added, reason = frontier.add_candidate(frontier_item)
-            if added or reason == CrawlSkipReason.DUPLICATE_URL.value:
+            if added or reason == CrawlSkipReason.DUPLICATE_URL:
                 continue
             skipped_items.append(
                 _skipped_item(
                     url=item.candidate.url,
                     source_url=source_url,
                     depth=item.candidate.depth,
-                    reason=reason or CrawlSkipReason.FETCH_FAILED.value,
+                    reason=reason or CrawlSkipReason.FETCH_FAILED,
                 )
             )
             skipped_count += 1
@@ -616,7 +652,7 @@ def _rank_link_candidates(
                 candidate=candidate,
                 score=score,
                 accepted=accepted,
-                reject_reason=None if accepted else CrawlSkipReason.LOW_RELEVANCE.value,
+                reject_reason=None if accepted else CrawlSkipReason.LOW_RELEVANCE,
             )
         )
 
@@ -671,40 +707,40 @@ def _url_terms(url: str) -> str:
     )
 
 
-def _hard_filter_reason(url: str) -> Optional[str]:
+def _hard_filter_reason(url: str) -> Optional[CrawlSkipReason]:
     """对 URL 执行硬过滤检查：不支持的协议、媒体后缀和敏感路径。"""
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
     if scheme in _BLOCKED_SCHEMES or scheme not in {"http", "https"}:
-        return CrawlSkipReason.UNSUPPORTED_SCHEME.value
+        return CrawlSkipReason.UNSUPPORTED_SCHEME
     path = parsed.path.lower()
     if any(path == part or path.startswith(part + "/") for part in _BLOCKED_PATH_PARTS):
-        return CrawlSkipReason.BLOCKED_PATH.value
+        return CrawlSkipReason.BLOCKED_PATH
     if path.endswith(_BLOCKED_MEDIA_EXTENSIONS):
-        return CrawlSkipReason.UNSUPPORTED_MEDIA.value
+        return CrawlSkipReason.UNSUPPORTED_MEDIA
     return None
 
 
-def _map_fetch_error_to_skip_reason(error: Optional[str]) -> str:
+def _map_fetch_error_to_skip_reason(error: Optional[str]) -> CrawlSkipReason:
     """将抓取错误信息映射到对应的跳过原因枚举值。"""
     text = (error or "").lower()
     if "captcha" in text:
-        return CrawlSkipReason.CAPTCHA_DETECTED.value
+        return CrawlSkipReason.CAPTCHA_DETECTED
     if "bot" in text or "challenge" in text:
-        return CrawlSkipReason.BOT_CHALLENGE.value
+        return CrawlSkipReason.BOT_CHALLENGE
     if "login" in text or "signin" in text:
-        return CrawlSkipReason.LOGIN_REQUIRED.value
+        return CrawlSkipReason.LOGIN_REQUIRED
     if "paywall" in text:
-        return CrawlSkipReason.PAYWALL_DETECTED.value
+        return CrawlSkipReason.PAYWALL_DETECTED
     if "permission" in text or "403" in text:
-        return CrawlSkipReason.PERMISSION_DENIED.value
+        return CrawlSkipReason.PERMISSION_DENIED
     if "429" in text or "rate limit" in text:
-        return CrawlSkipReason.RATE_LIMITED.value
+        return CrawlSkipReason.RATE_LIMITED
     if "javascript" in text or "js required" in text:
-        return CrawlSkipReason.JS_REQUIRED.value
+        return CrawlSkipReason.JS_REQUIRED
     if "spa" in text:
-        return CrawlSkipReason.SPA_SHELL.value
-    return CrawlSkipReason.FETCH_FAILED.value
+        return CrawlSkipReason.SPA_SHELL
+    return CrawlSkipReason.FETCH_FAILED
 
 
 def _skipped_item(
@@ -712,16 +748,18 @@ def _skipped_item(
     url: str,
     source_url: str,
     depth: int,
-    reason: str,
+    reason: CrawlSkipReason,
     error: Optional[str] = None,
 ) -> CrawlResultItem:
     """快速构造一个跳过条目。"""
     return CrawlResultItem(
         url=url,
-        kind=CrawlItemKind.SKIPPED.value,
+        kind=CrawlItemKind.SKIPPED,
         depth=depth,
         success=False,
         source_url=source_url,
         error=error,
         skip_reason=reason,
     )
+
+

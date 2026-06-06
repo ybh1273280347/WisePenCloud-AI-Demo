@@ -9,6 +9,7 @@ from pydantic import (
 )
 
 from chat.application.rag.enums import ResourceKind
+from chat.application.rag.runtime.enums import RagIndexingStatus
 
 
 class RagResourceUpsertRequest(BaseModel):
@@ -85,6 +86,9 @@ class RagResourceDetailResponse(BaseModel):
     version: int = Field(..., description="资源事实版本")
     content: str = Field(..., description="资源正文内容")
     is_deleted: bool = Field(..., description="是否已删除")
+    indexing_status: RagIndexingStatus = Field(..., description="索引生命周期状态")
+    indexing_error: Optional[str] = Field(default=None, description="最近一次索引错误")
+    last_index_version: Optional[str] = Field(default=None, description="最近一次索引版本")
 
 
 class RagResourceUpsertResponse(BaseModel):
@@ -125,6 +129,9 @@ class RagIndexReadinessResponse(BaseModel):
     resource_kind: ResourceKind = Field(..., description="资源类型")
     target_index_version: str = Field(..., description="资源当前应构建的目标索引版本")
     current_index_version: Optional[str] = Field(default=None, description="Manifest 当前发布索引版本")
+    indexing_status: RagIndexingStatus = Field(..., description="索引生命周期状态")
+    indexing_error: Optional[str] = Field(default=None, description="最近一次索引错误")
+    last_index_version: Optional[str] = Field(default=None, description="最近一次索引版本")
     is_index_current: bool = Field(..., description="当前发布索引是否已是最新版本")
     needs_indexing: bool = Field(..., description="是否需要重新索引")
     can_retrieve_published_index: bool = Field(..., description="是否已有可检索的发布索引")

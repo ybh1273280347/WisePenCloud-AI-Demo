@@ -18,7 +18,7 @@ SHUTDOWN_REQUEST: Dict[str, object] = {"shutdown": True}
 
 @dataclass(slots=True)
 class OcrResult:
-    """表示当前组件。"""
+    
     ok: bool
     text: str = ""
     error: Optional[str] = None

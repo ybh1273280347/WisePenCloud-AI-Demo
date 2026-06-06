@@ -1,6 +1,5 @@
 from typing import Any, Dict
 
-from chat.core.config.app_settings import settings as app_settings
 from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
 from chat.domain.interfaces.tool import BaseTool
 from chat.domain.repositories import SkillRepository

@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from chat.application.tools.web.services.web_crawl import WebCrawlService
 from chat.application.tools.web.services.web_crawl.models import CrawlRequest
-from chat.application.tools.web.services.web_crawl.runtime.formatting import format_crawl_result
+from chat.application.tools.web.services.web_crawl.formatting import format_crawl_result
 from chat.domain.interfaces.tool import BaseTool
 
 _TOOL_DESCRIPTION = (

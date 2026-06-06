@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from chat.application.tools.language.services.translation.errors import TranslationAssistError
-from chat.application.tools.language.services.translation.runtime.formatting import (
+from chat.application.tools.language.services.translation.formatting import (
     format_translation_error,
     format_translation_result,
 )

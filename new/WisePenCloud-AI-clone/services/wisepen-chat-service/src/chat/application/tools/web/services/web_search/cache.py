@@ -6,7 +6,8 @@ from cachetools import TTLCache
 
 from chat.application.algorithms.hash import stable_hash, stable_hash_json
 from chat.application.tools.web.services.web_search.enums import ProviderMode, SearchPurpose, SearcherName
-from chat.application.tools.web.services.web_search.models import CUSTOM_PROVIDER_NAMES, SearchResponse
+from chat.application.tools.web.services.web_search.models import SearchResponse
+from chat.application.tools.web.services.web_search.provider_policy.models import CUSTOM_PROVIDER_NAMES
 from chat.application.tools.web.services.web_search.utils.results import is_valid_result
 
 

@@ -127,6 +127,7 @@ class AppSettings(BaseModel):
     RAG_CONTEXT_MAX_TOKENS: int = 192
     RAG_CONTEXT_TEMPERATURE: float = 0.0
     RAG_RERANKER_TOP_N: int = 20
+    RAG_RETRIEVAL_CHANNEL_TIMEOUT_SECONDS: float = 8.0
 
     # RAG 管道版本控制（Chunking / Indexing / Embedding Pipeline）
     RAG_CHUNKER_VERSION: str = "recursive-character-v1"

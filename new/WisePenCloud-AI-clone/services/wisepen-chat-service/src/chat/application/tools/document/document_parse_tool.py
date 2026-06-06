@@ -17,8 +17,8 @@ from chat.application.tools.document.services.document_parse import (
     DocumentParseService,
 )
 from chat.application.tools.document.services.document_parse.models import DocumentParseResultItem
-from chat.application.tools.tool_content_store import ToolContentStore
 from chat.application.tools.tool_content_store import CONTENT_ROLE_PARSED, CONTENT_ROLE_WINDOW
+from chat.application.tools.tool_content_store import ToolContentStore
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_fail
 

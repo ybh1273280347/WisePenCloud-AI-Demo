@@ -20,7 +20,6 @@ from chat.application.tools.chart.services.service import (
 from chat.domain.interfaces.tool import BaseTool
 from common.logger import log_fail
 
-
 _ANNOTATION_SCHEMA = {
     "type": "object",
     "properties": {

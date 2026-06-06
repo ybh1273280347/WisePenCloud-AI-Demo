@@ -71,7 +71,7 @@ def _should_skip_fourget_link(url: str, title: str) -> bool:
 
 
 def _extract_fourget_snippet(block: Tag, title: str) -> str:
-    cloned = BeautifulSoup(str(block), "html.parser")
+    cloned = BeautifulSoup(str(block), "html.parsers")
 
     for noise in cloned.select("div.url"):
         noise.decompose()
@@ -93,7 +93,7 @@ def map_fourget_html(
     """
     阴的没边了，返回的是html，不是json
     """
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "html.parsers")
 
     results: List[SearchResult] = []
     seen_urls: Set[str] = set()

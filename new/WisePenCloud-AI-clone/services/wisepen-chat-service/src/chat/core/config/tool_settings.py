@@ -1,6 +1,4 @@
 from typing import Optional
-import secrets
-import base64
 
 from pydantic import BaseModel
 

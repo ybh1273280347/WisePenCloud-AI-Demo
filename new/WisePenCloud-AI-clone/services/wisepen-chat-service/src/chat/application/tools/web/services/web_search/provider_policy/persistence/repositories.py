@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from chat.application.tools.web.services.web_search.domain.ports import BaseSearchProviderConfigRepository
-from chat.application.tools.web.services.web_search.dtos import UserSearchProviderConfigUpsertDTO
+from chat.application.tools.web.services.web_search.provider_policy.persistence.interfaces import \
+    BaseSearchProviderConfigRepository
 from chat.application.tools.web.services.web_search.provider_policy.persistence.entities import UserSearchProviderConfig
+from chat.application.tools.web.services.web_search.dtos import UserSearchProviderConfigUpsertDTO
 
 
 class SearchProviderConfigRepository(BaseSearchProviderConfigRepository):

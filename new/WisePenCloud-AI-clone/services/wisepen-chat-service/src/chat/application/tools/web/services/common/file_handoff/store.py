@@ -55,7 +55,7 @@ _DANGEROUS_INNER_SUFFIXES = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class FileHandoffResult:
-    """表示当前组件。"""
+    
     file_ref: str
     local_path: Path
     filename: str
@@ -68,7 +68,7 @@ class FileHandoffResult:
 
 
 class TemporaryFileHandoffStore:
-    """表示当前组件。"""
+    
     def __init__(
         self,
         *,

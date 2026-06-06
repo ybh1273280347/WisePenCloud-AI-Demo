@@ -2,24 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
 from beanie import init_beanie
-from chat.application.rag.implementations.persistence.mongodb.entities.chunk_documents import (
-    RetrieveChunkDocument,
-    SearchChunkDocument,
-)
-from chat.application.rag.implementations.persistence.mongodb.entities.manifest_documents import (
-    RagIndexManifestDocument,
-)
-from chat.application.rag.implementations.persistence.mongodb.entities.resource_documents import (
-    DocumentResourceDocument,
-    NoteResourceDocument,
-)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -33,6 +22,17 @@ from chat.api.endpoints import (
     session as session_endpoints,
 )
 from chat.api.router import api_router
+from chat.application.rag.runtime.persistence.entities.chunk_documents import (
+    RetrieveChunkDocument,
+    SearchChunkDocument,
+)
+from chat.application.rag.runtime.persistence.entities import (
+    RagIndexManifestDocument,
+)
+from chat.application.rag.runtime.persistence.entities import (
+    DocumentResourceDocument,
+    NoteResourceDocument,
+)
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings

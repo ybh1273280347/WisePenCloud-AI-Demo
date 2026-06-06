@@ -1,7 +1,4 @@
-from typing import Any, Dict, List
-
-from chat.domain.interfaces.tool import BaseTool
-from common.logger import log_error
+from typing import Any, Dict
 
 from chat.application.tools.skill.services.skill_create.errors import SkillBundleBuildError
 from chat.application.tools.skill.services.skill_create.models import (
@@ -15,7 +12,8 @@ from chat.application.tools.skill.services.skill_create.models import (
     SkillWorkflowStep,
 )
 from chat.application.tools.skill.services.skill_create.service import SkillBundleService
-
+from chat.domain.interfaces.tool import BaseTool
+from common.logger import log_error
 
 _DESCRIPTION = (
     "Create a portable .skill bundle from a reusable workflow, project convention, "

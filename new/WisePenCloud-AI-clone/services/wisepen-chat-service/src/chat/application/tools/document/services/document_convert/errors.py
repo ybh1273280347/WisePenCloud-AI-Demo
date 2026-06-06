@@ -1,11 +1,11 @@
 class DocumentConvertError(Exception):
-    """表示当前组件。"""
+    
     pass
 
 
 class EmptyParsedMarkdownError(DocumentConvertError):
     def __init__(self):
-        super().__init__("Document parser returned empty Markdown content.")
+        super().__init__("Document parsers returned empty Markdown content.")
 
 
 class InvalidDocumentRefError(DocumentConvertError):

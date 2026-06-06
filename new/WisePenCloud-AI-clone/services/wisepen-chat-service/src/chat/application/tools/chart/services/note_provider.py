@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
 from chat.application.tools.chart.services.models import NoteTable
 
